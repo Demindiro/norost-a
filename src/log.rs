@@ -15,9 +15,12 @@ enum LogLevel {
 static mut UART: Option<crate::io::uart::UART> = None;
 static LOG_LEVEL: LogLevel = LogLevel::Info;
 
-// FIXME adding cold breaks things because ??????
-//#[cold]
-fn log(strings: [&str; 3]) {
+// PSA: Originally this accepted a [&str; 3] (and &[&str] before that) but it seems there
+// is a compiler bug that prevents the arguments from being passed properly.
+// This works at least.
+#[cold]
+fn log(a: &str, b: &str, c: &str) {
+	let strings = [a, b, c];
 	// SAFETY: FIXME we should use locks
 	unsafe {
 		if UART.is_none() {
@@ -33,7 +36,7 @@ fn log(strings: [&str; 3]) {
 macro_rules! log {
 	($level:ident, $($str:expr)*) => {
 		if LOG_LEVEL >= LogLevel::$level {
-			log([$($str),*]);
+			log($($str),*);
 		}
 	};
 }

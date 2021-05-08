@@ -6,23 +6,24 @@ run: run-riscv64
 
 gdb: gdb-riscv64
 
-test:
-	cargo test
+test: test-riscv64
 
 expand-%:
 	cargo expand --target riscv64gc-unknown-none-elf $*
 
 clean:
-	rm -r target/
+	rm -rf target/
 
 build-riscv64:
 	cargo rustc \
 		--release \
 		--target riscv64gc-unknown-none-elf \
 		-- \
-		-C linker=riscv64-linux-gnu-gcc \
+		-C linker=riscv64-unknown-linux-gnu-gcc \
 		-C link-arg=-nostartfiles \
 		-C link-arg=-Tlink.ld \
+		-C link-arg=boot.s \
+		-C no-redzone=yes
 
 run-riscv64: build-riscv64
 	@echo Enter Ctrl-A + X to quit
@@ -37,10 +38,33 @@ run-riscv64: build-riscv64
 		$(QEMU_OPT)
 
 gdb-riscv64:
-	gdb \
+	riscv64-unknown-unknown-linux-gnu-gdb \
 		-ex='set arch riscv64' \
 		-ex='target extended-remote localhost:1234' \
 		target/riscv64gc-unknown-none-elf/release/dux
 
+test-riscv64:
+	cargo rustc \
+		--release \
+		--target riscv64gc-unknown-none-elf \
+		-- \
+		-C linker=riscv64-unknown-linux-gnu-gcc \
+		-C link-arg=-nostartfiles \
+		-C link-arg=-Tlink.ld \
+		-C link-arg=boot.s \
+		-C no-redzone=yes \
+		--test
+	@echo Enter Ctrl-A + X to quit
+	qemu-system-riscv64 \
+		-s \
+		-machine virt \
+		-nographic \
+		-m 32M \
+		-smp 1 \
+		-bios none \
+		-kernel target/riscv64gc-unknown-none-elf/release/dux \
+		$(QEMU_OPT)
+
+
 dump:
-	riscv64-linux-gnu-objdump -SC target/riscv64gc-unknown-none-elf/release/dux
+	riscv64-unknown-linux-gnu-objdump -SC target/riscv64gc-unknown-none-elf/release/dux
