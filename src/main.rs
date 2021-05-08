@@ -23,7 +23,32 @@ fn panic(_info: &PanicInfo) -> ! {
 #[no_mangle]
 #[cfg(not(test))]
 fn main() {
-	log::info(&["Hello, world!"]);
+	io::uart::default(|uart| {
+		use io::Device;
+		let _ = uart.write(b"Greetings!\n");
+		let _ = uart.write(b"Type whatever you want, I'll echo it:\n");
+		loop {
+			let mut buf = [0; 1024];
+			let mut i = 0;
+			loop {
+				match uart.read(&mut buf[i..]) {
+					Ok(n) => {
+						let _ = uart.write(&buf[i..i + n.get()]);
+						i += n.get();
+						if buf[i - 1] == b'\n' || buf[i - 1] == b'\r' {
+							buf[i - 1] = b'\n';
+							break;
+						}
+					}
+					Err(io::ReadError::Empty) => (),
+					Err(io::ReadError::BufferIsZeroSized) => break,
+					Err(_) => (),
+				}
+			}
+			let _ = uart.write(b"\nYou wrote: ");
+			let _ = uart.write(&buf[..i]);
+		}
+	});
 }
 
 #[cfg(test)]
