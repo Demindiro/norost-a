@@ -1,4 +1,4 @@
-use core::ptr;
+use core::{fmt, ptr};
 
 /// The default UART address. Used in [`UART::new()`](UART::new)
 const BASE: *mut u8 = 0x10000000 as _;
@@ -39,14 +39,16 @@ impl UART {
 		init(address);
 		Self { address }
 	}
+}
 
-	/// Writes a string
-	pub fn write_str(&mut self, string: &str) {
+impl fmt::Write for UART {
+	fn write_str(&mut self, string: &str) -> fmt::Result {
 		for b in string.bytes() {
 			// SAFETY: This UART is valid
 			unsafe {
 				putc(self.address, b);
 			}
 		}
+		Ok(())
 	}
 }

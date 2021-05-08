@@ -23,8 +23,8 @@ fn panic(_info: &PanicInfo) -> ! {
 #[no_mangle]
 #[cfg(not(test))]
 fn main() {
-	log::info("Hello, world!");
-	log::warn("This is bullshit");
+	log::info(&["Hello, world!"]);
+	log::warn(&["This is bullshit"]);
 }
 
 #[cfg(test)]
@@ -40,16 +40,15 @@ mod test {
 	pub(super) fn runner(tests: &[&dyn Fn()]) {
 		let mut buf = [0; 32];
 		let num = util::isize_to_string(&mut buf, tests.len() as isize).unwrap();
-		log::info("Running tests");
-		log::info(num);
+		log::info(&["Running ", num, if tests.len() == 1 { " test" } else { " tests" }]);
 		for f in tests {
 			f();
 		}
-		log::info("Done");
+		log::info(&["Done"]);
 	}
 
 	#[test_case]
 	fn wakawaka() {
-		log::fatal("WAKA WAKA EE EE");
+		log::fatal(&["WAKA WAKA EE EE"]);
 	}
 }

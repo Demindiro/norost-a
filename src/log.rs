@@ -2,9 +2,11 @@
 //!
 //! These are all globally accessible for ease of use
 
+use core::fmt::Write;
+
 #[derive(PartialEq, PartialOrd)]
 #[repr(u8)]
-enum LogLevel {
+pub enum LogLevel {
 	Fatal = 0,
 	Error = 1,
 	Warn = 2,
@@ -15,48 +17,45 @@ enum LogLevel {
 static mut UART: Option<crate::io::uart::UART> = None;
 static LOG_LEVEL: LogLevel = LogLevel::Info;
 
-// PSA: Originally this accepted a [&str; 3] (and &[&str] before that) but it seems there
-// is a compiler bug that prevents the arguments from being passed properly.
-// This works at least.
+#[doc(hidden)]
 #[cold]
-fn log(a: &str, b: &str, c: &str) {
-	let strings = [a, b, c];
+pub fn log(pre: &str, strings: &[&str]) {
 	// SAFETY: FIXME we should use locks
 	unsafe {
 		if UART.is_none() {
 			UART = Some(crate::io::uart::UART::new());
 		}
 		let uart = UART.as_mut().unwrap();
+		uart.write_str(pre);
 		for &s in strings.iter() {
 			uart.write_str(s);
 		}
+		uart.write_char('\n');
 	}
 }
 
-macro_rules! log {
-	($level:ident, $($str:expr)*) => {
-		if LOG_LEVEL >= LogLevel::$level {
-			log($($str),*);
-		}
-	};
+fn log_prefix(level: LogLevel, prefix: &str, strings: &[&str]) {
+	if LOG_LEVEL >= level {
+		log(prefix, strings);
+	}
 }
 
-pub fn fatal(message: &str) {
-	log!(Fatal, "[FATAL] " message "\n");
+pub fn fatal(strings: &[&str]) {
+	log_prefix(LogLevel::Fatal, "[FATAL] ", strings);
 }
 
-pub fn error(message: &str) {
-	log!(Error, "[ERROR] " message "\n");
+pub fn error(strings: &[&str]) {
+	log_prefix(LogLevel::Error, "[ERROR] ", strings);
 }
 
-pub fn warn(message: &str) {
-	log!(Warn, "[WARN ] " message "\n");
+pub fn warn(strings: &[&str]) {
+	log_prefix(LogLevel::Warn, "[WARN ] ", strings);
 }
 
-pub fn info(message: &str) {
-	log!(Info, "[INFO ] " message "\n");
+pub fn info(strings: &[&str]) {
+	log_prefix(LogLevel::Info, "[INFO ] ", strings);
 }
 
-pub fn debug(message: &str) {
-	log!(Debug, "[DEBUG] " message "\n");
+pub fn debug(strings: &[&str]) {
+	log_prefix(LogLevel::Debug, "[DEBUG] ", strings);
 }
