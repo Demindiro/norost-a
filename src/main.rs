@@ -1,9 +1,7 @@
 #![no_std]
 #![no_main]
-
 #![feature(asm)]
 #![feature(naked_functions)]
-
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
@@ -24,7 +22,6 @@ fn panic(_info: &PanicInfo) -> ! {
 #[cfg(not(test))]
 fn main() {
 	log::info(&["Hello, world!"]);
-	log::warn(&["This is bullshit"]);
 }
 
 #[cfg(test)]
@@ -40,7 +37,11 @@ mod test {
 	pub(super) fn runner(tests: &[&dyn Fn()]) {
 		let mut buf = [0; 32];
 		let num = util::isize_to_string(&mut buf, tests.len() as isize).unwrap();
-		log::info(&["Running ", num, if tests.len() == 1 { " test" } else { " tests" }]);
+		log::info(&[
+			"Running ",
+			num,
+			if tests.len() == 1 { " test" } else { " tests" },
+		]);
 		for f in tests {
 			f();
 		}

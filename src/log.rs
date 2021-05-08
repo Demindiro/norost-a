@@ -2,7 +2,7 @@
 //!
 //! These are all globally accessible for ease of use
 
-use core::fmt::Write;
+use crate::io::Device;
 
 #[derive(PartialEq, PartialOrd)]
 #[repr(u8)]
@@ -26,11 +26,14 @@ pub fn log(pre: &str, strings: &[&str]) {
 			UART = Some(crate::io::uart::UART::new());
 		}
 		let uart = UART.as_mut().unwrap();
-		uart.write_str(pre);
+		// TODO how should we handle write failures?
+		// Right now UART "can't fail", but what if it
+		// does at some point?
+		let _ = uart.write_str(pre);
 		for &s in strings.iter() {
-			uart.write_str(s);
+			let _ = uart.write_str(s);
 		}
-		uart.write_char('\n');
+		let _ = uart.write_str("\n");
 	}
 }
 

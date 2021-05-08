@@ -1,4 +1,6 @@
 QEMU_OPT?=
+QEMU?=qemu-system-riscv64
+BIOS?=none
 
 default: build-riscv64
 
@@ -27,18 +29,18 @@ build-riscv64:
 
 run-riscv64: build-riscv64
 	@echo Enter Ctrl-A + X to quit
-	qemu-system-riscv64 \
+	$(QEMU) \
 		-s \
 		-machine virt \
 		-nographic \
 		-m 32M \
 		-smp 1 \
-		-bios none \
+		-bios $(BIOS) \
 		-kernel target/riscv64gc-unknown-none-elf/release/dux \
 		$(QEMU_OPT)
 
 gdb-riscv64:
-	riscv64-unknown-unknown-linux-gnu-gdb \
+	riscv64-unknown-linux-gnu-gdb \
 		-ex='set arch riscv64' \
 		-ex='target extended-remote localhost:1234' \
 		target/riscv64gc-unknown-none-elf/release/dux
@@ -55,13 +57,13 @@ test-riscv64:
 		-C no-redzone=yes \
 		--test
 	@echo Enter Ctrl-A + X to quit
-	qemu-system-riscv64 \
+	$(QEMU) \
 		-s \
 		-machine virt \
 		-nographic \
 		-m 32M \
 		-smp 1 \
-		-bios none \
+		-bios $(BIOS) \
 		-kernel target/riscv64gc-unknown-none-elf/release/dux \
 		$(QEMU_OPT)
 
