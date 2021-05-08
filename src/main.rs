@@ -10,7 +10,7 @@
 
 mod io;
 mod log;
-mod idle;
+mod powerstate;
 mod util;
 
 use core::panic::PanicInfo;
