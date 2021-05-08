@@ -14,27 +14,21 @@ pub enum LogLevel {
 	Debug = 4,
 }
 
-static mut UART: Option<crate::io::uart::UART> = None;
 static LOG_LEVEL: LogLevel = LogLevel::Info;
 
 #[doc(hidden)]
 #[cold]
 pub fn log(pre: &str, strings: &[&str]) {
-	// SAFETY: FIXME we should use locks
-	unsafe {
-		if UART.is_none() {
-			UART = Some(crate::io::uart::UART::new());
-		}
-		let uart = UART.as_mut().unwrap();
-		// TODO how should we handle write failures?
-		// Right now UART "can't fail", but what if it
-		// does at some point?
+	// TODO how should we handle write failures?
+	// Right now UART "can't fail", but what if it
+	// does at some point?
+	let _ = crate::io::uart::default(|uart| {
 		let _ = uart.write_str(pre);
 		for &s in strings.iter() {
 			let _ = uart.write_str(s);
 		}
 		let _ = uart.write_str("\n");
-	}
+	});
 }
 
 fn log_prefix(level: LogLevel, prefix: &str, strings: &[&str]) {

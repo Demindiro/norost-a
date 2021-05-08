@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(asm)]
 #![feature(naked_functions)]
+#![feature(once_cell)]
 #![feature(custom_test_frameworks)]
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
@@ -10,6 +11,7 @@ mod io;
 mod log;
 mod powerstate;
 mod util;
+mod sync;
 
 use core::panic::PanicInfo;
 

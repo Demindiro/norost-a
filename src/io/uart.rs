@@ -1,13 +1,31 @@
 use super::*;
 use core::{num, ptr};
 use core::convert::TryInto;
+use core::lazy::OnceCell;
+use core::cell::{RefMut, RefCell, BorrowMutError};
 
-/// The default UART address. Used in [`UART::new()`](UART::new)
+use crate::sync::{Mutex, MutexGuard};
+
+/// The default UART address.
 const BASE: *mut u8 = 0x10000000 as _;
 const QUEUE: isize = 0x0;
 const LINESTAT: isize = 0x5;
 const STATUS_RX: u8 = 0x01;
 const STATUS_TX: u8 = 0x20;
+
+/// An UART port that always exists
+static DEFAULT: Mutex<OnceCell<RefCell<UART>>> = Mutex::new(OnceCell::new());
+
+/// Attempts to access the default UART device. Returns
+/// [`BorrowMutError`](core::cell::BorrowMutError) if it already borrowed (i.e. in use)
+pub fn default<'a, F, R>(f: F) -> Result<R, BorrowMutError>
+where
+	F: FnOnce(&mut UART) -> R
+{
+	let uart = DEFAULT.lock();
+	let mut uart = uart.get_or_init(|| unsafe { RefCell::new(UART::new(BASE)) }).try_borrow_mut()?;
+	Ok(f(&mut uart))
+}
 
 // TODO initialize the UART properly
 // It works with QEMU right now, but it won't necessarily work on real hardware
@@ -39,8 +57,7 @@ impl UART {
 	/// ## Safety
 	///
 	/// This function is called only once.
-	pub unsafe fn new() -> Self {
-		let address = BASE;
+	pub unsafe fn new(address: *mut u8) -> Self {
 		init(address);
 		Self { address }
 	}
