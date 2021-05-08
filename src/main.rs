@@ -1,7 +1,13 @@
 #![no_std]
 #![no_main]
+#![feature(custom_test_frameworks)]
+#![feature(asm)]
+#![test_runner(crate::test::runner)]
 
 mod io;
+mod log;
+mod test;
+mod idle;
 
 use core::panic::PanicInfo;
 
@@ -12,8 +18,9 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
-	// SAFETY: we call UART::new only once
-	let mut uart = unsafe { io::uart::UART::new() };
-	uart.write_str("Hello, world!\n");
-	loop {}
+	log::info("Hello, world!");
+	log::warn("This is bullshit");
+	loop {
+		idle::halt();
+	}
 }

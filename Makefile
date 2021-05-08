@@ -1,10 +1,19 @@
+QEMU_OPT?=
+
 default: build-riscv64
 
 run: run-riscv64
 
+gdb: gdb-riscv64
+
+test:
+	cargo test
+
+expand-%:
+	cargo expand --target riscv64gc-unknown-none-elf $*
+
 clean:
 	rm -r target/
-
 
 build-riscv64:
 	cargo rustc \
@@ -21,11 +30,17 @@ run-riscv64: build-riscv64
 		-s \
 		-machine virt \
 		-nographic \
-		-serial mon:stdio \
-		-smp 1 \
 		-m 32M \
+		-smp 1 \
 		-bios none \
-		-kernel target/riscv64gc-unknown-none-elf/release/dux
+		-kernel target/riscv64gc-unknown-none-elf/release/dux \
+		$(QEMU_OPT)
+
+gdb-riscv64:
+	gdb \
+		-ex='set arch riscv64' \
+		-ex='target extended-remote localhost:1234' \
+		target/riscv64gc-unknown-none-elf/release/dux
 
 dump:
-	riscv64-linux-gnu-objdump -SC target/riscv64-unknown-none-elf/release/dux
+	riscv64-linux-gnu-objdump -SC target/riscv64gc-unknown-none-elf/release/dux
