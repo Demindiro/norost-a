@@ -143,15 +143,17 @@ impl MISA {
 	/// Logs the value of `misa` in human-readable format
 	#[cold]
 	pub fn log(&self) {
-		let mut buf = [0; 64];
+		// log(1 << 128) / log(16) == 32
+		let mut buf = [0; 32];
 		let misa: usize;
 		// SAFETY: Inspecting `misa` is always safe
 		unsafe {
 			asm!("csrrs	a0, {csr}, zero", csr = const Self::CSR, out("a0") misa);
 		}
-		let misa = util::usize_to_string_hex(&mut buf, misa).unwrap();
+		let mxl = self.mxl();
+		let misa = util::usize_to_string(&mut buf, misa, 16, mxl.xlen() / 4).unwrap();
 		log::info(&["MISA = ", misa]);
-		log::info(&["  MXL = ", self.mxl().as_str()]);
+		log::info(&["  MXL = ", mxl.as_str()]);
 		{
 			use Extension::*;
 			log::info(&["  Extensions:"]);
@@ -175,6 +177,15 @@ impl MXL {
 			Self::XLEN32 => "32",
 			Self::XLEN64 => "64",
 			Self::XLEN128 => "128",
+		}
+	}
+
+	/// Returns the XLEN of the MXL as an `u8`
+	pub fn xlen(&self) -> u8 {
+		match self {
+			Self::XLEN32 => 32,
+			Self::XLEN64 => 64,
+			Self::XLEN128 => 128,
 		}
 	}
 }

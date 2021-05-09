@@ -9,8 +9,8 @@ edition = "2018"
 
 [profile.dev]
 panic = "abort"
-
+debug = true
 
 [profile.release]
 panic = "abort"
-#debug = true
+debug = true

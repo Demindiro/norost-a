@@ -6,9 +6,19 @@ default: build-riscv64
 
 run: run-riscv64
 
+run-debug: run-debug-riscv64
+
 gdb: gdb-riscv64
 
+gdb-debug: gdb-debug-riscv64
+
 test: test-riscv64
+
+test-debug: test-debug-riscv64
+
+dump: dump-riscv64
+
+dump-debug: dump-debug-riscv64
 
 expand-%:
 	cargo expand --target riscv64gc-unknown-none-elf $*
@@ -19,6 +29,16 @@ clean:
 build-riscv64:
 	cargo rustc \
 		--release \
+		--target riscv64gc-unknown-none-elf \
+		-- \
+		-C linker=riscv64-unknown-linux-gnu-gcc \
+		-C link-arg=-nostartfiles \
+		-C link-arg=-Tlink.ld \
+		-C link-arg=boot.s \
+		-C no-redzone=yes
+
+build-debug-riscv64:
+	cargo rustc \
 		--target riscv64gc-unknown-none-elf \
 		-- \
 		-C linker=riscv64-unknown-linux-gnu-gcc \
@@ -39,11 +59,50 @@ run-riscv64: build-riscv64
 		-kernel target/riscv64gc-unknown-none-elf/release/dux \
 		$(QEMU_OPT)
 
+run-debug-riscv64: build-debug-riscv64
+	@echo Enter Ctrl-A + X to quit
+	$(QEMU) \
+		-s \
+		-machine virt \
+		-nographic \
+		-m 32M \
+		-smp 1 \
+		-bios $(BIOS) \
+		-kernel target/riscv64gc-unknown-none-elf/debug/dux \
+		$(QEMU_OPT)
+
 gdb-riscv64:
 	riscv64-unknown-linux-gnu-gdb \
 		-ex='set arch riscv64' \
 		-ex='target extended-remote localhost:1234' \
 		target/riscv64gc-unknown-none-elf/release/dux
+
+gdb-debug-riscv64:
+	riscv64-unknown-linux-gnu-gdb \
+		-ex='set arch riscv64' \
+		-ex='target extended-remote localhost:1234' \
+		target/riscv64gc-unknown-none-elf/debug/dux
+
+test-debug-riscv64:
+	cargo rustc \
+		--target riscv64gc-unknown-none-elf \
+		-- \
+		-C linker=riscv64-unknown-linux-gnu-gcc \
+		-C link-arg=-nostartfiles \
+		-C link-arg=-Tlink.ld \
+		-C link-arg=boot.s \
+		-C no-redzone=yes \
+		--test
+	@echo Enter Ctrl-A + X to quit
+	$(QEMU) \
+		-s \
+		-machine virt \
+		-nographic \
+		-m 32M \
+		-smp 1 \
+		-bios $(BIOS) \
+		-kernel target/riscv64gc-unknown-none-elf/debug/dux \
+		$(QEMU_OPT)
 
 test-riscv64:
 	cargo rustc \
@@ -67,6 +126,8 @@ test-riscv64:
 		-kernel target/riscv64gc-unknown-none-elf/release/dux \
 		$(QEMU_OPT)
 
-
-dump:
+dump-riscv64:
 	riscv64-unknown-linux-gnu-objdump -SC target/riscv64gc-unknown-none-elf/release/dux
+
+dump-debug-riscv64:
+	riscv64-unknown-linux-gnu-objdump -SC target/riscv64gc-unknown-none-elf/debug/dux

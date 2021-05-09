@@ -1,12 +1,31 @@
 #![no_std]
 #![no_main]
+#![feature(allocator_api)]
 #![feature(asm)]
 #![feature(naked_functions)]
 #![feature(once_cell)]
+#![feature(nonnull_slice_from_raw_parts)]
 #![feature(custom_test_frameworks)]
+#![feature(raw)]
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
 
+// TODO read up on the test framework thing. Using macro for now because custom_test_frameworks
+// does something stupid complicated with tokenstreams (I just want to log the function name
+// damnit)
+#[macro_export]
+macro_rules! test {
+	($name:ident() $code:block) => {
+		#[test_case]
+		fn $name() {
+			log::info(&["  testing ", concat!(module_path!(), "::", stringify!($name))]);
+			{ $code }
+		}
+	};
+}
+
+
+mod alloc;
 mod arch;
 mod io;
 mod log;
@@ -65,7 +84,7 @@ mod test {
 
 	pub(super) fn runner(tests: &[&dyn Fn()]) {
 		let mut buf = [0; 32];
-		let num = util::isize_to_string(&mut buf, tests.len() as isize).unwrap();
+		let num = util::isize_to_string(&mut buf, tests.len() as isize, 10, 1).unwrap();
 		log::info(&[
 			"Running ",
 			num,
@@ -75,10 +94,5 @@ mod test {
 			f();
 		}
 		log::info(&["Done"]);
-	}
-
-	#[test_case]
-	fn wakawaka() {
-		log::fatal(&["WAKA WAKA EE EE"]);
 	}
 }
