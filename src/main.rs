@@ -7,11 +7,12 @@
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
 
+mod arch;
 mod io;
 mod log;
 mod powerstate;
-mod util;
 mod sync;
+mod util;
 
 use core::panic::PanicInfo;
 
@@ -23,6 +24,7 @@ fn panic(_info: &PanicInfo) -> ! {
 #[no_mangle]
 #[cfg(not(test))]
 fn main() {
+	arch::Capabilities::new().log();
 	io::uart::default(|uart| {
 		use io::Device;
 		let _ = uart.write(b"Greetings!\n");

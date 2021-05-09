@@ -1,8 +1,8 @@
 use super::*;
-use core::{num, ptr};
+use core::cell::{BorrowMutError, RefCell, RefMut};
 use core::convert::TryInto;
 use core::lazy::OnceCell;
-use core::cell::{RefMut, RefCell, BorrowMutError};
+use core::{num, ptr};
 
 use crate::sync::{Mutex, MutexGuard};
 
@@ -20,10 +20,12 @@ static DEFAULT: Mutex<OnceCell<RefCell<UART>>> = Mutex::new(OnceCell::new());
 /// [`BorrowMutError`](core::cell::BorrowMutError) if it already borrowed (i.e. in use)
 pub fn default<'a, F, R>(f: F) -> Result<R, BorrowMutError>
 where
-	F: FnOnce(&mut UART) -> R
+	F: FnOnce(&mut UART) -> R,
 {
 	let uart = DEFAULT.lock();
-	let mut uart = uart.get_or_init(|| unsafe { RefCell::new(UART::new(BASE)) }).try_borrow_mut()?;
+	let mut uart = uart
+		.get_or_init(|| unsafe { RefCell::new(UART::new(BASE)) })
+		.try_borrow_mut()?;
 	Ok(f(&mut uart))
 }
 

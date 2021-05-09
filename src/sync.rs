@@ -1,5 +1,5 @@
-use core::ops::Deref;
 use core::cell::Cell;
+use core::ops::Deref;
 
 pub struct Mutex<T> {
 	value: T,
@@ -15,7 +15,10 @@ unsafe impl<T> Sync for Mutex<T> {}
 // FIXME proper atomic sync implementation
 impl<T> Mutex<T> {
 	pub const fn new(value: T) -> Self {
-		Self { value, lock: Cell::new(false) }
+		Self {
+			value,
+			lock: Cell::new(false),
+		}
 	}
 
 	pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
