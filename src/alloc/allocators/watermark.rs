@@ -67,7 +67,10 @@ impl WaterMark {
 		let zone: &mut FreeZone = base.cast().as_mut();
 		zone.size = size;
 		zone.next = None;
-		Self { base, next: Cell::new(Some(NonNull::from(zone))) }
+		Self {
+			base,
+			next: Cell::new(Some(NonNull::from(zone))),
+		}
 	}
 }
 

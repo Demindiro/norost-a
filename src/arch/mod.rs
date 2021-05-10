@@ -68,15 +68,15 @@ pub fn id() -> impl ID {
 	riscv64::ID::new()
 }
 
-extern {
+extern "C" {
 	#[link_name = "__stack_pointer"]
 	static STACK_BASE: *const u8;
 }
-extern {
+extern "C" {
 	#[link_name = "__text"]
 	static TEXT_START: *const u8;
 }
-extern {
+extern "C" {
 	#[link_name = "__etext"]
 	static TEXT_END: *const u8;
 }
@@ -92,13 +92,13 @@ pub fn is_backtrace_accurate() -> bool {
 #[inline(never)]
 pub fn backtrace<F>(f: F)
 where
-	F: Fn(*const u8, *const u8)
+	F: Fn(*const u8, *const u8),
 {
 	// TODO the current method is a very ugly way to get the backtrace.
 	// While simply checking whether a stack value happens to be an address
 	// to somewhere in .text, it's not reliable since some values may just
 	// coincidence (e.g. array of function pointers, random integer with
-	// value 0x8000_4394 etc)	
+	// value 0x8000_4394 etc)
 	// We should be able to scan the ELF file for a section with stack information
 	// per function, though if that section isn't there we're probably out of luck...
 

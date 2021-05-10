@@ -71,7 +71,7 @@ mod csr {
 			$(#[allow(dead_code)] pub const $name: u16 = $value;)*
 		};
 		($base_value:literal $name:ident $start:literal $end:literal) => {
-			#[allow(dead_code)] 
+			#[allow(dead_code)]
 			#[allow(unused_comparisons)]
 			pub const fn $name(index: u16) -> u16 {
 				assert!($start <= index, "Index is not within range");
@@ -245,8 +245,7 @@ impl MISA {
 	}
 }
 
-impl ID {
-}
+impl ID {}
 
 impl MXL {
 	/// Returns the MXL as a human-readable string

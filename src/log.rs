@@ -46,13 +46,23 @@ pub fn error(strings: &[&str]) {
 }
 
 pub fn warn(strings: &[&str]) {
-	log_prefix(LogLevel::Warn, "[WARN ] ", strings);
+	log_prefix(LogLevel::Warn, "[WARN]  ", strings);
 }
 
 pub fn info(strings: &[&str]) {
-	log_prefix(LogLevel::Info, "[INFO ] ", strings);
+	log_prefix(LogLevel::Info, "[INFO]  ", strings);
 }
 
 pub fn debug(strings: &[&str]) {
 	log_prefix(LogLevel::Debug, "[DEBUG] ", strings);
+}
+
+pub fn debug_str(msg: &str) {
+	debug(&[msg]);
+}
+
+pub fn debug_usize(msg: &str, num: usize, radix: u8) {
+	let mut buf = [0; 128];
+	let num = crate::util::usize_to_string(&mut buf, num, radix, 1).unwrap();
+	debug(&[msg, " -> ", num]);
 }
