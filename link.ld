@@ -6,22 +6,23 @@
 OUTPUT_FORMAT("elf64-littleriscv", "elf64-littleriscv",
 	      "elf64-littleriscv")
 OUTPUT_ARCH(riscv)
-/* >>> Our addition. <<< */
+
 MEMORY
 {
    /* qemu-system-risc64 virt machine */
    RAM (rwx)  : ORIGIN = 0x80000000, LENGTH = 32M 
 }
-/* >>> End of our addition. <<< */
+
+/* Based on heuristics */
+STACK_SIZE = 8K;
+
 ENTRY(_start)
+
 SEARCH_DIR("=/home/david/Documents/riscv/riscv-gnu-toolchain/../opt/riscv/riscv64-unknown-linux-gnu/lib64/lp64d"); SEARCH_DIR("=/home/david/Documents/riscv/riscv-gnu-toolchain/../opt/riscv/riscv64-unknown-linux-gnu/lib64"); SEARCH_DIR("=/usr/local/lib64/lp64d"); SEARCH_DIR("=/usr/local/lib64"); SEARCH_DIR("=/lib64/lp64d"); SEARCH_DIR("=/lib64"); SEARCH_DIR("=/usr/lib64/lp64d"); SEARCH_DIR("=/usr/lib64"); SEARCH_DIR("=/home/david/Documents/riscv/riscv-gnu-toolchain/../opt/riscv/riscv64-unknown-linux-gnu/lib"); SEARCH_DIR("=/usr/local/lib"); SEARCH_DIR("=/lib"); SEARCH_DIR("=/usr/lib");
 SECTIONS
 {
   /* Read-only sections, merged into text segment: */
   PROVIDE (__executable_start = SEGMENT_START("text-segment", 0x10000)); . = SEGMENT_START("text-segment", 0x10000) + SIZEOF_HEADERS;
-  /* >>> Our addition. <<< */
-  PROVIDE(__stack_pointer = ORIGIN(RAM) + LENGTH(RAM));
-  /* >>> End of our addition. <<< */
   .interp         : { *(.interp) }
   .note.gnu.build-id  : { *(.note.gnu.build-id) }
   .hash           : { *(.hash) }
@@ -99,11 +100,13 @@ SECTIONS
   /* Adjust the address for the data segment.  We want to adjust up to
      the same address within the page on the next page up.  */
   . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE));
+
   /* Exception handling  */
   .eh_frame       : ONLY_IF_RW { KEEP (*(.eh_frame)) *(.eh_frame.*) }
   .gnu_extab      : ONLY_IF_RW { *(.gnu_extab) }
   .gcc_except_table   : ONLY_IF_RW { *(.gcc_except_table .gcc_except_table.*) }
   .exception_ranges   : ONLY_IF_RW { *(.exception_ranges*) }
+
   /* Thread Local Storage sections  */
   .tdata	  :
    {
@@ -210,6 +213,16 @@ SECTIONS
 		            MAX(__DATA_BEGIN__ + 0x800, __BSS_END__ - 0x800));
   _end = .; PROVIDE (end = .);
   . = DATA_SEGMENT_END (.);
+
+	.stack (NOLOAD): {
+		. = ALIGN(8);
+		__stack_start = .;
+		. = . + STACK_SIZE;
+		. = ALIGN(8);
+		__stack_end = .;
+		__stack_pointer = .;
+	}
+
   /* Stabs debugging sections.  */
   .stab          0 : { *(.stab) }
   .stabstr       0 : { *(.stabstr) }

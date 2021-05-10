@@ -1,5 +1,7 @@
+.globl __stack_pointer
+.globl _start
+
 .section .init, "ax"
-.global _start
 _start:
     .cfi_startproc
     .cfi_undefined ra

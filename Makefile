@@ -45,7 +45,11 @@ CARGO_DEBUG?=cargo rustc \
 	-C link-arg=boot.s \
 	-C no-redzone=yes
 
-default: build-riscv64
+default: build
+	
+build: build-riscv64
+
+build-debug: build-debug-riscv64
 
 run: run-riscv64
 
@@ -62,6 +66,28 @@ test-debug: test-debug-riscv64
 dump: dump-riscv64
 
 dump-debug: dump-debug-riscv64
+
+measure-stack-size: build
+	@echo Enter Ctrl-A + X to exit
+	$(QEMU) -d cpu,nochain 2>&1 \
+		| rg sp \
+		| sed 's/.*sp   \(.*\) gp.*/\1/g' \
+		| sed 's/^0*//g' \
+		| rg . \
+		| uniq \
+		| sort -V \
+		| head -n 1
+
+measure-stack-size-debug: build-debug
+	@echo Enter Ctrl-A + X to exit
+	$(QEMU_DEBUG) -d cpu,nochain 2>&1 \
+		| rg sp \
+		| sed 's/.*sp   \(.*\) gp.*/\1/g' \
+		| sed 's/^0*//g' \
+		| rg . \
+		| uniq \
+		| sort -V \
+		| head -n 1
 
 dump-dtb:
 	$(QEMU) --machine dumpdtb=machine.dtb
