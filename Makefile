@@ -1,3 +1,5 @@
+DRIVE?=drive.bin
+
 KERNEL?=target/riscv64gc-unknown-none-elf/release/dux
 KERNEL_DEBUG?=target/riscv64gc-unknown-none-elf/debug/dux
 
@@ -10,6 +12,7 @@ QEMU?=qemu-system-riscv64 \
 		-m 32M \
 		-smp 1 \
 		-bios $(QEMU_BIOS) \
+		-drive file=$(DRIVE),format=raw \
 		-kernel $(KERNEL)
 QEMU_DEBUG?=qemu-system-riscv64 \
 		-s \
@@ -18,20 +21,23 @@ QEMU_DEBUG?=qemu-system-riscv64 \
 		-m 32M \
 		-smp 1 \
 		-bios $(QEMU_BIOS) \
+		-drive file=$(DRIVE),format=raw \
 		-kernel $(KERNEL_DEBUG)
 
+CARGO_OPT?=
 CARGO?=cargo rustc \
 	--release \
 	--target riscv64gc-unknown-none-elf \
+	$(CARGO_OPT) \
 	-- \
 	-C linker=riscv64-unknown-linux-gnu-gcc \
 	-C link-arg=-nostartfiles \
 	-C link-arg=-Tlink.ld \
 	-C link-arg=boot.s \
 	-C no-redzone=yes
-
 CARGO_DEBUG?=cargo rustc \
 	--target riscv64gc-unknown-none-elf \
+	$(CARGO_OPT) \
 	-- \
 	-C linker=riscv64-unknown-linux-gnu-gcc \
 	-C link-arg=-nostartfiles \
@@ -57,6 +63,10 @@ dump: dump-riscv64
 
 dump-debug: dump-debug-riscv64
 
+dump-dtb:
+	$(QEMU) --machine dumpdtb=machine.dtb
+	dtc -I dtb -O dts -o machine.dts machine.dtb
+
 expand-%:
 	cargo expand --target riscv64gc-unknown-none-elf $*
 
@@ -69,11 +79,11 @@ build-riscv64:
 build-debug-riscv64:
 	$(CARGO_DEBUG)
 
-run-riscv64: build-riscv64
+run-riscv64: build-riscv64 $(DRIVE)
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU) $(QEMU_OPT)
 
-run-debug-riscv64: build-debug-riscv64
+run-debug-riscv64: build-debug-riscv64 $(DRIVE)
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU_DEBUG) $(QEMU_OPT)
 
@@ -89,12 +99,12 @@ gdb-debug-riscv64:
 		-ex='target extended-remote localhost:1234' \
 		$(KERNEL_DEBUG)
 
-test-riscv64:
+test-riscv64: $(DRIVE)
 	$(CARGO) --test
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU) $(QEMU_OPT)
 
-test-debug-riscv64:
+test-debug-riscv64: $(DRIVE)
 	$(CARGO_DEBUG) --test
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU_DEBUG) $(QEMU_OPT)
@@ -104,3 +114,6 @@ dump-riscv64:
 
 dump-debug-riscv64:
 	riscv64-unknown-linux-gnu-objdump -SC $(KERNEL_DEBUG)
+
+$(DRIVE):
+	dd if=/dev/zero of=drive.bin bs=1M count=32

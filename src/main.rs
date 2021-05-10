@@ -86,56 +86,59 @@ fn panic(info: &panic::PanicInfo) -> ! {
 	}
 }
 
-#[no_mangle]
-#[cfg(not(test))]
-fn main(_plug: usize, dtb: *const u8) {
-	use arch::*;
-	arch::id().log();
-	arch::capabilities().log();
-
-	log::info(&["Device tree:"]);
-	let dtb = unsafe { driver::DeviceTree::parse_dtb(dtb).unwrap() };
+#[cfg(feature = "dump-dtb")]
+fn dump_dtb(dtb: &driver::DeviceTree) {
+	log::debug(&["Device tree:"]);
 	let mut buf = [0; 32];
 	let num = util::usize_to_string(&mut buf, dtb.boot_cpu_id() as usize, 16, 1).unwrap();
-	log::info(&["  Boot CPU physical ID: ", num]);
-	log::info(&["  Reserved memory regions:"]);
+	log::debug(&["  Boot CPU physical ID: ", num]);
+	log::debug(&["  Reserved memory regions:"]);
 	for rmr in dtb.reserved_memory_regions() {
 		let mut buf = [0; 32];
 		let addr = util::usize_to_string(&mut buf, rmr.address.get() as usize, 16, 1).unwrap();
 		let mut buf = [0; 32];
 		let size = util::usize_to_string(&mut buf, rmr.size.get() as usize, 16, 1).unwrap();
-		log::info(&["    ", addr, " ", size]);
+		log::debug(&["    ", addr, " ", size]);
 	}
-
-	fn print_node_info(level: usize, buf: &mut [&str; 64], mut node: driver::Node) {
-		log::debug(&["start  ", node.name]);
+	fn print_node(level: usize, buf: &mut [&str; 64], mut node: driver::Node) {
 		buf[level * 2] = "'";
 		buf[level * 2 + 1] = node.name;
 		buf[level * 2 + 2] = "'";
-		log::info(&buf[..level * 2 + 3]);
+		log::debug(&buf[..level * 2 + 3]);
 		buf[level * 2] = "  Properties:";
-		log::info(&buf[..level * 2 + 1]);
+		log::debug(&buf[..level * 2 + 1]);
 		while let Some(property) = node.next_property() {
 			buf[level * 2] = "    '";
 			buf[level * 2 + 1] = property.name;
 			buf[level * 2 + 2] = "'";
-			log::info(&buf[..level * 2 + 3]);
+			log::debug(&buf[..level * 2 + 3]);
 		}
 		buf[level * 2] = "  Child nodes:";
-		log::info(&buf[..level * 2 + 1]);
+		log::debug(&buf[..level * 2 + 1]);
 		while let Some(node) = node.next_child_node() {
 			buf[level * 2] = "  ";
 			buf[level * 2 + 1] = "  ";
-			print_node_info(level + 1, buf, node);
+			print_node(level + 1, buf, node);
 		}
-		log::debug_str("next");
 	}
-	log::info(&["  Nodes:"]);
+	log::debug(&["  Nodes:"]);
 	let mut interpreter = dtb.interpreter();
 	let mut buf = ["  "; 64];
 	while let Some(mut node) = interpreter.next_node() {
-		print_node_info(1, &mut buf, node);
+		print_node(1, &mut buf, node);
 	}
+}
+
+#[no_mangle]
+#[cfg(not(test))]
+fn main(hart_id: usize, dtb: *const u8) {
+	use arch::*;
+	arch::id().log();
+	arch::capabilities().log();
+
+	let dtb = unsafe { driver::DeviceTree::parse_dtb(dtb).unwrap() };
+	#[cfg(feature = "dump-dtb")]
+	dump_dtb(&dtb);
 
 	io::uart::default(|uart| {
 		use io::Device;

@@ -137,7 +137,6 @@ impl DeviceTree {
 		if header.magic.get() != Self::MAGIC {
 			return Err(ParseDTBError::BadMagic(header.magic.get()));
 		}
-		crate::log::debug_usize("header", address as usize, 16);
 
 		Ok(Self { header })
 	}
@@ -193,11 +192,6 @@ impl DeviceTree {
 				.add(self.header.offset_strings_block.get() as usize)
 				.cast()
 		};
-		crate::log::debug_usize(
-			"strings block",
-			self.header.offset_strings_block.get() as usize,
-			16,
-		);
 		let state = InterpreterState::NotStarted;
 		Interpreter { pc, strings, state }
 	}
@@ -242,7 +236,6 @@ impl Interpreter {
 
 	/// Return the current token and advance the program counter
 	fn step(&mut self) -> u32 {
-		crate::log::debug_usize("pc_offt", self.pc as usize - 0x1020, 16);
 		let tk = self.current();
 		self.advance(1);
 		tk
@@ -267,7 +260,6 @@ impl Interpreter {
 		loop {
 			match self.step() {
 				Self::TOKEN_BEGIN_NODE => {
-					crate::log::debug_str("TOKEN_BEGIN_NODE");
 					let ptr = self.pc as *const u8;
 					// SAFETY: ptr points to a null-terminated byte string
 					let name = unsafe { util::cstr_to_str(ptr).expect("Invalid UTF-8 node name") };
@@ -281,7 +273,6 @@ impl Interpreter {
 					});
 				}
 				Self::TOKEN_END_NODE => {
-					crate::log::debug_str("TOKEN_END_NODE");
 					break None;
 				}
 				Self::TOKEN_PROP => panic!("Unexpected TOKEN_PROP"),
@@ -310,7 +301,6 @@ impl Interpreter {
 					break None;
 				}
 				Self::TOKEN_END_NODE => {
-					crate::log::debug_str("TOKEN_END_NODE property");
 					// next_node() will consume the token
 					self.rewind(1);
 					break None;

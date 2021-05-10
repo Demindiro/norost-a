@@ -1,1 +1,4 @@
 /target
+drive.bin
+*.dtb
+*.dts

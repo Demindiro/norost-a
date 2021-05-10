@@ -14,7 +14,7 @@ pub enum LogLevel {
 	Debug = 4,
 }
 
-static LOG_LEVEL: LogLevel = LogLevel::Info;
+static LOG_LEVEL: LogLevel = LogLevel::Debug;
 
 #[doc(hidden)]
 #[cold]

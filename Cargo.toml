@@ -15,3 +15,6 @@ debug = true
 panic = "abort"
 #debug = true
 lto = true
+
+[features]
+dump-dtb = []
