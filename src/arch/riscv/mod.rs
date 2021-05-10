@@ -17,6 +17,9 @@ use core::{array, mem};
 /// supported extensions.
 pub struct MISA;
 
+/// A wrapper to query vendor information
+pub struct ID;
+
 /// An enum indicating the width of the ISA
 pub enum MXL {
 	XLEN32 = 1,
@@ -59,17 +62,122 @@ pub enum Extension {
 	Z = 25,
 }
 
-impl MISA {
-	/// The address of the `misa` register
-	const CSR: u16 = 0x301;
-
-	/// Wraps the contents of the `misa` register. This constructor is a NOOP, though
-	/// this may change.
-	#[cold]
-	pub fn new() -> Self {
-		Self
+/// A listing of all CSRs
+mod csr {
+	macro_rules! csr_table {
+		{
+			$($value:literal $name:ident)*
+		} => {
+			$(#[allow(dead_code)] pub const $name: u16 = $value;)*
+		};
+		($base_value:literal $name:ident $start:literal $end:literal) => {
+			#[allow(dead_code)] 
+			#[allow(unused_comparisons)]
+			pub const fn $name(index: u16) -> u16 {
+				assert!($start <= index, "Index is not within range");
+				assert!(index <= $end, "Index is not within range");
+				$base_value + index
+			}
+		};
 	}
 
+	csr_table! {
+		0x000 USTATUS
+		0x004 UIE
+		0x005 UTVEC
+
+		0x040 USCRATCH
+		0x041 UEPC
+		0x042 UCAUSE
+		0x043 UTVAL
+		0x044 UIP
+
+		0x001 FFLAGS
+		0x002 FRM
+		0x003 FCSR
+
+		0xc00 CYCLE
+		0xc01 TIME
+		0xc02 INSTRET
+
+		0xc80 CYCLEH
+		0xc81 TIMEH
+		0xc82 INSTRETH
+
+		0x100 SSTATUS
+		0x102 SEDELEG
+		0x103 SIDELEG
+		0x104 SIE
+		0x105 STVEC
+		0x106 SCOUNTEREN
+
+		0x140 SSCRATCH
+		0x141 SEPC
+		0x142 SCAUSE
+		0x143 STVAL
+		0x144 SIP
+
+		0x180 SATP
+
+		0xf11 MVENDORID
+		0xf12 MARCHID
+		0xf13 MIMP
+		0xf14 MHARTID
+
+		0x300 MSTATUS
+		0x301 MISA
+		0x302 MEDELEG
+		0x303 MIDELEG
+		0x304 MIE
+		0x305 MTVEC
+		0x306 MCOUNTEREN
+
+		0x340 MSCRATCH
+		0x341 MEPC
+		0x342 MCAUSE
+		0x343 MTVAL
+		0x344 MIP
+
+		0xb00 MCYCLE
+		0xb02 MINSTRET
+
+		0xb80 MCYCLEH
+		0xb02 MINSTRETH
+
+		0x320 MCOUNTINHIBIT
+
+		0x7a0 TSELECT
+
+		0x7b0 DCSR
+		0x7b1 DPC
+	}
+
+	csr_table!(0xc00 hpmcounter 3 31);
+	csr_table!(0xc80 hpmcounterh 3 31);
+	csr_table!(0x3a0 pmpcfg 0 3);
+	csr_table!(0x3a0 pmpaddr 0 15);
+	csr_table!(0xb00 mhpmcounter 3 31);
+	csr_table!(0xb80 mhpmcounterh 3 31);
+	csr_table!(0x320 mhpmevent 3 31);
+	csr_table!(0x7a0 tdata 1 3);
+	csr_table!(0x7b2 dscratch 0 1);
+}
+
+macro_rules! csr {
+	($name:ident) => {{
+		let t: usize;
+		asm!("csrrs a0, {csr}, zero", csr = const csr::$name, out("a0") t);
+		t
+	}};
+	($name:ident($index:literal)) => {{
+		const CSR: usize = csr::$name($index);
+		let t: usize;
+		asm!("csrrs a0, {csr}, zero", csr = const CSR, out("a0") t);
+		t
+	}};
+}
+
+impl MISA {
 	/// Returns the base integer width of this ISA.
 	#[cold]
 	#[must_use]
@@ -116,7 +224,7 @@ impl MISA {
 
 			done:
 			",
-				csr = const Self::CSR,
+				csr = const csr::MISA,
 				out("a0") mxl,
 			);
 			match mxl {
@@ -132,42 +240,12 @@ impl MISA {
 	#[cold]
 	#[must_use]
 	pub fn has_extension(&self, extension: Extension) -> bool {
-		let misa: usize;
 		// SAFETY: Inspecting `misa` is always safe.
-		unsafe {
-			asm!("csrrs	a0, {csr}, zero", csr = const Self::CSR, out("a0") misa);
-		}
-		misa & (1 << extension as u8) != 0
+		unsafe { csr!(MISA) & (1 << extension as u8) != 0 }
 	}
+}
 
-	/// Logs the value of `misa` in human-readable format
-	#[cold]
-	pub fn log(&self) {
-		// log(1 << 128) / log(16) == 32
-		let mut buf = [0; 32];
-		let misa: usize;
-		// SAFETY: Inspecting `misa` is always safe
-		unsafe {
-			asm!("csrrs	a0, {csr}, zero", csr = const Self::CSR, out("a0") misa);
-		}
-		let mxl = self.mxl();
-		let misa = util::usize_to_string(&mut buf, misa, 16, mxl.xlen() / 4).unwrap();
-		log::info(&["MISA = ", misa]);
-		log::info(&["  MXL = ", mxl.as_str()]);
-		{
-			use Extension::*;
-			log::info(&["  Extensions:"]);
-			let e = [
-				A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
-			];
-			for e in array::IntoIter::new(e) {
-				let s = e.as_str();
-				if self.has_extension(e) {
-					log::info(&["    ", s]);
-				}
-			}
-		}
-	}
+impl ID {
 }
 
 impl MXL {
@@ -233,4 +311,68 @@ human_extension! {
 	X "Non-standard extensions"
 	Y "RESERVED"
 	Z "RESERVED"
+}
+
+impl super::Capabilities for MISA {
+	/// Wraps the contents of the `misa` register. This constructor is a NOOP, though
+	/// this may change.
+	#[cold]
+	fn new() -> Self {
+		Self
+	}
+
+	/// Logs the value of `misa` in human-readable format
+	#[cold]
+	fn log(&self) {
+		// log(1 << 128) / log(16) == 32
+		let mut buf = [0; 32];
+		// SAFETY: Inspecting `misa` is always safe
+		let misa = unsafe { csr!(MISA) };
+		let mxl = self.mxl();
+		let misa = util::usize_to_string(&mut buf, misa, 16, mxl.xlen() / 4).unwrap();
+		log::info(&["MISA = ", misa]);
+		log::info(&["  MXL = ", mxl.as_str()]);
+		{
+			use Extension::*;
+			log::info(&["  Extensions:"]);
+			let e = [
+				A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+			];
+			for e in array::IntoIter::new(e) {
+				let s = e.as_str();
+				if self.has_extension(e) {
+					log::info(&["    ", s]);
+				}
+			}
+		}
+	}
+}
+
+impl super::ID for ID {
+	#[cold]
+	fn new() -> Self {
+		Self
+	}
+
+	#[cold]
+	fn jedec(&self) -> super::JEDEC {
+		// SAFETY: accessing the mvendorid CSR is safe.
+		let jedec = unsafe { csr!(MVENDORID) };
+		super::JEDEC {
+			stop: (jedec & (1 << 6)) as u8,
+			continuation: jedec >> 6,
+		}
+	}
+
+	#[cold]
+	fn arch(&self) -> usize {
+		// SAFETY: accessing the marchid is safe.
+		unsafe { csr!(MARCHID) }
+	}
+
+	#[cold]
+	fn hart(&self) -> usize {
+		// SAFETY: accessing the hartid is safe.
+		unsafe { csr!(MHARTID) }
+	}
 }

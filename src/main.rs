@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(allocator_api)]
 #![feature(asm)]
+#![feature(const_panic)]
 #![feature(naked_functions)]
 #![feature(once_cell)]
 #![feature(nonnull_slice_from_raw_parts)]
@@ -73,7 +74,9 @@ fn panic(info: &panic::PanicInfo) -> ! {
 #[no_mangle]
 #[cfg(not(test))]
 fn main() {
-	arch::Capabilities::new().log();
+	use arch::*;
+	arch::id().log();
+	arch::capabilities().log();
 	io::uart::default(|uart| {
 		use io::Device;
 		let _ = uart.write(b"Greetings!\n");

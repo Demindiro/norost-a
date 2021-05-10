@@ -1,27 +1,71 @@
-#[cfg(any(target_arch = "riscv64"))]
+#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 mod riscv;
 #[cfg(target_arch = "riscv64")]
-pub use riscv::rv64 as riscv64;
+use riscv::rv64 as riscv64;
 
-use crate::log;
-use core::ptr;
+use crate::{log, util};
+use core::{mem, ptr};
 
-/// A wrappers that allows inspecting the capabilities of the current CPU
-#[cfg(target_arch = "riscv64")]
-pub struct Capabilities(riscv64::MISA);
+/// A structure that encodes the JEDEC in a somewhat sensible way
+pub struct JEDEC {
+	/// The amount of continuation codes.
+	continuation: usize,
+	/// The stop (i.e. termination) code.
+	stop: u8,
+}
 
-impl Capabilities {
+/// A wrapper that allows inspecting the capabilities of the current CPU
+pub trait Capabilities {
 	/// Creates a new wrapper around whatever structures that need to be accessed to
 	/// get the CPU's capabilities.
-	pub fn new() -> Self {
-		#[cfg(target_arch = "riscv64")]
-		Capabilities(riscv64::MISA::new())
-	}
+	fn new() -> Self;
 
 	/// Logs the capabilities of the current CPU
-	pub fn log(&self) {
-		self.0.log()
+	fn log(&self);
+}
+
+/// A wrapper to get CPU-specific information, such as the vendor
+pub trait ID {
+	/// Creates a wrapper around the structures needed for accessing CPU-specific information.
+	fn new() -> Self;
+
+	/// Gets the JEDEC ID of this CPU.
+	fn jedec(&self) -> JEDEC;
+
+	/// Gets the architecture ID.
+	fn arch(&self) -> usize;
+
+	/// Gets the current hardware thread (i.e. hart)
+	fn hart(&self) -> usize;
+
+	/// Logs vendor-specific information.
+	fn log(&self) {
+		let jedec = self.jedec();
+		let mut buf = [0; 16];
+		let continuation = util::usize_to_string(&mut buf, jedec.continuation, 10, 1).unwrap();
+		let mut buf = [0; 2];
+		let stop = util::usize_to_string(&mut buf, jedec.stop.into(), 16, 2).unwrap();
+		log::info(&["Vendor: ", continuation, " ", stop]);
+
+		const LEN: u8 = 2 * mem::size_of::<usize>() as u8;
+		let mut buf = [0; LEN as usize];
+
+		let arch = util::usize_to_string(&mut buf, self.arch(), 16, LEN.into()).unwrap();
+		log::info(&["Architecture: ", arch]);
+
+		let hart = util::usize_to_string(&mut buf, self.hart(), 16, LEN.into()).unwrap();
+		log::info(&["Current hart: ", hart]);
 	}
+}
+
+pub fn capabilities() -> impl Capabilities {
+	#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+	riscv64::MISA::new()
+}
+
+pub fn id() -> impl ID {
+	#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+	riscv64::ID::new()
 }
 
 extern {
