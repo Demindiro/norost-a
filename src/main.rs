@@ -7,6 +7,7 @@
 #![feature(nonnull_slice_from_raw_parts)]
 #![feature(custom_test_frameworks)]
 #![feature(raw)]
+#![feature(link_llvm_intrinsics)]
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
 
@@ -33,16 +34,46 @@ mod powerstate;
 mod sync;
 mod util;
 
-use core::panic::PanicInfo;
+use core::{mem, panic};
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-	loop {}
+fn panic(info: &panic::PanicInfo) -> ! {
+	log::fatal(&["Kernel panicked!"]);
+	let msg = info.payload();
+	if let Some(s) = msg.downcast_ref::<&str>() {
+		log::fatal(&["  Message: ", s]);
+	//} else if let Some(s) = msg.downcast_ref::<String>() {
+	//	log::fatal(&["  Message: ", s.as_str()]);
+	}
+	if let Some(loc) = info.location() {
+		// If more than 8 characters are needed for line/column I'll kill someone
+		let mut buf = [0; 8];
+		let line = util::usize_to_string(&mut buf, loc.line() as usize, 10, 1).unwrap();
+		let mut buf = [0; 8];
+		let column = util::usize_to_string(&mut buf, loc.column() as usize, 10, 1).unwrap();
+		log::fatal(&["  Source: ", loc.file(), ":", line, ",", column]);
+	} else {
+		log::fatal(&["  No location info"]);
+	}
+	let bt_approx = if arch::is_backtrace_accurate() { "" } else { " (approximate)" };
+	log::fatal(&["  Backtrace", bt_approx, ":"]);
+	arch::backtrace(|sp, fun| {
+		const LEN: u8 = 2 * mem::size_of::<*const ()>() as u8;
+		let mut buf = [0; LEN as usize];
+		let sp = util::usize_to_string(&mut buf, sp as usize, 16, 1).unwrap();
+		let mut buf = [0; LEN as usize];
+		let fun = util::usize_to_string(&mut buf, fun as usize, 16, 1).unwrap();
+		log::fatal(&["    ", sp, ": ", fun]);
+	});
+	loop {
+		powerstate::halt();
+	}
 }
 
 #[no_mangle]
 #[cfg(not(test))]
 fn main() {
+	panic!();
 	arch::Capabilities::new().log();
 	io::uart::default(|uart| {
 		use io::Device;

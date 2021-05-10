@@ -62,6 +62,9 @@ SECTIONS
     KEEP (*(SORT_NONE(.init)))
   }
   .plt            : { *(.plt) *(.iplt) }
+  /* >>> Our addition. (mine, in fact) <<< */
+  PROVIDE(__text = .);
+  /* >>> End of our addition. <<< */
   .text           :
   {
     *(.text.unlikely .text.*_unlikely .text.unlikely.*)

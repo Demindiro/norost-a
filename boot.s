@@ -7,14 +7,11 @@ _start:
     .option norelax
 	la	gp, __global_pointer$
 	.option pop
-	# Bandaid
-	#auipc	sp, 0x4
-	#la		s0, 0x10000
-	#add		sp, sp, s0
-	# FIXME fix whatever is breaking this
 	la	sp, __stack_pointer
     add s0, sp, zero
-	j	main
+	# Set ra to zero to indicate end of call stack
+	mv		ra, zero
+	call	main
 1:
 	wfi
 	j	1b
