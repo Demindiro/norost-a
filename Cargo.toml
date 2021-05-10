@@ -13,4 +13,5 @@ debug = true
 
 [profile.release]
 panic = "abort"
-debug = true
+#debug = true
+lto = true

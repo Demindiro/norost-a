@@ -73,7 +73,6 @@ fn panic(info: &panic::PanicInfo) -> ! {
 #[no_mangle]
 #[cfg(not(test))]
 fn main() {
-	panic!();
 	arch::Capabilities::new().log();
 	io::uart::default(|uart| {
 		use io::Device;

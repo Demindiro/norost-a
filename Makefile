@@ -1,6 +1,43 @@
+KERNEL?=target/riscv64gc-unknown-none-elf/release/dux
+KERNEL_DEBUG?=target/riscv64gc-unknown-none-elf/debug/dux
+
 QEMU_OPT?=
-QEMU?=qemu-system-riscv64
-BIOS?=none
+QEMU_BIOS?=none
+QEMU?=qemu-system-riscv64 \
+		-s \
+		-machine virt \
+		-nographic \
+		-m 32M \
+		-smp 1 \
+		-bios $(QEMU_BIOS) \
+		-kernel $(KERNEL)
+QEMU_DEBUG?=qemu-system-riscv64 \
+		-s \
+		-machine virt \
+		-nographic \
+		-m 32M \
+		-smp 1 \
+		-bios $(QEMU_BIOS) \
+		-kernel $(KERNEL_DEBUG)
+
+CARGO?=cargo rustc \
+	--release \
+	--target riscv64gc-unknown-none-elf \
+	-- \
+	-C linker=riscv64-unknown-linux-gnu-gcc \
+	-C link-arg=-nostartfiles \
+	-C link-arg=-Tlink.ld \
+	-C link-arg=boot.s \
+	-C no-redzone=yes
+
+CARGO_DEBUG?=cargo rustc \
+	--target riscv64gc-unknown-none-elf \
+	-- \
+	-C linker=riscv64-unknown-linux-gnu-gcc \
+	-C link-arg=-nostartfiles \
+	-C link-arg=-Tlink.ld \
+	-C link-arg=boot.s \
+	-C no-redzone=yes
 
 default: build-riscv64
 
@@ -27,107 +64,43 @@ clean:
 	rm -rf target/
 
 build-riscv64:
-	cargo rustc \
-		--release \
-		--target riscv64gc-unknown-none-elf \
-		-- \
-		-C linker=riscv64-unknown-linux-gnu-gcc \
-		-C link-arg=-nostartfiles \
-		-C link-arg=-Tlink.ld \
-		-C link-arg=boot.s \
-		-C no-redzone=yes
+	$(CARGO)
 
 build-debug-riscv64:
-	cargo rustc \
-		--target riscv64gc-unknown-none-elf \
-		-- \
-		-C linker=riscv64-unknown-linux-gnu-gcc \
-		-C link-arg=-nostartfiles \
-		-C link-arg=-Tlink.ld \
-		-C link-arg=boot.s \
-		-C no-redzone=yes
+	$(CARGO_DEBUG)
 
 run-riscv64: build-riscv64
 	@echo Enter Ctrl-A + X to quit
-	$(QEMU) \
-		-s \
-		-machine virt \
-		-nographic \
-		-m 32M \
-		-smp 1 \
-		-bios $(BIOS) \
-		-kernel target/riscv64gc-unknown-none-elf/release/dux \
-		$(QEMU_OPT)
+	$(QEMU) $(QEMU_OPT)
 
 run-debug-riscv64: build-debug-riscv64
 	@echo Enter Ctrl-A + X to quit
-	$(QEMU) \
-		-s \
-		-machine virt \
-		-nographic \
-		-m 32M \
-		-smp 1 \
-		-bios $(BIOS) \
-		-kernel target/riscv64gc-unknown-none-elf/debug/dux \
-		$(QEMU_OPT)
+	$(QEMU_DEBUG) $(QEMU_OPT)
 
 gdb-riscv64:
 	riscv64-unknown-linux-gnu-gdb \
 		-ex='set arch riscv64' \
 		-ex='target extended-remote localhost:1234' \
-		target/riscv64gc-unknown-none-elf/release/dux
+		$(KERNEL)
 
 gdb-debug-riscv64:
 	riscv64-unknown-linux-gnu-gdb \
 		-ex='set arch riscv64' \
 		-ex='target extended-remote localhost:1234' \
-		target/riscv64gc-unknown-none-elf/debug/dux
-
-test-debug-riscv64:
-	cargo rustc \
-		--target riscv64gc-unknown-none-elf \
-		-- \
-		-C linker=riscv64-unknown-linux-gnu-gcc \
-		-C link-arg=-nostartfiles \
-		-C link-arg=-Tlink.ld \
-		-C link-arg=boot.s \
-		-C no-redzone=yes \
-		--test
-	@echo Enter Ctrl-A + X to quit
-	$(QEMU) \
-		-s \
-		-machine virt \
-		-nographic \
-		-m 32M \
-		-smp 1 \
-		-bios $(BIOS) \
-		-kernel target/riscv64gc-unknown-none-elf/debug/dux \
-		$(QEMU_OPT)
+		$(KERNEL_DEBUG)
 
 test-riscv64:
-	cargo rustc \
-		--release \
-		--target riscv64gc-unknown-none-elf \
-		-- \
-		-C linker=riscv64-unknown-linux-gnu-gcc \
-		-C link-arg=-nostartfiles \
-		-C link-arg=-Tlink.ld \
-		-C link-arg=boot.s \
-		-C no-redzone=yes \
-		--test
+	$(CARGO) --test
 	@echo Enter Ctrl-A + X to quit
-	$(QEMU) \
-		-s \
-		-machine virt \
-		-nographic \
-		-m 32M \
-		-smp 1 \
-		-bios $(BIOS) \
-		-kernel target/riscv64gc-unknown-none-elf/release/dux \
-		$(QEMU_OPT)
+	$(QEMU) $(QEMU_OPT)
+
+test-debug-riscv64:
+	$(CARGO_DEBUG) --test
+	@echo Enter Ctrl-A + X to quit
+	$(QEMU_DEBUG) $(QEMU_OPT)
 
 dump-riscv64:
-	riscv64-unknown-linux-gnu-objdump -SC target/riscv64gc-unknown-none-elf/release/dux
+	riscv64-unknown-linux-gnu-objdump -SC $(KERNEL)
 
 dump-debug-riscv64:
-	riscv64-unknown-linux-gnu-objdump -SC target/riscv64gc-unknown-none-elf/debug/dux
+	riscv64-unknown-linux-gnu-objdump -SC $(KERNEL_DEBUG)
