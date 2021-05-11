@@ -9,6 +9,7 @@ use core::{marker, mem, ops, ptr};
 //#[lang = "owned_box"]
 pub struct Box<T, A>
 where
+	T: ?Sized,
 	A: Allocator,
 {
 	pointer: NonNull<T>,
@@ -16,18 +17,36 @@ where
 	allocator: A,
 }
 
-/// Equivalent of `Box<[T]>`, as I can't implement `Drop` for unsized types for whatever reason.
-pub struct BoxSlice<T, A>
+impl<T, A> Box<T, A>
 where
+	T: ?Sized,
 	A: Allocator,
 {
-	pointer: NonNull<[T]>,
-	_marker: marker::PhantomData<T>,
-	allocator: A,
+	pub unsafe fn from_raw_in(pointer: NonNull<T>, allocator: A) -> Self {
+		Self {
+			pointer,
+			_marker: marker::PhantomData,
+			allocator,
+		}
+	}
+
+	pub fn into_raw_with_allocator(b: Self) -> (NonNull<T>, A) {
+		let b = mem::ManuallyDrop::new(b);
+		// SAFETY: The box won't be dropped as it is wrapped in a ManuallyDrop,
+		// hence moving out of it is safe.
+		let alloc = unsafe { ptr::read(&b.allocator) };
+		(b.pointer, alloc)
+	}
+
+	pub fn leak<'a>(b: Self) -> &'a mut T {
+		// SAFETY: not dropping the box is safe
+		unsafe { mem::ManuallyDrop::new(b).pointer.as_mut() }
+	}
 }
 
 impl<T, A> Box<T, A>
 where
+	T: Sized,
 	A: Allocator,
 {
 	pub fn try_new_in(value: T, allocator: A) -> Result<Self, AllocError> {
@@ -55,96 +74,51 @@ where
 		unsafe { Ok(Box::from_raw_in(ptr.cast(), allocator)) }
 	}
 
-	pub unsafe fn from_raw_in(pointer: NonNull<T>, allocator: A) -> Self {
-		Self {
-			pointer,
-			_marker: marker::PhantomData,
-			allocator,
-		}
-	}
-
-	pub fn into_raw_with_allocator(b: Self) -> (NonNull<T>, A) {
-		let b = mem::ManuallyDrop::new(b);
-		// SAFETY: The box won't be dropped as it is wrapped in a ManuallyDrop,
-		// hence moving out of it is safe.
-		let alloc = unsafe { ptr::read(&b.allocator) };
-		(b.pointer, alloc)
-	}
-
-	pub fn leak<'a>(b: Self) -> &'a mut T {
-		// SAFETY: not dropping the box is safe
-		unsafe { mem::ManuallyDrop::new(b).pointer.as_mut() }
-	}
-
 	pub unsafe fn assume_init(self) -> Self {
 		let (ptr, alloc) = Box::into_raw_with_allocator(self);
 		Self::from_raw_in(ptr.cast(), alloc)
 	}
 }
 
-impl<T, A> BoxSlice<T, A>
+impl<T, A> Box<[T], A>
 where
+	T: Sized,
 	A: Allocator,
 {
-	pub fn try_new_uninit_slice_in(size: usize, allocator: A) -> Result<BoxSlice<mem::MaybeUninit<T>, A>, AllocError> {
+	pub fn try_new_uninit_slice_in(
+		size: usize,
+		allocator: A,
+	) -> Result<Box<[mem::MaybeUninit<T>], A>, AllocError> {
 		let layout = Layout::new::<T>().repeat(size).ok().ok_or(AllocError)?.0;
 		let ptr = allocator.allocate(layout)?;
 		let ptr = NonNull::slice_from_raw_parts(ptr.cast(), size);
 		// SAFETY: the allocator returned a valid pointer
-		unsafe { Ok(BoxSlice::from_raw_in(ptr, allocator)) }
+		unsafe { Ok(Box::from_raw_in(ptr, allocator)) }
 	}
 
-	pub fn try_new_zeroed_slice_in(size: usize, allocator: A) -> Result<BoxSlice<mem::MaybeUninit<T>, A>, AllocError> {
+	pub fn try_new_zeroed_slice_in(
+		size: usize,
+		allocator: A,
+	) -> Result<Box<[mem::MaybeUninit<T>], A>, AllocError> {
 		let layout = Layout::new::<T>().repeat(size).ok().ok_or(AllocError)?.0;
 		let ptr = allocator.allocate_zeroed(layout)?;
 		let ptr = NonNull::slice_from_raw_parts(ptr.cast(), size);
 		// SAFETY: the allocator returned a valid pointer
-		unsafe { Ok(BoxSlice::from_raw_in(ptr, allocator)) }
-	}
-
-	pub unsafe fn from_raw_in(pointer: NonNull<[T]>, allocator: A) -> Self {
-		Self {
-			pointer,
-			_marker: marker::PhantomData,
-			allocator,
-		}
-	}
-
-	pub fn into_raw_with_allocator(b: Self) -> (NonNull<[T]>, A) {
-		let b = mem::ManuallyDrop::new(b);
-		// SAFETY: The box won't be dropped as it is wrapped in a ManuallyDrop,
-		// hence moving out of it is safe.
-		let alloc = unsafe { ptr::read(&b.allocator) };
-		(b.pointer, alloc)
-	}
-
-	pub fn leak<'a>(b: Self) -> &'a mut [T] {
-		// SAFETY: not dropping the box is safe
-		unsafe { mem::ManuallyDrop::new(b).pointer.as_mut() }
+		unsafe { Ok(Box::from_raw_in(ptr, allocator)) }
 	}
 }
 
 impl<T, A> Drop for Box<T, A>
 where
+	T: ?Sized,
 	A: Allocator,
 {
 	fn drop(&mut self) {
-		// SAFETY: self.pointer points to memory allocated by self.allocator
+		// SAFETY: self.pointer points to memory allocated by self.allocator and is
+		// valid/initialized.
 		unsafe {
 			let layout = Layout::for_value(self.pointer.as_ref());
-			self.allocator.deallocate(self.pointer.cast(), layout);
-		}
-	}
-}
-
-impl<T, A> Drop for BoxSlice<T, A>
-where
-	A: Allocator,
-{
-	fn drop(&mut self) {
-		// SAFETY: self.pointer points to memory allocated by self.allocator
-		unsafe {
-			let layout = Layout::for_value(self.pointer.as_ref());
+			ptr::drop_in_place(self.pointer.as_ptr());
 			self.allocator.deallocate(self.pointer.cast(), layout);
 		}
 	}
@@ -152,7 +126,8 @@ where
 
 impl<T, A> ops::Deref for Box<T, A>
 where
-	A: Allocator
+	T: ?Sized,
+	A: Allocator,
 {
 	type Target = T;
 
@@ -162,38 +137,16 @@ where
 	}
 }
 
-impl<T, A> ops::Deref for BoxSlice<T, A>
-where
-	A: Allocator
-{
-	type Target = [T];
-
-	fn deref(&self) -> &Self::Target {
-		// SAFETY: self.pointer points to memory allocated by self.allocator
-		unsafe { self.pointer.as_ref() }
-	}
-}
-
 impl<T, A> ops::DerefMut for Box<T, A>
 where
-	A: Allocator
+	T: ?Sized,
+	A: Allocator,
 {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		// SAFETY: self.pointer points to memory allocated by self.allocator
 		unsafe { self.pointer.as_mut() }
 	}
 }
-
-impl<T, A> ops::DerefMut for BoxSlice<T, A>
-where
-	A: Allocator
-{
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		// SAFETY: self.pointer points to memory allocated by self.allocator
-		unsafe { self.pointer.as_mut() }
-	}
-}
-
 
 /* TODO ????? I don't understand how this is supposed to be useable
  * https://doc.rust-lang.org/unstable-book/language-features/lang-items.html

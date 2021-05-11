@@ -200,8 +200,8 @@ unsafe impl Allocator for WaterMark {
 #[cfg(test)]
 mod test {
 	use super::*;
-	use crate::log;
 	use crate::alloc;
+	use crate::log;
 
 	/// Since we're just running tests, we'll assume that anything at this address here is unused.
 	/// Adjust as needed.
@@ -255,7 +255,7 @@ mod test {
 
 	test!(allocate_boxslice() {
 		let heap = make_heap();
-		let a = alloc::BoxSlice::<usize, _>::try_new_uninit_slice_in(40, &heap).expect("Failed to allocate");
+		let a = alloc::Box::<[usize], _>::try_new_uninit_slice_in(40, &heap).expect("Failed to allocate");
 		assert_eq!(a.len(), 40);
 	});
 }

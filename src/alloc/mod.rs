@@ -4,4 +4,4 @@ mod r#box;
 
 pub mod allocators;
 
-pub use r#box::{Box, BoxSlice};
+pub use r#box::Box;
