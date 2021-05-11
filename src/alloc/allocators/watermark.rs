@@ -252,4 +252,10 @@ mod test {
 		let _c = alloc::Box::try_new_in([0u8; 100], &heap).expect("Failed to allocate");
 		drop(_b);
 	});
+
+	test!(allocate_boxslice() {
+		let heap = make_heap();
+		let a = alloc::BoxSlice::<usize, _>::try_new_uninit_slice_in(40, &heap).expect("Failed to allocate");
+		assert_eq!(a.len(), 40);
+	});
 }
