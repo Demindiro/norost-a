@@ -4,10 +4,12 @@
 #![feature(asm)]
 #![feature(const_panic)]
 #![feature(custom_test_frameworks)]
+#![feature(lang_items)]
 #![feature(naked_functions)]
 #![feature(nonnull_slice_from_raw_parts)]
 #![feature(once_cell)]
 #![feature(panic_info_message)]
+#![feature(ptr_internals)]
 #![feature(raw)]
 #![feature(link_llvm_intrinsics)]
 #![test_runner(crate::test::runner)]
@@ -45,8 +47,8 @@ mod powerstate;
 mod sync;
 mod util;
 
-use core::{mem, panic, ptr};
 use core::convert::TryInto;
+use core::{mem, panic, ptr};
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
@@ -137,7 +139,6 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 #[no_mangle]
 #[cfg(not(test))]
 fn main(hart_id: usize, dtb: *const u8) {
-
 	// Log architecture info
 	use arch::*;
 	arch::id().log();
@@ -194,8 +195,14 @@ fn main(hart_id: usize, dtb: *const u8) {
 						let val = prop.value;
 						let (start, val) = match address_cells {
 							0 => (0, val),
-							1 => (u32::from_be_bytes(val[..4].try_into().unwrap()) as usize, &val[4..]),
-							2 => (u64::from_be_bytes(val[..8].try_into().unwrap()) as usize, &val[8..]),
+							1 => (
+								u32::from_be_bytes(val[..4].try_into().unwrap()) as usize,
+								&val[4..],
+							),
+							2 => (
+								u64::from_be_bytes(val[..8].try_into().unwrap()) as usize,
+								&val[8..],
+							),
 							_ => panic!("Unsupported address size"),
 						};
 						let size = match size_cells {
@@ -205,7 +212,12 @@ fn main(hart_id: usize, dtb: *const u8) {
 							_ => panic!("Unsupported size size"),
 						};
 						// Ensure we don't ever allocate 0x0.
-						let start = start + if start == 0 { mem::size_of::<usize>() } else { 0 };
+						let start = start
+							+ if start == 0 {
+								mem::size_of::<usize>()
+							} else {
+								0
+							};
 						let (kernel_start, kernel_end): (usize, usize);
 						// SAFETY: loading symbols is safe
 						unsafe {
@@ -217,7 +229,9 @@ fn main(hart_id: usize, dtb: *const u8) {
 						}
 						let max_end = start + size;
 						let end = start + HEAP_MEM_MAX;
-						let (start, end) = if (start < kernel_start && end < kernel_start) || (start >= kernel_end && end >= kernel_end) {
+						let (start, end) = if (start < kernel_start && end < kernel_start)
+							|| (start >= kernel_end && end >= kernel_end)
+						{
 							// No adjustments needed
 							(start, end)
 						} else if start >= kernel_start && end >= kernel_end {
@@ -228,7 +242,7 @@ fn main(hart_id: usize, dtb: *const u8) {
 							if end > max_end {
 								(start, max_end)
 							} else {
-								(start, end) 
+								(start, end)
 							}
 						} else {
 							// While other layouts are technically possible, I assume it's uncommon

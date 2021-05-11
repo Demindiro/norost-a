@@ -90,7 +90,7 @@ unsafe impl Allocator for WaterMark {
 
 		// Ensure the zone can be split into chunks of FreeZones
 		const _POW2_ASSERT: usize = 0 - (MIN_SIZE & (MIN_SIZE - 1));
-		let min_size = (layout.size() + MIN_SIZE - 1) & !(layout.size() - 1);
+		let min_size = (layout.size() + MIN_SIZE - 1) & !(MIN_SIZE - 1);
 
 		let mut prev_zone: Option<&mut FreeZone> = None;
 		let mut maybe_current = self.next.get();
@@ -106,15 +106,17 @@ unsafe impl Allocator for WaterMark {
 					self.next.set(curr_zone.next);
 				}
 				let ptr = curr_zone_ptr.cast();
+				super::track_allocation(ptr, min_size);
 				return Ok(NonNull::slice_from_raw_parts(ptr, layout.size()));
 			} else if curr_zone.size > min_size {
 				// Simply resize the current zone and offset the allocated memory.
 				curr_zone.size -= min_size;
 				// SAFETY: the pointer won't overflow & the pointed memory is unused
 				let ptr = unsafe {
-					let ptr = curr_zone_ptr.as_ptr().offset(curr_zone.size as isize);
+					let ptr = curr_zone_ptr.cast::<u8>().as_ptr().add(curr_zone.size);
 					NonNull::new_unchecked(ptr).cast()
 				};
+				super::track_allocation(ptr, min_size);
 				return Ok(NonNull::slice_from_raw_parts(ptr, layout.size()));
 			}
 			maybe_current = curr_zone.next;
@@ -125,7 +127,73 @@ unsafe impl Allocator for WaterMark {
 	}
 
 	unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-		todo!()
+		let min_size = (layout.size() + MIN_SIZE - 1) & !(MIN_SIZE - 1);
+		super::track_deallocation(ptr, min_size);
+		if let Some(mut zone) = self.next.get() {
+			if (zone.as_ptr() as usize) < ptr.as_ptr() as usize {
+				// Find the free zone right before ptr
+				while let Some(zn) = zone.as_mut().next {
+					if (zn.as_ptr() as usize) < ptr.as_ptr() as usize {
+						zone = zn;
+					} else {
+						break;
+					}
+				}
+
+				// Find the free zone right after ptr, which is simply the zone right after
+				let next_zone = zone.as_mut().next;
+
+				// Check if the left and middle (allocated) zone can be merged
+				let mut zone = if zone.as_ptr().cast::<u8>().add(zone.as_mut().size) == ptr.as_ptr()
+				{
+					zone.as_mut().size += min_size;
+					zone
+				} else {
+					let nz = FreeZone {
+						size: min_size,
+						next: next_zone,
+					};
+					let ptr = ptr.cast::<FreeZone>();
+					ptr.as_ptr().write(nz);
+					zone.as_mut().next = Some(ptr);
+					ptr.cast()
+				};
+
+				// Check if the middle and right zone can be merged
+				if let Some(mut next_zone) = next_zone {
+					if zone.as_ptr().cast::<u8>().add(zone.as_mut().size)
+						== next_zone.cast().as_ptr()
+					{
+						zone.as_mut().size += next_zone.as_mut().size;
+						zone.as_mut().next = next_zone.as_mut().next;
+					}
+				}
+			} else {
+				// Write a new zone, as there is no possibility for a merge
+				let nz = FreeZone {
+					size: min_size,
+					next: Some(zone),
+				};
+				let mut ptr = ptr.cast::<FreeZone>();
+				ptr.as_ptr().write(nz);
+				zone.as_mut().next = Some(ptr);
+				// Check if the middle (allocated) and right zone can be merged
+				if ptr.cast::<u8>().as_ptr().add(min_size) == zone.cast().as_ptr() {
+					ptr.as_mut().size += zone.as_mut().size;
+					ptr.as_mut().next = zone.as_mut().next;
+				}
+				// The new zone is first, so set self.next appropriately
+				self.next.set(Some(ptr.cast()));
+			}
+		} else {
+			// All zones are occupied, so just write out
+			let zone = FreeZone {
+				size: layout.size(),
+				next: None,
+			};
+			ptr.cast::<FreeZone>().as_ptr().write(zone);
+			self.next.set(Some(ptr.cast()));
+		}
 	}
 }
 
@@ -133,24 +201,55 @@ unsafe impl Allocator for WaterMark {
 mod test {
 	use super::*;
 	use crate::log;
+	use crate::alloc;
 
-	// TODO figure out a way to find unused memory
-	// Right now, we're just praying this doesn't land in either the stack or the
-	// executable/.rodata/.data/... sections.
+	/// Since we're just running tests, we'll assume that anything at this address here is unused.
+	/// Adjust as needed.
+	// TODO Maybe it's worth adding a linker symbol for this instead?
 	const UNUSED_MEM_PTR: NonNull<u8> = unsafe { NonNull::new_unchecked(0x8100_0000 as *mut u8) };
+	// Ditto?
+	/// Presumably there is at least 16KB memory free on whatever platform the kernel can run on.
+	const UNUSED_MEM_SIZE: usize = 0x4_000;
+
+	/// Allocate a temporary heap for testing.
+	fn make_heap() -> WaterMark {
+		unsafe { WaterMark::new(UNUSED_MEM_PTR, UNUSED_MEM_SIZE) }
+	}
 
 	test!(allocate_byte() {
-		let allocator = unsafe { WaterMark::new(UNUSED_MEM_PTR, 128) };
+		let allocator = make_heap();
 		let layout = Layout::from_size_align(1, 1).unwrap();
 		let _ = allocator.allocate_zeroed(layout);
 	});
 
 	test!(allocate_zst() {
-		let allocator = unsafe { WaterMark::new(UNUSED_MEM_PTR, 128) };
+		let allocator = make_heap();
 		let layout = Layout::from_size_align(0, 1).unwrap();
 		let data = allocator.allocate_zeroed(layout).unwrap();
 		let data = unsafe { data.as_ref() };
 		assert_eq!(data.len(), 0);
 		assert_eq!(data.as_ptr_range().start, 0x1 as *mut u8);
+	});
+
+	test!(allocate_box_3() {
+		let heap = make_heap();
+		for i in 0..3 {
+			alloc::Box::try_new_in(0, &heap).expect("Failed to allocate");
+		}
+	});
+
+	test!(allocate_box_3_chain() {
+		let heap = make_heap();
+		let _a = alloc::Box::try_new_in(0, &heap).expect("Failed to allocate");
+		let _b = alloc::Box::try_new_in(0, &heap).expect("Failed to allocate");
+		let _c = alloc::Box::try_new_in([0u8; 100], &heap).expect("Failed to allocate");
+	});
+
+	test!(allocate_box_3_chain_drop_mid_first() {
+		let heap = make_heap();
+		let _a = alloc::Box::try_new_in(0, &heap).expect("Failed to allocate");
+		let _b = alloc::Box::try_new_in(0, &heap).expect("Failed to allocate");
+		let _c = alloc::Box::try_new_in([0u8; 100], &heap).expect("Failed to allocate");
+		drop(_b);
 	});
 }
