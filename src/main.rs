@@ -13,6 +13,10 @@
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
 
+/// The default amount of kernel heap memory for the default allocator.
+// 1 MiB should be plenty for now and probably forever
+const HEAP_MEM_MAX: usize = 0x100_000;
+
 // TODO read up on the test framework thing. Using macro for now because custom_test_frameworks
 // does something stupid complicated with tokenstreams (I just want to log the function name
 // damnit)
@@ -41,7 +45,8 @@ mod powerstate;
 mod sync;
 mod util;
 
-use core::{mem, panic};
+use core::{mem, panic, ptr};
+use core::convert::TryInto;
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
@@ -132,13 +137,143 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 #[no_mangle]
 #[cfg(not(test))]
 fn main(hart_id: usize, dtb: *const u8) {
+
+	// Log architecture info
 	use arch::*;
 	arch::id().log();
 	arch::capabilities().log();
 
+	// Parse DTB and reserve some memory for heap usage
 	let dtb = unsafe { driver::DeviceTree::parse_dtb(dtb).unwrap() };
 	#[cfg(feature = "dump-dtb")]
 	dump_dtb(&dtb);
+
+	let mut interpreter = dtb.interpreter();
+	let mut root = interpreter.next_node().expect("No root node");
+
+	let mut address_cells = None;
+	let mut size_cells = None;
+	let mut model = "";
+	let mut boot_args = "";
+	let mut stdout = "";
+
+	let log_err_malformed_prop = |name| log::error(&["Value of '", name, "' is malformed"]);
+
+	while let Some(prop) = root.next_property() {
+		match prop.name {
+			"#address-cells" => {
+				let num = prop.value.try_into().expect("Malformed #address-cells");
+				address_cells = Some(u32::from_be_bytes(num));
+			}
+			"#size-cells" => {
+				let num = prop.value.try_into().expect("Malformed #size-cells");
+				size_cells = Some(u32::from_be_bytes(num));
+			}
+			"model" => {
+				if let Ok(m) = core::str::from_utf8(prop.value) {
+					model = m;
+				} else {
+					log_err_malformed_prop("model");
+				}
+			}
+			// Ignore other properties
+			_ => (),
+		}
+	}
+
+	let address_cells = address_cells.expect("Address cells isn't set");
+	let size_cells = size_cells.expect("Address cells isn't set");
+
+	let mut heap = None;
+
+	while let Some(mut node) = root.next_child_node() {
+		if heap.is_none() && node.name.starts_with("memory@") {
+			while let Some(prop) = node.next_property() {
+				match prop.name {
+					"reg" => {
+						let val = prop.value;
+						let (start, val) = match address_cells {
+							0 => (0, val),
+							1 => (u32::from_be_bytes(val[..4].try_into().unwrap()) as usize, &val[4..]),
+							2 => (u64::from_be_bytes(val[..8].try_into().unwrap()) as usize, &val[8..]),
+							_ => panic!("Unsupported address size"),
+						};
+						let size = match size_cells {
+							0 => 0,
+							1 => u32::from_be_bytes(val.try_into().unwrap()) as usize,
+							2 => u64::from_be_bytes(val.try_into().unwrap()) as usize,
+							_ => panic!("Unsupported size size"),
+						};
+						// Ensure we don't ever allocate 0x0.
+						let start = start + if start == 0 { mem::size_of::<usize>() } else { 0 };
+						let (kernel_start, kernel_end): (usize, usize);
+						// SAFETY: loading symbols is safe
+						unsafe {
+							asm!("
+								la	t0, _kernel_start
+								la	t1, _kernel_end
+								", out("t0") kernel_start, out("t1") kernel_end
+							);
+						}
+						let max_end = start + size;
+						let end = start + HEAP_MEM_MAX;
+						let (start, end) = if (start < kernel_start && end < kernel_start) || (start >= kernel_end && end >= kernel_end) {
+							// No adjustments needed
+							(start, end)
+						} else if start >= kernel_start && end >= kernel_end {
+							// Adjust upwards
+							let delta = kernel_end - start;
+							let start = start + delta;
+							let end = end + delta;
+							if end > max_end {
+								(start, max_end)
+							} else {
+								(start, end) 
+							}
+						} else {
+							// While other layouts are technically possible, I assume it's uncommon
+							// because why would anyone make it harder than necessary?
+							todo!();
+						};
+						heap = Some((ptr::NonNull::new(start as *mut u8).unwrap(), end - start));
+					}
+					_ => (),
+				}
+			}
+		} else if node.name.starts_with("chosen") {
+			while let Some(prop) = node.next_property() {
+				if let Ok(value) = core::str::from_utf8(prop.value) {
+					match prop.name {
+						"bootargs" => boot_args = value,
+						"stdout-path" => stdout = value,
+						_ => (),
+					}
+				} else {
+					log_err_malformed_prop(prop.name);
+				}
+			}
+		}
+	}
+
+	// Allocate a heap
+	let (address, size) = heap.expect("No address for heap allocation");
+	// SAFETY: The DTB told us this address is valid. We also ensured no existing
+	// memory will be overwritten.
+	let heap = unsafe { alloc::allocators::WaterMark::new(address, size) };
+
+	// Log some of the properties we just fetched
+	log::info(&["Device model: '", model, "'"]);
+	log::info(&["Boot arguments: '", boot_args, "'"]);
+	log::info(&["Dumping logs on '", stdout, "'"]);
+
+	const DIGITS: u8 = 2 * mem::size_of::<usize>() as u8;
+	let start = address.as_ptr() as usize;
+	let end = start + size;
+	let mut buf = [0; DIGITS as usize];
+	let start = util::usize_to_string(&mut buf, start, 16, DIGITS).unwrap();
+	let mut buf = [0; DIGITS as usize];
+	let end = util::usize_to_string(&mut buf, end, 16, DIGITS).unwrap();
+	log::info(&["Kernel heap: ", start, " - ", end]);
 
 	io::uart::default(|uart| {
 		use io::Device;

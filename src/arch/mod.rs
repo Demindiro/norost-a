@@ -68,19 +68,6 @@ pub fn id() -> impl ID {
 	riscv64::ID::new()
 }
 
-extern "C" {
-	#[link_name = "__stack_pointer"]
-	static STACK_BASE: *const u8;
-}
-extern "C" {
-	#[link_name = "__text"]
-	static TEXT_START: *const u8;
-}
-extern "C" {
-	#[link_name = "__etext"]
-	static TEXT_END: *const u8;
-}
-
 /// Returns `true` if an accurate backtrace can be returned, otherwise `false`.
 pub fn is_backtrace_accurate() -> bool {
 	false
@@ -103,15 +90,13 @@ where
 	// per function, though if that section isn't there we're probably out of luck...
 
 	// SAFETY: extern static is defined and valid
-	//let (stack_base, text_start, text_end); = unsafe {
 	let (stack_base, text_start, text_end): (usize, usize, usize);
 	unsafe {
-		// TODO figure out why the extern statics produce garbage
-		//(STACK_BASE as *const usize, TEXT_START as usize, TEXT_END as usize)
+		// TODO figure out why extern statics produce garbage
 		asm!("
-			la	t0, __stack_pointer
-			la	t1, __text
-			la	t2, __etext
+			la	t0, _stack_pointer
+			la	t1, _text_start
+			la	t2, _text_end
 		", out("t0") stack_base, out("t1") text_start, out("t2") text_end);
 	};
 	let mut sp: usize;

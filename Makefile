@@ -45,6 +45,12 @@ CARGO_DEBUG?=cargo rustc \
 	-C link-arg=boot.s \
 	-C no-redzone=yes
 
+OBJDUMP_OPT?=-S
+
+NM_OPT?=
+
+READELF_OPT?=-a
+
 default: build
 	
 build: build-riscv64
@@ -63,9 +69,15 @@ test: test-riscv64
 
 test-debug: test-debug-riscv64
 
-dump: dump-riscv64
+objdump: objdump-riscv64
 
-dump-debug: dump-debug-riscv64
+objdump-debug: objdump-debug-riscv64
+
+nm: nm-riscv64
+
+readelf: readelf-riscv64
+
+strip: strip-riscv64
 
 measure-stack-size: build
 	@echo Enter Ctrl-A + X to exit
@@ -135,11 +147,20 @@ test-debug-riscv64: $(DRIVE)
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU_DEBUG) $(QEMU_OPT)
 
-dump-riscv64:
-	riscv64-unknown-linux-gnu-objdump -SC $(KERNEL)
+objdump-riscv64:
+	riscv64-unknown-linux-gnu-objdump -C $(OBJDUMP_OPT) $(KERNEL)
 
-dump-debug-riscv64:
-	riscv64-unknown-linux-gnu-objdump -SC $(KERNEL_DEBUG)
+objdump-debug-riscv64:
+	riscv64-unknown-linux-gnu-objdump -C $(OBJDUMP_OPT) $(KERNEL_DEBUG)
+
+nm-riscv64:
+	riscv64-unknown-linux-gnu-nm -C $(NM_OPT) $(KERNEL)
+
+readelf-riscv64:
+	riscv64-unknown-linux-gnu-readelf -C $(READELF_OPT) $(KERNEL)
+
+strip-riscv64:
+	riscv64-unknown-linux-gnu-strip -x $(KERNEL)
 
 $(DRIVE):
 	dd if=/dev/zero of=drive.bin bs=1M count=32

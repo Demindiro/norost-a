@@ -7,9 +7,9 @@ _start:
     .cfi_undefined ra
     .option push
     .option norelax
-	la	gp, __global_pointer$
+	la	gp, _global_pointer
 	.option pop
-	la	sp, __stack_pointer
+	la	sp, _stack_end
     add s0, sp, zero
 	# Set ra to zero to indicate end of call stack
 	mv		ra, zero
