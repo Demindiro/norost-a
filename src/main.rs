@@ -7,12 +7,16 @@
 #![feature(custom_test_frameworks)]
 #![feature(dropck_eyepatch)]
 #![feature(lang_items)]
+#![feature(maybe_uninit_extra)]
 #![feature(naked_functions)]
 #![feature(nonnull_slice_from_raw_parts)]
+#![feature(option_result_unwrap_unchecked)]
 #![feature(once_cell)]
 #![feature(panic_info_message)]
+#![feature(ptr_metadata)]
 #![feature(ptr_internals)]
 #![feature(raw)]
+#![feature(slice_ptr_len)]
 #![feature(link_llvm_intrinsics)]
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
@@ -48,6 +52,7 @@ mod log;
 mod powerstate;
 mod sync;
 mod util;
+mod vfs;
 
 use core::convert::TryInto;
 use core::{mem, panic, ptr};

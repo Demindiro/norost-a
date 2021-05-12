@@ -127,6 +127,10 @@ unsafe impl Allocator for WaterMark {
 	}
 
 	unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+		// ZSTs aren't allocated in the first place, so don't deallocate either
+		if layout.size() == 0 {
+			return;
+		}
 		let min_size = (layout.size() + MIN_SIZE - 1) & !(MIN_SIZE - 1);
 		super::track_deallocation(ptr, min_size);
 		if let Some(mut zone) = self.next.get() {

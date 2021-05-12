@@ -3,6 +3,10 @@ mod riscv;
 #[cfg(target_arch = "riscv64")]
 use riscv::rv64 as riscv64;
 
+/// The size of a single memory page.
+#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+pub use riscv::PAGE_SIZE;
+
 use crate::{log, util};
 use core::{mem, ptr};
 

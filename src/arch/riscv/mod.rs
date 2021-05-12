@@ -13,6 +13,9 @@ pub mod rv64;
 use crate::{log, util};
 use core::{array, mem};
 
+/// The size of a single memory page, which is 4KB for all RISC-V architectures.
+pub const PAGE_SIZE: usize = 4096;
+
 /// A wrapper around the contents of the `misa` register, which describes the base ISA and it's
 /// supported extensions.
 pub struct MISA;

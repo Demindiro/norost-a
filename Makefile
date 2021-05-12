@@ -51,7 +51,12 @@ NM_OPT?=
 
 READELF_OPT?=-a
 
-default: build
+INITFS?=initfs.cpio
+INITFS_ROOT?=src/
+
+default: build mkinitfs
+
+mkinitfs: $(INITFS)
 	
 build: build-riscv64
 
@@ -164,3 +169,6 @@ strip-riscv64:
 
 $(DRIVE):
 	dd if=/dev/zero of=drive.bin bs=1M count=32
+
+$(INITFS): $(INITFS_ROOT)
+	find $< -type f | cpio -o -H newc > $@

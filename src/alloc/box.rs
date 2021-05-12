@@ -1,6 +1,6 @@
 use core::alloc::{AllocError, Allocator, Layout};
 use core::ptr::NonNull;
-use core::{marker, mem, ops, ptr};
+use core::{convert, marker, mem, ops, ptr};
 
 /// See [`core::alloc::Box`](core::alloc::Box) for documentation.
 // Lang items aren't used atm because of an ICE (and my mistrusting ass
@@ -85,6 +85,20 @@ where
 	T: Sized,
 	A: Allocator,
 {
+	/// Attempts to create a boxed slice from an
+	/// [`ExactSizeIterator`](core::iter::ExactSizeIterator).
+	pub fn try_from_iterator<I>(iterator: I, allocator: A) -> Result<Self, AllocError>
+	where
+		I: ExactSizeIterator<Item = T>,
+	{
+		let mut b = Self::try_new_uninit_slice_in(iterator.len(), allocator)?;
+		for (i, e) in iterator.enumerate() {
+			b[i].write(e);
+		}
+		// SAFETY: we initialized all elements
+		Ok(unsafe { b.assume_init() })
+	}
+
 	pub fn try_new_uninit_slice_in(
 		size: usize,
 		allocator: A,
@@ -105,6 +119,33 @@ where
 		let ptr = NonNull::slice_from_raw_parts(ptr.cast(), size);
 		// SAFETY: the allocator returned a valid pointer
 		unsafe { Ok(Box::from_raw_in(ptr, allocator)) }
+	}
+}
+
+impl<T, A> Box<[mem::MaybeUninit<T>], A>
+where
+	T: Sized,
+	A: Allocator,
+{
+	pub unsafe fn assume_init(self) -> Box<[T], A> {
+		let (ptr, alloc) = Box::into_raw_with_allocator(self);
+		let ptr = ptr.as_ptr() as *mut _ as *mut [T];
+		Box::from_raw_in(NonNull::new_unchecked(ptr), alloc)
+	}
+}
+
+impl<A> Box<str, A>
+where
+	A: Allocator,
+{
+	/// Attempts to create a boxed string from an [`str`](str).
+	pub fn try_from_str(string: &str, allocator: A) -> Result<Self, AllocError> {
+		let b = Box::try_from_iterator(string.bytes(), allocator)?;
+		let (ptr, alloc) = Box::into_raw_with_allocator(b);
+		let (ptr, _) = ptr.to_raw_parts();
+		let ptr = NonNull::from_raw_parts(ptr, string.len());
+		// SAFETY: string is already valid, so casting from &[u8] to &str is safe.
+		unsafe { Ok(Self::from_raw_in(ptr, alloc)) }
 	}
 }
 
@@ -132,8 +173,7 @@ where
 	type Target = T;
 
 	fn deref(&self) -> &Self::Target {
-		// SAFETY: self.pointer points to memory allocated by self.allocator
-		unsafe { self.pointer.as_ref() }
+		self.as_ref()
 	}
 }
 
@@ -143,6 +183,27 @@ where
 	A: Allocator,
 {
 	fn deref_mut(&mut self) -> &mut Self::Target {
+		self.as_mut()
+	}
+}
+
+impl<T, A> AsRef<T> for Box<T, A>
+where
+	T: ?Sized,
+	A: Allocator,
+{
+	fn as_ref(&self) -> &T {
+		// SAFETY: self.pointer points to memory allocated by self.allocator
+		unsafe { self.pointer.as_ref() }
+	}
+}
+
+impl<T, A> AsMut<T> for Box<T, A>
+where
+	T: ?Sized,
+	A: Allocator,
+{
+	fn as_mut(&mut self) -> &mut T {
 		// SAFETY: self.pointer points to memory allocated by self.allocator
 		unsafe { self.pointer.as_mut() }
 	}

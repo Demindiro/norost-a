@@ -1,8 +1,8 @@
 use core::slice;
 
-/// This macro creates a big-endian wrapper for the given integer type.
-macro_rules! gen_be {
-	($name:ident, $type_str:expr, $type:ty) => {
+/// This macro creates a big/little-endian wrapper for the given integer type.
+macro_rules! gen_endian {
+	($name:ident, $type_str:expr, $type:ty, $from:ident, $to:ident) => {
 		#[doc = "A wrapper that encodes `"]
 		#[doc = $type_str]
 		#[doc = "`stored in big-endian format. This structure is used to prevent accidently"]
@@ -16,27 +16,28 @@ macro_rules! gen_be {
 		impl $name {
 			/// Creates a new `BigEndianU32` from a native-endian `u32`.
 			pub fn new(value: $type) -> Self {
-				Self(value.to_be())
+				Self(value.$to())
 			}
 
 			/// Gets the stored value as a native-endian `u32`
 			pub fn get(self) -> $type {
-				<$type>::from_be(self.0)
+				<$type>::$from(self.0)
 			}
 
 			/// Sets the stored value as a native-endian `u32`
 			pub fn set(&mut self, value: $type) {
-				self.0 = value.to_be()
+				self.0 = value.$to()
 			}
 		}
 	};
-	($name:ident($type:ty)) => {
-		gen_be!($name, stringify!($type), $type);
+	($name:ident($type:ty) ($from:ident, $to:ident)) => {
+		gen_endian!($name, stringify!($type), $type, $from, $to);
 	};
 }
 
-gen_be!(BigEndianU32(u32));
-gen_be!(BigEndianU64(u64));
+gen_endian!(BigEndianU32(u32)(from_be, to_be));
+gen_endian!(BigEndianU64(u64)(from_be, to_be));
+gen_endian!(LittleEndianU32(u32)(from_le, to_le));
 
 /// Error returned if there is not enough space in a buffer.
 #[derive(Debug)]
