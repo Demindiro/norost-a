@@ -31,12 +31,12 @@
 //!
 //! [spec]: https://www.kernel.org/doc/html/latest/driver-api/early-userspace/buffer-format.html
 
+use super::cpio;
 use crate::alloc::{Box, Vec};
 use crate::log;
 use core::alloc::Allocator;
-use core::pin::Pin;
 use core::mem;
-use super::cpio;
+use core::pin::Pin;
 
 /// Structure representing an initramfs block
 // TODO M should be a special sort of "page allocator". It must NOT implement core::alloc::Allocator,
@@ -55,7 +55,7 @@ where
 /// boot.
 struct Node<A>
 where
-	A: Allocator
+	A: Allocator,
 {
 	/// The name of the node.
 	name: Box<str, A>,
@@ -68,7 +68,7 @@ where
 /// File-type specific data.
 enum Branch<A>
 where
-	A: Allocator
+	A: Allocator,
 {
 	/// A regular file
 	File(File),
@@ -79,7 +79,7 @@ where
 /// Structure representing a regular file
 struct File {
 	/// The data of the file.
-	data: () /* TODO structure describing a range of memory pages */,
+	data: (), /* TODO structure describing a range of memory pages */
 }
 
 /// Enum representing possible errors when trying to unpack a CPIO archive.
@@ -112,21 +112,29 @@ where
 					// find() causes some complaints about mutable borrows, so use position and index
 					// (which should optimize out any bounds checks anyways)
 					vec = if let Some(i) = vec.iter_mut().position(|n| n.name.as_ref() == comp) {
-						vec[i].data.as_directory_mut().ok_or(Error::FileTreatedAsDirectory)?
+						vec[i]
+							.data
+							.as_directory_mut()
+							.ok_or(Error::FileTreatedAsDirectory)?
 					} else {
 						vec.try_push(Node {
-							name: Box::try_from_str(comp, allocator).ok().ok_or(Error::AllocError)?,
+							name: Box::try_from_str(comp, allocator)
+								.ok()
+								.ok_or(Error::AllocError)?,
 							permissions: file.permissions,
 							data: Branch::Directory(Vec::new_in(allocator)),
-						}).map(|d| d.data.as_directory_mut().unwrap()).ok().ok_or(Error::AllocError)?
+						})
+						.map(|d| d.data.as_directory_mut().unwrap())
+						.ok()
+						.ok_or(Error::AllocError)?
 					};
 				} else {
 					vec.try_push(Node {
-						name: Box::try_from_str(comp, allocator).ok().ok_or(Error::AllocError)?,
+						name: Box::try_from_str(comp, allocator)
+							.ok()
+							.ok_or(Error::AllocError)?,
 						permissions: file.permissions,
-						data: Branch::File(File {
-							data: (),
-						})
+						data: Branch::File(File { data: () }),
 					});
 					break;
 				}

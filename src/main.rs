@@ -3,11 +3,18 @@
 #![feature(allocator_api)]
 #![feature(alloc_layout_extra)]
 #![feature(asm)]
+#![feature(bindings_after_at)]
+#![feature(const_generics)]
+#![feature(const_evaluatable_checked)]
+#![feature(const_option)]
 #![feature(const_panic)]
 #![feature(custom_test_frameworks)]
 #![feature(dropck_eyepatch)]
+#![feature(inline_const)]
 #![feature(lang_items)]
+#![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_extra)]
+#![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(nonnull_slice_from_raw_parts)]
 #![feature(option_result_unwrap_unchecked)]
@@ -24,6 +31,20 @@
 /// The default amount of kernel heap memory for the default allocator.
 // 1 MiB should be plenty for now and probably forever
 const HEAP_MEM_MAX: usize = 0x100_000;
+
+/// The default MAX_ORDER of the memory manager. This is set to 27 which allows
+/// areas up to 512 GiB, or a single "terapage" in RISC-V lingo. This should be
+/// sufficient for a very, very long time.
+///
+/// See [`memory`](crate::memory) for more information.
+///
+/// ## References
+///
+/// Mention of "terapages" can be found in [the RISC-V manual for privileged instructions][riscv],
+/// "Sv48: Page-Based 48-bit Virtual-Memory System", section 4.5.1, page 37.
+///
+/// [riscv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
+const MEMORY_MANAGER_MAX_ORDER: usize = 27;
 
 // TODO read up on the test framework thing. Using macro for now because custom_test_frameworks
 // does something stupid complicated with tokenstreams (I just want to log the function name
@@ -49,12 +70,14 @@ mod arch;
 mod driver;
 mod io;
 mod log;
+mod memory;
 mod powerstate;
 mod sync;
 mod util;
 mod vfs;
 
 use core::convert::TryInto;
+use core::num::NonZeroUsize;
 use core::{mem, panic, ptr};
 
 #[panic_handler]
@@ -234,27 +257,22 @@ fn main(hart_id: usize, dtb: *const u8) {
 								", out("t0") kernel_start, out("t1") kernel_end
 							);
 						}
-						let max_end = start + size;
-						let end = start + HEAP_MEM_MAX;
+						let page_mask = arch::PAGE_SIZE - 1;
+						let end = start + size;
 						let (start, end) = if (start < kernel_start && end < kernel_start)
 							|| (start >= kernel_end && end >= kernel_end)
 						{
 							// No adjustments needed
 							(start, end)
 						} else if start >= kernel_start && end >= kernel_end {
-							// Adjust upwards
+							// Adjust upwards & align to page boundary
 							let delta = kernel_end - start;
-							let start = start + delta;
-							let end = end + delta;
-							if end > max_end {
-								(start, max_end)
-							} else {
-								(start, end)
-							}
+							let start = (start + delta + page_mask) & !page_mask;
+							(start, end)
 						} else {
 							// While other layouts are technically possible, I assume it's uncommon
 							// because why would anyone make it harder than necessary?
-							todo!();
+							unimplemented!();
 						};
 						heap = Some((ptr::NonNull::new(start as *mut u8).unwrap(), end - start));
 					}
@@ -276,11 +294,12 @@ fn main(hart_id: usize, dtb: *const u8) {
 		}
 	}
 
-	// Allocate a heap
-	let (address, size) = heap.expect("No address for heap allocation");
-	// SAFETY: The DTB told us this address is valid. We also ensured no existing
-	// memory will be overwritten.
-	let heap = unsafe { alloc::allocators::WaterMark::new(address, size) };
+	// Initialize the memory manager
+	let (address, size) = heap.expect("No memory device (check the DTB!)");
+	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
+	// be overwritten.
+	let mm = NonZeroUsize::new(size / arch::PAGE_SIZE).expect("Memory range is zero-sized");
+	let mm = unsafe { memory::Manager::<MEMORY_MANAGER_MAX_ORDER>::new(address.cast(), mm) };
 
 	// Log some of the properties we just fetched
 	log::info(&["Device model: '", model, "'"]);
@@ -294,7 +313,7 @@ fn main(hart_id: usize, dtb: *const u8) {
 	let start = util::usize_to_string(&mut buf, start, 16, DIGITS).unwrap();
 	let mut buf = [0; DIGITS as usize];
 	let end = util::usize_to_string(&mut buf, end, 16, DIGITS).unwrap();
-	log::info(&["Kernel heap: ", start, " - ", end]);
+	log::info(&["Useable memory range: ", start, " - ", end]);
 
 	io::uart::default(|uart| {
 		use io::Device;

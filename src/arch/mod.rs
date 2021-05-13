@@ -62,6 +62,15 @@ pub trait ID {
 	}
 }
 
+/// A representation of a single memory page.
+// TODO figure out how to set repr align based on a constant
+#[repr(align(4096))]
+pub struct Page {
+	_data: [u8; PAGE_SIZE],
+}
+
+const _PAGE_ALIGN_CHECK: usize = 0 - (PAGE_SIZE - core::alloc::Layout::new::<Page>().align());
+
 pub fn capabilities() -> impl Capabilities {
 	#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 	riscv64::MISA::new()

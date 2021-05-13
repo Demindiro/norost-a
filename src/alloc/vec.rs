@@ -1,7 +1,6 @@
 use super::{RawVec, ReserveError};
 use core::alloc::{AllocError, Allocator, Layout};
 use core::marker::PhantomData;
-use core::{mem, ops};
 /// A common abstraction for `Vec`-like structures (`Vec`, `VecDeque`, ...)
 ///
 /// Note that it *doesn't* drop it's contents when deallocated.
@@ -10,6 +9,7 @@ use core::{mem, ops};
 ///
 /// [std rawvec]: https://github.com/rust-lang/rust/blob/master/library/alloc/src/raw_vec.rs
 use core::ptr::NonNull;
+use core::{mem, ops};
 
 pub struct Vec<T, A>
 where

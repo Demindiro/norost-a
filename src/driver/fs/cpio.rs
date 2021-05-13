@@ -34,13 +34,13 @@
 //! [spec]: https://www.kernel.org/doc/html/latest/driver-api/early-userspace/buffer-format.html
 
 use crate::alloc::{ReserveError, Vec};
-use core::alloc::{Allocator, AllocError};
+use core::alloc::{AllocError, Allocator};
 use core::mem;
 
 /// Structure representing a CPIO archive
 pub struct Archive<'a, A>
 where
-	A: Allocator
+	A: Allocator,
 {
 	/// A list of files present in the archive
 	pub files: Vec<File<'a>, A>,
@@ -126,7 +126,7 @@ pub enum FileError {
 
 impl<'a, A> Archive<'a, A>
 where
-	A: Allocator
+	A: Allocator,
 {
 	/// Parses the CPIO archive data at the given address. If an archive trailer was
 	/// encountered, it'll return early and return a slice to the remainder of the
@@ -136,12 +136,15 @@ where
 		let mut offset = 0;
 		loop {
 			if data.len() < offset {
-				return Err(ArchiveError::FileError(FileError::Truncated, files.len() as u32));
+				return Err(ArchiveError::FileError(
+					FileError::Truncated,
+					files.len() as u32,
+				));
 			}
 			match File::parse(&data[offset..]) {
 				Ok((file, offt)) => {
 					if (file.name == "TRAILER!!!" && file.data.len() == 0) {
-						return Ok((Self { files }, &[]))
+						return Ok((Self { files }, &[]));
 					}
 					offset = (offset + offt + 3) & !3;
 					files.try_push(file)?;
@@ -160,8 +163,7 @@ impl<'a> File<'a> {
 			let header = unsafe { &*(data as *const _ as *const FileHeader) };
 
 			if !(&header.magic[..5] == b"07070" && b"12".contains(&header.magic[5])) {
-				for c in header.magic.iter() {
-				}
+				for c in header.magic.iter() {}
 				return Err(FileError::InvalidMagic);
 			}
 
@@ -202,7 +204,8 @@ impl<'a> File<'a> {
 			if dt.len() < name_size {
 				return Err(FileError::Truncated);
 			}
-			let name = core::str::from_utf8(&dt[..name_size - 1]).map_err(|_| FileError::InvalidFileName)?;
+			let name = core::str::from_utf8(&dt[..name_size - 1])
+				.map_err(|_| FileError::InvalidFileName)?;
 			if data.len() < name_size {
 				return Err(FileError::Truncated);
 			}
@@ -213,16 +216,19 @@ impl<'a> File<'a> {
 			if dt.len() < file_size {
 				return Err(FileError::Truncated);
 			}
-			Ok((Self {
-				inode,
-				permissions: (mode as u16).into(),
-				user_id,
-				group_id,
-				link_count,
-				modification_time,
-				name,
-				data: &dt[..file_size],
-			}, offset + file_size))
+			Ok((
+				Self {
+					inode,
+					permissions: (mode as u16).into(),
+					user_id,
+					group_id,
+					link_count,
+					modification_time,
+					name,
+					data: &dt[..file_size],
+				},
+				offset + file_size,
+			))
 		} else {
 			Err(FileError::Truncated)
 		}
