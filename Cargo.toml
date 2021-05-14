@@ -1,10 +1,8 @@
-[package]
-name = "dux"
-version = "0.1.0"
-authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
-edition = "2018"
+[workspace]
 
-[dependencies]
+members = [
+	"kernel",
+]
 
 
 [profile.dev]
@@ -15,7 +13,3 @@ debug = true
 panic = "abort"
 debug = true
 lto = true
-
-[features]
-dump-dtb = []
-log-allocations = []
