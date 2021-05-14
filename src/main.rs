@@ -9,6 +9,7 @@
 #![feature(const_option)]
 #![feature(const_panic)]
 #![feature(custom_test_frameworks)]
+#![feature(destructuring_assignment)]
 #![feature(dropck_eyepatch)]
 #![feature(inline_const)]
 #![feature(lang_items)]
@@ -27,24 +28,6 @@
 #![feature(link_llvm_intrinsics)]
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
-
-/// The default amount of kernel heap memory for the default allocator.
-// 1 MiB should be plenty for now and probably forever
-const HEAP_MEM_MAX: usize = 0x100_000;
-
-/// The default MAX_ORDER of the memory manager. This is set to 27 which allows
-/// areas up to 512 GiB, or a single "terapage" in RISC-V lingo. This should be
-/// sufficient for a very, very long time.
-///
-/// See [`memory`](crate::memory) for more information.
-///
-/// ## References
-///
-/// Mention of "terapages" can be found in [the RISC-V manual for privileged instructions][riscv],
-/// "Sv48: Page-Based 48-bit Virtual-Memory System", section 4.5.1, page 37.
-///
-/// [riscv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
-const MEMORY_MANAGER_MAX_ORDER: usize = 27;
 
 // TODO read up on the test framework thing. Using macro for now because custom_test_frameworks
 // does something stupid complicated with tokenstreams (I just want to log the function name
@@ -76,9 +59,68 @@ mod sync;
 mod util;
 mod vfs;
 
+use core::cell::UnsafeCell;
 use core::convert::TryInto;
 use core::num::NonZeroUsize;
-use core::{mem, panic, ptr};
+use core::{mem, ops, panic, ptr};
+
+/// The default amount of kernel heap memory for the default allocator.
+// 1 MiB should be plenty for now and probably forever
+const HEAP_MEM_MAX: usize = 0x100_000;
+
+/// The default MAX_ORDER of the memory manager. This is set to 27 which allows
+/// areas up to 512 GiB, or a single "terapage" in RISC-V lingo. This should be
+/// sufficient for a very, very long time.
+///
+/// See [`memory`](crate::memory) for more information.
+///
+/// ## References
+///
+/// Mention of "terapages" can be found in [the RISC-V manual for privileged instructions][riscv],
+/// "Sv48: Page-Based 48-bit Virtual-Memory System", section 4.5.1, page 37.
+///
+/// [riscv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
+const MEMORY_MANAGER_MAX_ORDER: usize = 27;
+
+/// A global reference to the memory manager, of which there can only be one managed by the kernel.
+pub static MEMORY_MANAGER: BootOnceCell<sync::Mutex<memory::Manager<MEMORY_MANAGER_MAX_ORDER>>> =
+	BootOnceCell(UnsafeCell::new(None));
+
+/// A variant of a `OnceCell` that is set during early boot, which means it doesn't check whether
+/// the inner value is set. This technically makes it unsafe, but if the invariant is uphold it _is_
+/// safe, hence the `deref` method is safe to use.
+pub struct BootOnceCell<T>(UnsafeCell<Option<T>>);
+
+impl<T> BootOnceCell<T> {
+	/// Sets the inner value. This should be called only once.
+	///
+	/// ## Safety
+	///
+	/// This method is called once early at boot time.
+	#[inline]
+	#[track_caller]
+	unsafe fn __init(&self, value: T) {
+		debug_assert!(
+			self.0.get().as_ref().is_none(),
+			"Inner value is already set"
+		);
+		self.0.get().write(Some(value));
+	}
+}
+
+impl<T> ops::Deref for BootOnceCell<T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		// SAFETY: if the `init` method was called, the inner value is safe to dereference.
+		unsafe {
+			debug_assert!(self.0.get().as_ref().is_some(), "Inner value isn't set");
+			(&*self.0.get()).as_ref().unwrap_unchecked()
+		}
+	}
+}
+
+unsafe impl<T> Sync for BootOnceCell<T> {}
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
@@ -300,6 +342,10 @@ fn main(hart_id: usize, dtb: *const u8) {
 	// be overwritten.
 	let mm = NonZeroUsize::new(size / arch::PAGE_SIZE).expect("Memory range is zero-sized");
 	let mm = unsafe { memory::Manager::<MEMORY_MANAGER_MAX_ORDER>::new(address.cast(), mm) };
+	// SAFETY: the init function hasn't been called yet.
+	unsafe {
+		MEMORY_MANAGER.__init(sync::Mutex::new(mm));
+	}
 
 	// Log some of the properties we just fetched
 	log::info(&["Device model: '", model, "'"]);
@@ -346,12 +392,17 @@ fn main(hart_id: usize, dtb: *const u8) {
 #[cfg(test)]
 mod test {
 	use super::*;
+	use core::num::NonZeroUsize;
+	use core::ptr::NonNull;
 
 	#[no_mangle]
 	#[cfg(test)]
 	fn main() {
 		test_main();
 	}
+
+	const MEMORY_MANAGER_ADDRESS: NonNull<arch::Page> =
+		unsafe { NonNull::new_unchecked(0x8100_0000 as *mut _) };
 
 	pub(super) fn runner(tests: &[&dyn Fn()]) {
 		let mut buf = [0; 32];
@@ -362,6 +413,18 @@ mod test {
 			if tests.len() == 1 { " test" } else { " tests" },
 		]);
 		for f in tests {
+			// Reinitialize the memory manager each time in case of leaks or something else
+			// overwriting it's state.
+			// Incredibly unsafe, but w/e.
+			unsafe {
+				MEMORY_MANAGER
+					.0
+					.get()
+					.write(Some(sync::Mutex::new(memory::Manager::new(
+						MEMORY_MANAGER_ADDRESS,
+						NonZeroUsize::new(256).unwrap(),
+					))));
+			}
 			f();
 		}
 		log::info(&["Done"]);

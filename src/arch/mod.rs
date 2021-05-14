@@ -7,6 +7,9 @@ use riscv::rv64 as riscv64;
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub use riscv::PAGE_SIZE;
 
+/// A bitmask that covers the lower zeroed bits of an aligned page.
+pub const PAGE_MASK: usize = PAGE_SIZE - 1;
+
 use crate::{log, util};
 use core::{mem, ptr};
 

@@ -165,9 +165,9 @@ where
 			}
 			*areas[i].buddies_state.first_mut().unwrap() = 1;
 			if end.as_ptr() as usize & (PAGE_SIZE << i) > 0 {
-				end.cast::<FreeArea>().as_ptr().write(FreeArea {
-					next: None,
-				});
+				end.cast::<FreeArea>()
+					.as_ptr()
+					.write(FreeArea { next: None });
 				count -= area_size;
 				areas[i].next = Some(end.cast());
 				// Set the first bit to 1 to pretend its buddy is allocated.
@@ -193,7 +193,12 @@ where
 			let order_size = 1 << order;
 			if order_size <= count {
 				let area = end.cast();
-				ptr::write(area.as_ptr(), FreeArea { next: areas[order].next });
+				ptr::write(
+					area.as_ptr(),
+					FreeArea {
+						next: areas[order].next,
+					},
+				);
 				areas[order].next = Some(area);
 				count -= order_size;
 				end = NonNull::new_unchecked(end.as_ptr().add(order_size));
@@ -214,7 +219,6 @@ where
 			// Make the caller aware that its request will never succeed.
 			return Err(AllocateError::OrderTooLarge);
 		}
-
 
 		for o in order..=O {
 			if let Some(mut area) = self.free_areas[o].next {
@@ -277,12 +281,9 @@ where
 		let area_end = area.as_ptr().wrapping_add(1 << order) as usize;
 		let self_start = self.start.as_ptr() as usize;
 		let self_end = self.end.as_ptr() as usize;
-		if !(self_start <= area_start && area_start <= self_end) {
-		}
-		if !(self_start <= area_end && area_end <= self_end) {
-		}
-		if !(area_start < area_end) {
-		}
+		if !(self_start <= area_start && area_start <= self_end) {}
+		if !(self_start <= area_end && area_end <= self_end) {}
+		if !(area_start < area_end) {}
 		if !(area_start < area_end) || !(self_start <= area_start && area_end <= self_end) {
 			return Err(DeallocateError::OutOfBounds);
 		}
@@ -349,7 +350,6 @@ where
 
 		let bit_offset = offset & USIZE_MASK;
 		let usize_offset = offset / USIZE_BITS;
-
 
 		(usize_offset, 1 << bit_offset)
 	}

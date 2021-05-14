@@ -33,10 +33,11 @@
 
 use super::cpio;
 use crate::alloc::{Box, Vec};
-use crate::log;
+use crate::arch::Page;
+use crate::{arch, log, MEMORY_MANAGER};
 use core::alloc::Allocator;
-use core::mem;
-use core::pin::Pin;
+use core::ptr::NonNull;
+use core::{mem, ptr};
 
 /// Structure representing an initramfs block
 // TODO M should be a special sort of "page allocator". It must NOT implement core::alloc::Allocator,
@@ -71,15 +72,20 @@ where
 	A: Allocator,
 {
 	/// A regular file
-	File(File),
+	File(File<A>),
 	/// Another branch, i.e. a directory.
 	Directory(Vec<Node<A>, A>),
 }
 
 /// Structure representing a regular file
-struct File {
-	/// The data of the file.
-	data: (), /* TODO structure describing a range of memory pages */
+struct File<A>
+where
+	A: Allocator,
+{
+	/// The total size of the file in bytes.
+	size: usize,
+	/// The data of the file, which is stored in a number of memory pages.
+	pages: Box<[NonNull<Page>], A>,
 }
 
 /// Enum representing possible errors when trying to unpack a CPIO archive.
@@ -93,6 +99,7 @@ pub enum Error {
 	/// /foo.txt/bar.txt  <-- file inside file, which isn't possible
 	/// ```
 	FileTreatedAsDirectory,
+	MemoryManagerError(crate::memory::AllocateError),
 }
 
 impl<A> InitRAMFS<A>
@@ -100,6 +107,8 @@ where
 	A: Allocator + Copy,
 {
 	/// Attempts to create a filesystem from the given CPIO data.
+	// FIXME this leaks memory pages if an error occurs (which should generally not be an issue
+	// considering the boot process can't recover from this but still).
 	pub fn parse(cpio_data: &[u8], allocator: A) -> Result<Self, Error> {
 		let cpio = cpio::Archive::parse(cpio_data, allocator).map_err(Error::Archive)?;
 		let mut root = Vec::new_in(allocator);
@@ -109,6 +118,7 @@ where
 			loop {
 				let comp = iter.next().unwrap();
 				if iter.peek().is_some() {
+					// Insert or get a directory node.
 					// find() causes some complaints about mutable borrows, so use position and index
 					// (which should optimize out any bounds checks anyways)
 					vec = if let Some(i) = vec.iter_mut().position(|n| n.name.as_ref() == comp) {
@@ -119,27 +129,71 @@ where
 					} else {
 						vec.try_push(Node {
 							name: Box::try_from_str(comp, allocator)
-								.ok()
-								.ok_or(Error::AllocError)?,
+								.map_err(|_| Error::AllocError)?,
 							permissions: file.permissions,
 							data: Branch::Directory(Vec::new_in(allocator)),
 						})
 						.map(|d| d.data.as_directory_mut().unwrap())
-						.ok()
-						.ok_or(Error::AllocError)?
+						.map_err(|_| Error::AllocError)?
 					};
 				} else {
+					// Copy the data to memory pages.
+					let pages = (file.data.len() + arch::PAGE_MASK) & !arch::PAGE_MASK;
+					let pages = pages / arch::PAGE_SIZE;
+					let mut pages = Box::try_new_uninit_slice_in(pages, allocator)
+						.map_err(|_| Error::AllocError)?;
+					let mut data = file.data;
+					if pages.len() > 0 {
+						for i in 0..pages.len() - 1 {
+							let page = MEMORY_MANAGER
+								.lock()
+								.allocate(0)
+								.map_err(Error::MemoryManagerError)?;
+							// SAFETY: the page we received points to valid memory and data is at
+							// least one page size large.
+							debug_assert!(data.len() >= arch::PAGE_SIZE);
+							unsafe {
+								ptr::copy_nonoverlapping(
+									data.as_ptr(),
+									page.cast().as_ptr(),
+									arch::PAGE_SIZE,
+								);
+							}
+							data = &data[arch::PAGE_SIZE..];
+							pages[i].write(page);
+						}
+						let page = MEMORY_MANAGER
+							.lock()
+							.allocate(0)
+							.map_err(Error::MemoryManagerError)?;
+						// SAFETY: the page we received points to valid memory and data is at
+						// least one page size large.
+						debug_assert!(data.len() < arch::PAGE_SIZE);
+						unsafe {
+							ptr::copy_nonoverlapping(
+								data.as_ptr(),
+								page.cast().as_ptr(),
+								data.len(),
+							);
+						}
+						*pages.last_mut().unwrap().write(page);
+					}
+					// SAFETY: all pages are initialized.
+					let pages = unsafe { pages.assume_init() };
+					// Insert a file node.
 					vec.try_push(Node {
-						name: Box::try_from_str(comp, allocator)
-							.ok()
-							.ok_or(Error::AllocError)?,
+						name: Box::try_from_str(comp, allocator).map_err(|_| Error::AllocError)?,
 						permissions: file.permissions,
-						data: Branch::File(File { data: () }),
+						data: Branch::File(File {
+							size: file.data.len(),
+							pages,
+						}),
 					});
 					break;
 				}
 			}
 		}
+
 		Ok(Self { root })
 	}
 }
@@ -163,29 +217,54 @@ where
 			None
 		}
 	}
+
+	fn as_file(&self) -> Option<&File<A>> {
+		if let Self::File(f) = self {
+			Some(f)
+		} else {
+			None
+		}
+	}
 }
 
 #[cfg(test)]
 mod test {
 	use super::*;
 	use crate::alloc::allocators::WaterMark;
-	use crate::log;
+	use crate::{log, util};
 
-	const HEAP_ADDRESS: *mut u8 = 0x8100_0000 as *mut _;
 	const ARCHIVE: &[u8] = include_bytes!("../../../initfs.cpio");
 
 	#[test_case]
 	test!(list_tree() {
-		let heap = unsafe { WaterMark::new(core::ptr::NonNull::new(HEAP_ADDRESS).unwrap(), 0x10_000) };
+		let heap = MEMORY_MANAGER.lock().allocate(7).unwrap(); // Assume 512 page size is minimum.
+		let heap = unsafe { WaterMark::new(heap.cast(), 0x10_000) };
 		let ramfs = InitRAMFS::parse(ARCHIVE, &heap).map_err(|_| ()).unwrap();
 		fn print<'a>(node: &'a Node<&'a WaterMark>, buf: &mut [&'a str; 64], level: usize) {
 			buf[level] = node.name.as_ref();
-			buf[level + 1] = if node.data.as_directory().is_some() { "/" } else { "" };
-			log::debug(&buf[..level + 2]);
-			if let Some(v) = node.data.as_directory() {
-				buf[level] = "  ";
-				for node in v.iter() {
-					print(node, buf, level + 1);
+			match &node.data {
+				Branch::File(f) => {
+					buf[level + 1] = "\t\t(size: ";
+					// I can't be fucked dealing with this
+					// Rust, please recognize that I am clearing the references afterwards. Thank you.
+					let mut a = [0; 20];
+					buf[level + 2] = unsafe { core::mem::transmute(util::usize_to_string(&mut a, f.size, 10, 1).unwrap()) };
+					buf[level + 3] = ", pages: ";
+					let mut a = [0; 20];
+					buf[level + 4] = unsafe { core::mem::transmute(util::usize_to_string(&mut a, f.pages.len(), 10, 1).unwrap()) };
+					buf[level + 5] = ")";
+					log::debug(&buf[..level + 6]);
+					// Poof! Gone! Rust pls.
+					buf[level + 2] = "";
+					buf[level + 4] = "";
+				}
+				Branch::Directory(d) => {
+					buf[level + 1] = "/";
+					log::debug(&buf[..level + 2]);
+					buf[level] = "  ";
+					for node in d.iter() {
+						print(node, buf, level + 1);
+					}
 				}
 			}
 		}

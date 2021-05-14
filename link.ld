@@ -6,7 +6,7 @@ MEMORY
    RAM (rwx) : ORIGIN = 0x80000000, LENGTH = 32M
 }
 
-STACK_SIZE = 8K;
+STACK_SIZE = 64K;
 
 ENTRY(_start)
 
