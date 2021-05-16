@@ -13,6 +13,11 @@ pub mod rv64;
 use crate::{log, util};
 use core::{array, mem};
 
+/// Initialize arch-specific structures such as the interrupt table
+pub fn init() {
+	trap::init();
+}
+
 /// The size of a single memory page, which is 4KB for all RISC-V architectures.
 pub const PAGE_SIZE: usize = 4096;
 
@@ -403,5 +408,128 @@ impl super::ID for ID {
 	fn hart(&self) -> usize {
 		// SAFETY: accessing the hartid is safe.
 		unsafe { csr!(MHARTID) }
+	}
+}
+
+/// Module functions pertaining to setting up traps.
+mod trap {
+	use super::csr;
+	use crate::syscall;
+
+	/// Initialize the trap CSR and the interrupt table
+	pub fn init() {
+		#[naked]
+		unsafe fn handler() {
+			asm!("
+				.align	4
+
+				# Check if it's a syscall. In the case of a syscall, we can skip saving all
+				# caller-saved registers.
+				csrrw	t0, {mcause}, t0
+				li		t1, 9		# S-mode
+				beq		t0, t1, 0f
+				li		t1, 11		# M-mode
+				beq		t0, t1, 0f
+				li		t1, 8		# U-mode
+				beq		t0, t1, 0f
+
+				addi	sp, sp, -{regbytes} * 16
+				# Restore the register we just overwrote.
+				csrrw	t0, {mcause}, t0
+				# Save only registers that are normally caller-saved since we will immediately
+				# call after this. The callee will preserve the remaining registers for us.
+				sd		ra, 0 * {regbytes}(sp)
+				sd		t0, 1 * {regbytes}(sp)
+				sd		t1, 2 * {regbytes}(sp)
+				sd		t2, 3 * {regbytes}(sp)
+				sd		t3, 4 * {regbytes}(sp)
+				sd		t4, 5 * {regbytes}(sp)
+				sd		t5, 6 * {regbytes}(sp)
+				sd		t6, 7 * {regbytes}(sp)
+				sd		a0, 8 * {regbytes}(sp)
+				sd		a1, 9 * {regbytes}(sp)
+				sd		a2, 10 * {regbytes}(sp)
+				sd		a3, 11 * {regbytes}(sp)
+				sd		a4, 12 * {regbytes}(sp)
+				sd		a5, 13 * {regbytes}(sp)
+				sd		a6, 14 * {regbytes}(sp)
+				sd		a7, 15 * {regbytes}(sp)
+				# TODO implement exception table somewhere
+			2:
+				wfi
+				j		2b
+				ld		ra, 0 * {regbytes}(sp)
+				ld		t0, 1 * {regbytes}(sp)
+				ld		t1, 2 * {regbytes}(sp)
+				ld		t2, 3 * {regbytes}(sp)
+				ld		t3, 4 * {regbytes}(sp)
+				ld		t4, 5 * {regbytes}(sp)
+				ld		t5, 6 * {regbytes}(sp)
+				ld		t6, 7 * {regbytes}(sp)
+				ld		a0, 8 * {regbytes}(sp)
+				ld		a1, 9 * {regbytes}(sp)
+				ld		a2, 10 * {regbytes}(sp)
+				ld		a3, 11 * {regbytes}(sp)
+				ld		a4, 12 * {regbytes}(sp)
+				ld		a5, 13 * {regbytes}(sp)
+				ld		a6, 14 * {regbytes}(sp)
+				ld		a7, 15 * {regbytes}(sp)
+				addi	sp, sp, {regbytes} * 16
+				mret
+
+			0:
+				addi	sp, sp, -1 * {regbytes}
+
+				# Skip the ecall instruction, which is always 4 bytes long (there is no
+				# compressed version of it).
+				csrr	t0, {mepc}
+				addi	t0, t0, 4
+				csrw	{mepc}, t0
+
+				# Check if the syscall exists, otherwise return the 'no syscall' error code
+				li		t1, {max_syscalls}
+				bgeu	a7, t1, 1f
+
+				# Look up the entry in the call table
+				la		t0, {syscall_table}
+				slli	a7, a7, {regorder}
+				add		t0, t0, a7
+				ld		t0, 0(t0)
+
+				# Perform the call
+				sd		ra, 0 * {regbytes}(sp)
+				jalr	ra, t0
+				ld		ra, 0 * {regbytes}(sp)
+
+			3:
+				addi	sp, sp, 1 * {regbytes}
+				mret
+
+			1:
+				li		a0, {err_nocall}
+				# This is slightly more compact. It is slower, but that's fine for an error path
+				j		3b
+			",
+			regbytes = const 8,
+			regorder = const 3, // 8 == 1 << 3
+			mepc = const csr::MEPC,
+			mcause = const csr::MCAUSE,
+			max_syscalls = const syscall::TABLE_LEN,
+			syscall_table = sym syscall::TABLE,
+			err_nocall = const syscall::Status::NoCall as usize,
+			options(noreturn),
+			);
+		}
+		unsafe {
+			asm!("
+					la		t0, {func}
+					csrrw	zero, {csr}, t0
+				",
+				func = sym handler,
+				csr = const csr::MTVEC,
+				lateout("t0") _,
+			);
+		}
+		crate::log::info(&["Set up trap handler"]);
 	}
 }

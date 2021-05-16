@@ -8,10 +8,12 @@
 #![feature(const_evaluatable_checked)]
 #![feature(const_option)]
 #![feature(const_panic)]
+#![feature(const_raw_ptr_to_usize_cast)]
 #![feature(custom_test_frameworks)]
 #![feature(destructuring_assignment)]
 #![feature(dropck_eyepatch)]
 #![feature(inline_const)]
+#![feature(global_asm)]
 #![feature(lang_items)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_extra)]
@@ -23,6 +25,7 @@
 #![feature(panic_info_message)]
 #![feature(ptr_metadata)]
 #![feature(ptr_internals)]
+#![feature(pub_macro_rules)]
 #![feature(raw)]
 #![feature(slice_ptr_len)]
 #![feature(link_llvm_intrinsics)]
@@ -52,6 +55,7 @@ mod alloc;
 mod arch;
 mod driver;
 mod elf;
+mod syscall;
 mod io;
 mod log;
 mod memory;
@@ -66,7 +70,6 @@ use core::num::NonZeroUsize;
 use core::{mem, ops, panic, ptr};
 
 /// The default amount of kernel heap memory for the default allocator.
-// 1 MiB should be plenty for now and probably forever
 const HEAP_MEM_MAX: usize = 0x100_000;
 
 /// The default MAX_ORDER of the memory manager. This is set to 27 which allows
@@ -362,6 +365,9 @@ fn main(hart_id: usize, dtb: *const u8) {
 	let end = util::usize_to_string(&mut buf, end, 16, DIGITS).unwrap();
 	log::info(&["Useable memory range: ", start, " - ", end]);
 
+	// Initialize trap table now that the most important setup is done.
+	arch::init();
+
 	io::uart::default(|uart| {
 		use io::Device;
 		let _ = uart.write(b"Greetings!\n");
@@ -413,6 +419,7 @@ mod test {
 			num,
 			if tests.len() == 1 { " test" } else { " tests" },
 		]);
+		arch::init();
 		for f in tests {
 			// Reinitialize the memory manager each time in case of leaks or something else
 			// overwriting it's state.

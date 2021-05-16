@@ -23,6 +23,14 @@ pub const PAGE_MASK: usize = PAGE_SIZE - 1;
 use crate::{log, util};
 use core::{mem, ptr};
 
+/// Initialize arch-specific structures, such as the interrupt table
+pub fn init() {
+	#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+	riscv::init();
+	#[cfg(not(any(target_arch = "riscv64", target_arch = "riscv32")))]
+	compile_error!("No arch init function defined");
+}
+
 /// A structure that encodes the JEDEC in a somewhat sensible way
 pub struct JEDEC {
 	/// The amount of continuation codes.

@@ -300,7 +300,8 @@ where
 	pub unsafe fn execute(&self) {
 		let address = self.entry - self.segments[0].virtual_address;
 		let address = self.segments[0].page.cast::<u8>().as_ptr().add(address);
-		asm!("jalr ra,0({0})", in(reg) address);
+		let func: unsafe extern "C" fn() = unsafe { mem::transmute(address) };
+		func();
 	}
 }
 
