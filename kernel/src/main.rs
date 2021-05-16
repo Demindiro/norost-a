@@ -37,7 +37,7 @@ macro_rules! test {
 	($name:ident() $code:block) => {
 		#[test_case]
 		fn $name() {
-			log::info(&[
+			crate::log::info(&[
 				"  testing ",
 				concat!(module_path!(), "::", stringify!($name)),
 			]);
@@ -51,6 +51,7 @@ macro_rules! test {
 mod alloc;
 mod arch;
 mod driver;
+mod elf;
 mod io;
 mod log;
 mod memory;

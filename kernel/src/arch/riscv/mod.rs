@@ -16,6 +16,33 @@ use core::{array, mem};
 /// The size of a single memory page, which is 4KB for all RISC-V architectures.
 pub const PAGE_SIZE: usize = 4096;
 
+/// Flags pertaining to ELF files.
+///
+/// ## References
+///
+/// [RISC-V ELF psABI specification][elf]
+///
+/// [elf]: https://github.com/riscv/riscv-elf-psabi-doc/blob/master/riscv-elf.md#elf-object-file
+pub mod elf {
+	/// The value of the machine byte for this architecture.
+	pub const MACHINE: u16 = 0xf3;
+	/// Flag indicating whether ELF binaries target the C ABI (i.e. support C extension).
+	pub const RVC: u32 = 0x0001;
+	/// Flag indicating no support for the floating point ABI.
+	pub const FLOAT_ABI_SOFT: u32 = 0x0000;
+	/// Flag indicating support for the single precision floating point ABI.
+	pub const FLOAT_ABI_SINGLE: u32 = 0x0002;
+	/// Flag indicating support for the double precision floating point ABI.
+	pub const FLOAT_ABI_DOUBLE: u32 = 0x0004;
+	/// Flag indicating support for the quad precision floating point ABI.
+	pub const FLOAT_ABI_QUAD: u32 = 0x0006;
+	/// Flag indicating whether the E ABI is targeted (i.e. RV32E ISA).
+	pub const RVE: u32 = 0x0008;
+	/// Flag indicating whether the binary requires RVTSO.
+	// TODO brief description of RVTSO
+	pub const TSO: u32 = 0x0008;
+}
+
 /// A wrapper around the contents of the `misa` register, which describes the base ISA and it's
 /// supported extensions.
 pub struct MISA;

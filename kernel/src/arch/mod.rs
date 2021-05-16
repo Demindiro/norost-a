@@ -7,6 +7,16 @@ use riscv::rv64 as riscv64;
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub use riscv::PAGE_SIZE;
 
+/// The ELF type of this architecture.
+#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+pub use riscv::elf::MACHINE as ELF_MACHINE;
+
+/// All supported ELF flags.
+// FIXME we need a way to detect individual features at compile time.
+// Alternatively, we make this a static and use the MISA register.
+#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+pub const ELF_FLAGS: u32 = riscv::elf::RVC | riscv::elf::FLOAT_ABI_DOUBLE;
+
 /// A bitmask that covers the lower zeroed bits of an aligned page.
 pub const PAGE_MASK: usize = PAGE_SIZE - 1;
 
