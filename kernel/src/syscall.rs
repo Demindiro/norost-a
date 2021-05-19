@@ -19,7 +19,10 @@ pub struct Return(Status, usize);
 pub const TABLE_LEN: usize = 2;
 
 /// Table with all syscalls.
-pub static TABLE: [Syscall; TABLE_LEN] = [
+#[allow(non_upper_case_globals)]
+#[no_mangle]
+//pub static TABLE: [Syscall; TABLE_LEN] = [
+pub static syscall_table: [Syscall; TABLE_LEN] = [
 	sys::read,
 	sys::write,
 ];
