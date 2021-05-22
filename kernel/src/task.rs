@@ -18,8 +18,9 @@
 //! it.
 
 use crate::arch;
-use crate::memory::AllocatorError;
+use crate::memory::AllocateError;
 use crate::MEMORY_MANAGER;
+use core::sync::atomic;
 use core::ptr::NonNull;
 
 /// The fixed amount of page mappings. Some are mapped inside the `Task` structure itself to
@@ -31,6 +32,15 @@ const FIXED_PAGE_MAP_SIZE: usize = 16;
 /// The order (i.e. size) of each `Task` structure.
 const TASK_PAGE_ORDER: usize = 1;
 
+/// A global counter for assigning Task IDs.
+// TODO handle wrap around + try to keep TIDs low
+static TASK_ID_COUNTER: atomic::AtomicU32 = atomic::AtomicU32::new(0);
+
+/// A wrapper around a task pointer.
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct Task(NonNull<TaskData>);
+
 /// A single task.
 ///
 /// Tasks are implemented as a circular linked list for a few reasons:
@@ -40,92 +50,129 @@ const TASK_PAGE_ORDER: usize = 1;
 /// - It is very easy to make it space-efficient if the number of tasks is low.
 /// - It goes on and on and on ... because it is circular. No need to go back to a "starting"
 ///   pointer or whatever.
-struct Task {
+#[repr(C)]
+pub struct TaskData {
+	/// The register state of this task. Needed for context switches.
+	register_state: arch::RegisterState,
+	/// A pointer to some stack space for use with syscalls.
+	stack: NonNull<arch::Page>,
 	/// A pointer to the next task. It points to itself if there is only one task.
-	next_task: NonNull<Task>,
+	next_task: Task,
 	/// A pointer to the previous task or itself, which is needed to efficiently remove tasks.
-	prev_task: NonNull<Task>,
+	prev_task: Task,
 	/// The ID of this task.
 	id: u32,
 	/// A fixed array of the start addresses of allocated memory pages.
 	///
 	/// A value of `None` means there is no entry **and** that it is the last entry.
-	page_addresses: [Option<NonNull<Page>>; FIXED_PAGE_MAP_SIZE],
+	page_addresses: [Option<NonNull<arch::Page>>; FIXED_PAGE_MAP_SIZE],
 	/// The order (i.e. size) of each page map.
 	page_orders: [u8; FIXED_PAGE_MAP_SIZE],
 	/// A pointer to another page with additional page mappings. May be `None` if there are no
 	/// extra mappings.
-	extra_pages: Option<NonNull<Page>>,
-	/// A structure to hold register state. Needed for context switches.
-	register_state: arch::RegisterState,
-}
-
-/// An executor.
-struct Executor {
-	/// The list of tasks assigned to this executor. May be `None` if there are no tasks.
-	tasks: Option<NonNull<Task>>,
+	extra_pages: Option<NonNull<arch::Page>>,
 }
 
 struct NoTasks;
 
 impl Task {
-	/// Create a new empty task
-	fn new() -> Result<Self, AllocatorError> {
+	/// Create a new empty task.
+	pub fn new() -> Result<Self, AllocateError> {
 		let len = arch::PAGE_SIZE << TASK_PAGE_ORDER;
 		let pages = MEMORY_MANAGER.lock().allocate(TASK_PAGE_ORDER)?;
-		pages.cast::<Task>().as_ptr().write(Task {
-			next_task: pages.cast(),
-			prev_task: pages.cast(),
-			id: 0,
-			page_addresses: [None; FIXED_PAGE_MAP_SIZE],
-			page_orders: [0; FIXED_PAGE_MAP_SIZE],
-			extra_pages: None,
-		});
-	}
-}
-
-impl Executor {
-	/// Begins running the executor. This will not return.
-	fn run() -> ! {
-		loop {
-			if let Some(curr) = self.tasks {
-				
-			} else {
-				crate::powerstate::halt();
-			}
+		let stack = MEMORY_MANAGER.lock().allocate(0)?;
+		let task_data = pages.cast::<TaskData>();
+		let task = Self(task_data);
+		// SAFETY: task is valid
+		unsafe {
+			task_data.as_ptr().write(TaskData {
+				register_state: Default::default(),
+				stack,
+				next_task: task.clone(),
+				prev_task: task.clone(),
+				id: TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed),
+				page_addresses: [None; FIXED_PAGE_MAP_SIZE],
+				page_orders: [0; FIXED_PAGE_MAP_SIZE],
+				extra_pages: None,
+			});
 		}
+		Ok(task)
+	}
+
+	/// Add a memory mapping to this task.
+	pub fn add_mapping(&self, page: NonNull<arch::Page>, order: u8) -> Result<(), AllocateError> {
+		// FIXME
+		self.inner().page_addresses[0] = Some(page);
+		self.inner().page_orders[0] = order;
+		Ok(())
+	}
+
+	/// Set the program counter of this task to the given address.
+	pub fn set_pc(&self, address: *const ()) {
+		self.inner().register_state.set_pc(address);
 	}
 
 	/// Begin executing the next task.
-	fn next() {
-		
+	pub fn next(self) -> ! {
+		let task = self.inner().next_task.clone();
+		crate::log::debug_str("NEXT");
+		crate::log::debug_usize("tid", task.id() as usize, 10);
+		crate::log::debug_usize("pc", task.inner().register_state.pc as usize, 16);
+		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
+		unsafe { arch::trap_start_task(task) }
 	}
 
-	/// Insert a new task right after the current one.
-	///
-	/// ## Safety
-	///
-	/// The task must be valid and not already in use by other executors.
-	unsafe fn insert(&mut self, task: NonNull<Task>) {
-		if let Some(curr) = self.tasks {
-			let next = curr.next_task;
-			task.prev_task = curr;
-			task.next_task = next;
-			curr.next_task = task;
-			next.prev_task = task;
-		} else {
-			self.tasks = Some(task);
+	/// Insert a new task right after the current one. This removes it from any other task lists.
+	pub fn insert(&self, mut task: Task) {
+		unsafe {
+			// Remove from current list
+			task.inner().prev_task.inner().next_task = task.inner().next_task.clone();
+			task.inner().next_task.inner().prev_task = task.inner().prev_task.clone();
+			// Insert in new list
+			let prev = self.inner().prev_task.clone();
+			let next = self.inner().next_task.clone();
+			task.inner().prev_task = prev.clone();
+			task.inner().next_task = next.clone();
+			prev.inner().next_task = task.clone();
+			next.inner().prev_task = task;
 		}
 	}
 
-	/// Destroy the current task
+	/// Return the ID of this task
+	pub fn id(&self) -> u32 {
+		self.inner().id
+	}
+
+	fn inner<'a>(&'a self) -> &'a mut TaskData {
+		// SAFETY: The task has been safely initialized.
+		unsafe { self.0.clone().as_mut() }
+	}
+}
+
+/// Begin executing the next task.
+// TODO figure out how to get this to work in `impl`s
+#[export_name = "executor_next_task"]
+#[linkage = "external"]
+extern "C" fn next(exec: Task) -> ! {
+	exec.next()
+}
+
+/*
+impl Executor {
+	/// Destroy this task, removing it from the list it is part of.
 	fn destroy(&mut self) -> Result<(), NoTasks> {
-		if let Some(t) = self.tasks {
-			if t == t.next_task {
+		if let Some(mut t) = self.tasks {
+			// SAFETY: the task is valid.
+			let tr = unsafe { t.as_mut() };
+			if t == tr.next_task {
 				self.tasks = None;
 			} else {
-				t.prev_task.next_task = t.next_task;
-				t.next_task.prev_task = t.prev_task;
+				// SAFETY: the tasks are valid and they don't alias `tr`
+				// next_task and prev_task may alias each other, but with
+				// scoping it is not an issue (i.e. there are no two mutable
+				// references to the same struct simultaneously).
+				unsafe { tr.prev_task.as_mut().next_task = tr.next_task };
+				unsafe { tr.next_task.as_mut().prev_task = tr.prev_task };
 			}
 			// FIXME free it
 			Ok(())
@@ -134,3 +181,4 @@ impl Executor {
 		}
 	}
 }
+*/

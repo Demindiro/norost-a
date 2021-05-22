@@ -15,6 +15,7 @@
 #![feature(inline_const)]
 #![feature(global_asm)]
 #![feature(lang_items)]
+#![feature(linkage)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_uninit_array)]
@@ -61,6 +62,7 @@ mod log;
 mod memory;
 mod powerstate;
 mod sync;
+mod task;
 mod util;
 mod vfs;
 

@@ -10,8 +10,35 @@
 
 pub mod rv64;
 
+/// Structure used to save register state
+#[repr(C)]
+pub struct RegisterState {
+	/// The program counter state.
+	pub pc: *const (),
+	/// All integer registers except `x0`
+	pub x: [usize; 31],
+	/// All FP registers
+	pub f: [usize; 32],
+}
+impl RegisterState {
+	/// Sets the program counter to the given address.
+	#[inline(always)]
+	pub fn set_pc(&mut self, address: *const ()) {
+		self.pc = address;
+	}
+}
+impl Default for RegisterState {
+	fn default() -> Self {
+		Self {
+			x: [0; 31],
+			pc: ptr::null(),
+			f: [0; 32],
+		}
+	}
+}
+
 use crate::{log, util};
-use core::{array, mem};
+use core::{array, mem, ptr};
 
 /// Initialize arch-specific structures such as the interrupt table
 pub fn init() {

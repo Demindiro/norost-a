@@ -11,6 +11,10 @@ pub use riscv::PAGE_SIZE;
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub use riscv::elf::MACHINE as ELF_MACHINE;
 
+#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+pub use riscv::RegisterState;
+
+
 /// All supported ELF flags.
 // FIXME we need a way to detect individual features at compile time.
 // Alternatively, we make this a static and use the MISA register.
@@ -20,8 +24,20 @@ pub const ELF_FLAGS: u32 = riscv::elf::RVC | riscv::elf::FLOAT_ABI_DOUBLE;
 /// A bitmask that covers the lower zeroed bits of an aligned page.
 pub const PAGE_MASK: usize = PAGE_SIZE - 1;
 
-use crate::{log, util};
+use crate::{log, task, util};
 use core::{mem, ptr};
+
+extern "C" {
+	/// Saves the registers of the given task and begins running the next task.
+	///
+	/// ## Safety
+	///
+	/// `pc` in the `registers` must be valid.
+	pub fn trap_next_task(task: crate::task::Task) -> !;
+
+	/// Begins running the given task.
+	pub fn trap_start_task(task: crate::task::Task) -> !;
+}
 
 /// Initialize arch-specific structures, such as the interrupt table
 pub fn init() {

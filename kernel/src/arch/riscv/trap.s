@@ -73,44 +73,173 @@
 .equ		DCSR,			0x7b0
 .equ		DPC,			0x7b1
 
-.equ		SYSCALL_MAX,			2
+.equ		SYSCALL_MAX,			8
 .equ		SYSCALL_ERR_NOCALL, 	1
 
 .globl trap_handler
 .globl trap_init
+.globl trap_stop_task
+.globl trap_start_task
 
 .section .text
 
+	.balign 4	# 0
+interrupt_table:
+	jal		zero, trap_handler
+	.balign 4	# 1
+	ret
+	.balign 4	# 2
+	ret
+	.balign 4	# 3
+	ret
+	.balign 4	# 4
+	ret
+	.balign 4	# 5
+	ret
+	.balign 4	# 6
+	ret
+	.balign 4	# 7
+	ret
+	.balign 4	# 8
+	ret
+	.balign 4	# 9
+	ret
+	.balign 4	# 10
+	ret
+	.balign 4	# 11
+	ret
+	.balign 4	# 12
+	ret
+	.balign 4	# 13
+	ret
+	.balign 4	# 14
+	ret
+	.balign 4	# 15
+	ret
+
+	.balign 4	# 0
+sync_trap_table:
+	ret
+	.balign 4	# 1
+	ret
+	.balign 4	# 2
+	ret
+	.balign 4	# 3
+	ret
+	.balign 4	# 4
+	ret
+	.balign 4	# 5
+	ret
+	.balign 4	# 6
+	ret
+	.balign 4	# 7
+	ret
+	.balign 4	# 8
+	jal		trap_syscall
+	.balign 4	# 9
+	jal		trap_syscall
+	.balign 4	# 10
+	ret
+	.balign 4	# 11
+	jal		trap_syscall
+	.balign 4	# 12
+	ret
+	.balign 4	# 13
+	ret
+	.balign 4	# 14
+	ret
+	.balign 4	# 15
+	ret
+	
+
 ## Default handler for traps
 trap_handler:
-	.align	4
-	# Check if it's a syscall. In the case of a syscall, we can skip saving all
-	# caller-saved registers.
-	csrrw	t0, MCAUSE, t0
-	li		t1, 9		# S-mode
-	beq		t0, t1, 0f
-	li		t1, 11		# M-mode
-	beq		t0, t1, 0f
-	li		t1, 8		# U-mode
-	beq		t0, t1, 0f
-
-	addi	sp, sp, -REGBYTES * 16
-	# Restore the register we just overwrote.
-	csrrw	t0, MCAUSE, t0
-	# Save only registers that are normally caller-saved since we will immediately
-	# call after this. The callee will preserve the remaining registers for us.
-	save_caller_registers sp
-
-	# TODO implement exception table somewhere
-2:
-	wfi
-	j		2b
-
-	load_caller_registers sp
-	addi	sp, sp, REGBYTES * 16
+	# Save all integer registers. While we could just save the caller-saved registers, doing so
+	# would risk an information leak and makes context switching a lot harder than it need be.
+	csrrw	x31, MSCRATCH, x31
+	sd		x1, 1 * REGBYTES (x31)
+	sd		x2, 2 * REGBYTES (x31)
+	sd		x3, 3 * REGBYTES (x31)
+	sd		x4, 4 * REGBYTES (x31)
+	sd		x5, 5 * REGBYTES (x31)
+	sd		x6, 6 * REGBYTES (x31)
+	sd		x7, 7 * REGBYTES (x31)
+	sd		x8, 8 * REGBYTES (x31)
+	sd		x9, 9 * REGBYTES (x31)
+	sd		x10, 10 * REGBYTES (x31)
+	sd		x11, 11 * REGBYTES (x31)
+	sd		x12, 12 * REGBYTES (x31)
+	sd		x13, 13 * REGBYTES (x31)
+	sd		x14, 14 * REGBYTES (x31)
+	sd		x15, 15 * REGBYTES (x31)
+	sd		x16, 16 * REGBYTES (x31)
+	sd		x17, 17 * REGBYTES (x31)
+	sd		x18, 18 * REGBYTES (x31)
+	sd		x19, 19 * REGBYTES (x31)
+	sd		x20, 20 * REGBYTES (x31)
+	sd		x20, 20 * REGBYTES (x31)
+	sd		x20, 20 * REGBYTES (x31)
+	sd		x21, 21 * REGBYTES (x31)
+	sd		x22, 22 * REGBYTES (x31)
+	sd		x23, 23 * REGBYTES (x31)
+	sd		x24, 24 * REGBYTES (x31)
+	sd		x25, 25 * REGBYTES (x31)
+	sd		x26, 26 * REGBYTES (x31)
+	sd		x27, 27 * REGBYTES (x31)
+	sd		x28, 28 * REGBYTES (x31)
+	sd		x29, 29 * REGBYTES (x31)
+	# Set pointer to task struct argument
+	mv		a6, x31
+	# An untested attempt at catering to pipelining
+	la		x28, sync_trap_table		# jmp
+	ld		sp, 64 * REGBYTES (x31)		# stack pointer
+	csrr	x29, MCAUSE					# jmp
+	sd		x30, 30 * REGBYTES (x31)	# store A
+	slli	x29, x29, 2					# jmp
+	csrrw	x30, MSCRATCH, x31			# store B	(restores original mscratch)
+	add		x28, x28, x29				# jmp
+	sd		x30, 31 * REGBYTES (x31)	# store B
+	# Execute the appropriate routine
+	jalr	ra, x28						# jmp
+	# Restore all integer registers
+	csrr	x31, MSCRATCH
+	ld		x1, 1 * REGBYTES (x31)
+	ld		x2, 2 * REGBYTES (x31)
+	ld		x3, 3 * REGBYTES (x31)
+	ld		x4, 4 * REGBYTES (x31)
+	ld		x5, 5 * REGBYTES (x31)
+	ld		x6, 6 * REGBYTES (x31)
+	ld		x7, 7 * REGBYTES (x31)
+	ld		x8, 8 * REGBYTES (x31)
+	ld		x9, 9 * REGBYTES (x31)
+	ld		x10, 10 * REGBYTES (x31)
+	ld		x11, 11 * REGBYTES (x31)
+	ld		x12, 12 * REGBYTES (x31)
+	ld		x13, 13 * REGBYTES (x31)
+	ld		x14, 14 * REGBYTES (x31)
+	ld		x15, 15 * REGBYTES (x31)
+	ld		x16, 16 * REGBYTES (x31)
+	ld		x17, 17 * REGBYTES (x31)
+	ld		x18, 18 * REGBYTES (x31)
+	ld		x19, 19 * REGBYTES (x31)
+	ld		x20, 20 * REGBYTES (x31)
+	ld		x20, 20 * REGBYTES (x31)
+	ld		x20, 20 * REGBYTES (x31)
+	ld		x21, 21 * REGBYTES (x31)
+	ld		x22, 22 * REGBYTES (x31)
+	ld		x23, 23 * REGBYTES (x31)
+	ld		x24, 24 * REGBYTES (x31)
+	ld		x25, 25 * REGBYTES (x31)
+	ld		x26, 26 * REGBYTES (x31)
+	ld		x27, 27 * REGBYTES (x31)
+	ld		x28, 28 * REGBYTES (x31)
+	ld		x29, 29 * REGBYTES (x31)
+	ld		x30, 30 * REGBYTES (x31)
+	ld		x31, 31 * REGBYTES (x31)
 	mret
 
-0:
+# Handler for syscalls.
+trap_syscall:
 	addi	sp, sp, -1 * REGBYTES
 
 	# Skip the ecall instruction, which is always 4 bytes long (there is no
@@ -130,21 +259,120 @@ trap_handler:
 	ld		t0, 0(t0)
 
 	# Perform the call
-	sd		ra, 0 * REGBYTES(sp)
+	mv		s0, ra
 	jalr	ra, t0
-	ld		ra, 0 * REGBYTES(sp)
 
-3:
-	addi	sp, sp, 1 * REGBYTES
+	# Restore all integer registers except a0 and a1, then return
+0:
+	csrr	x31, MSCRATCH
+	ld		x1, 1 * REGBYTES (x31)
+	ld		x2, 2 * REGBYTES (x31)
+	ld		x3, 3 * REGBYTES (x31)
+	ld		x4, 4 * REGBYTES (x31)
+	ld		x5, 5 * REGBYTES (x31)
+	ld		x6, 6 * REGBYTES (x31)
+	ld		x7, 7 * REGBYTES (x31)
+	ld		x8, 8 * REGBYTES (x31)
+	ld		x9, 9 * REGBYTES (x31)
+	# x10 == a0 and x11 == a1, so skip
+	ld		x12, 12 * REGBYTES (x31)
+	ld		x13, 13 * REGBYTES (x31)
+	ld		x14, 14 * REGBYTES (x31)
+	ld		x15, 15 * REGBYTES (x31)
+	ld		x16, 16 * REGBYTES (x31)
+	ld		x17, 17 * REGBYTES (x31)
+	ld		x18, 18 * REGBYTES (x31)
+	ld		x19, 19 * REGBYTES (x31)
+	ld		x20, 20 * REGBYTES (x31)
+	ld		x20, 20 * REGBYTES (x31)
+	ld		x20, 20 * REGBYTES (x31)
+	ld		x21, 21 * REGBYTES (x31)
+	ld		x22, 22 * REGBYTES (x31)
+	ld		x23, 23 * REGBYTES (x31)
+	ld		x24, 24 * REGBYTES (x31)
+	ld		x25, 25 * REGBYTES (x31)
+	ld		x26, 26 * REGBYTES (x31)
+	ld		x27, 27 * REGBYTES (x31)
+	ld		x28, 28 * REGBYTES (x31)
+	ld		x29, 29 * REGBYTES (x31)
+	ld		x30, 30 * REGBYTES (x31)
+	ld		x31, 31 * REGBYTES (x31)
 	mret
 
 1:
 	li		a0, SYSCALL_ERR_NOCALL
-	# This is slightly more compact. It is slower, but that's fine for an error path
-	j		3b
+	j		0b
 
 
 ## Initialize the trap CSR and the interrupt table
 trap_init:
-	la		t0, trap_handler
+	la		t0, interrupt_table
+	#ori		t0, t0, 1
 	csrw	MTVEC, t0
+	ret
+
+
+## Save the program counter and fp registers, then jump into the executor task switching routine.
+##
+## It does not save the integer registers as those already have been saved.
+##
+## Arguments:
+## - a0: A pointer to the task structure.
+trap_next_task:
+	# Save the program counter
+	csrr	t0, MEPC
+	sd		t0, 0 * REGBYTES (a0)
+	save_pc_register		a0, t0
+	# Save all float registers
+	save_float_registers	a0
+	j		executor_next_task
+	
+
+## Load the task's saved registers, then start running the task using mret.
+##
+## Arguments:
+## - a0: A pointer to the task structure.
+trap_start_task:
+	# Setup the scratch register.
+	csrw	MSCRATCH, a0
+	# Restore the program counter
+	ld		t0, 0 * REGBYTES (a0)
+	csrw	MEPC, t0
+	# Restore all float registers
+	load_float_registers	a0
+	# Restore all integer registers
+	ld		x1, 1 * REGBYTES (a0)
+	ld		x2, 2 * REGBYTES (a0)
+	ld		x3, 3 * REGBYTES (a0)
+	ld		x4, 4 * REGBYTES (a0)
+	ld		x5, 5 * REGBYTES (a0)
+	ld		x6, 6 * REGBYTES (a0)
+	ld		x7, 7 * REGBYTES (a0)
+	ld		x8, 8 * REGBYTES (a0)
+	ld		x9, 9 * REGBYTES (a0)
+	# a0 == x10, so skip
+	ld		x11, 11 * REGBYTES (a0)
+	ld		x12, 12 * REGBYTES (a0)
+	ld		x13, 13 * REGBYTES (a0)
+	ld		x14, 14 * REGBYTES (a0)
+	ld		x15, 15 * REGBYTES (a0)
+	ld		x16, 16 * REGBYTES (a0)
+	ld		x17, 17 * REGBYTES (a0)
+	ld		x18, 18 * REGBYTES (a0)
+	ld		x19, 19 * REGBYTES (a0)
+	ld		x20, 20 * REGBYTES (a0)
+	ld		x20, 20 * REGBYTES (a0)
+	ld		x20, 20 * REGBYTES (a0)
+	ld		x21, 21 * REGBYTES (a0)
+	ld		x22, 22 * REGBYTES (a0)
+	ld		x23, 23 * REGBYTES (a0)
+	ld		x24, 24 * REGBYTES (a0)
+	ld		x25, 25 * REGBYTES (a0)
+	ld		x26, 26 * REGBYTES (a0)
+	ld		x27, 27 * REGBYTES (a0)
+	ld		x28, 28 * REGBYTES (a0)
+	ld		x29, 29 * REGBYTES (a0)
+	ld		x30, 30 * REGBYTES (a0)
+	ld		x31, 31 * REGBYTES (a0)
+	ld		a0, 10 * REGBYTES (a0)
+	mret

@@ -85,83 +85,95 @@
 
 ## Save/load the program counter from/into the given register
 .macro save_pc_register state_reg reg
-	sd	reg, 31 * REGBYTES (\state_reg)
-}
+	sd	\reg, 31 * REGBYTES (\state_reg)
 .endm
 
 ## Save/load the program counter from/into the given register
 .macro load_pc_register state_reg reg
-	ld	reg, 31 * REGBYTES (\state_reg)
-}
+	ld	\reg, 31 * REGBYTES (\state_reg)
 .endm
 
 ## Save/load all the floating point registers. Normally used for context switching.
 .macro save_float_registers state_reg
-	sd	f0, 32 * REGBYTES (\state_reg)
-	sd	f1, 33 * REGBYTES (\state_reg)
-	sd	f2, 34 * REGBYTES (\state_reg)
-	sd	f3, 35 * REGBYTES (\state_reg)
-	sd	f4, 36 * REGBYTES (\state_reg)
-	sd	f5, 37 * REGBYTES (\state_reg)
-	sd	f6, 38 * REGBYTES (\state_reg)
-	sd	f7, 39 * REGBYTES (\state_reg)
-	sd	f8, 40 * REGBYTES (\state_reg)
-	sd	f9, 41 * REGBYTES (\state_reg)
-	sd	f10, 42 * REGBYTES (\state_reg)
-	sd	f11, 43 * REGBYTES (\state_reg)
-	sd	f12, 44 * REGBYTES (\state_reg)
-	sd	f13, 45 * REGBYTES (\state_reg)
-	sd	f14, 46 * REGBYTES (\state_reg)
-	sd	f15, 47 * REGBYTES (\state_reg)
-	sd	f16, 48 * REGBYTES (\state_reg)
-	sd	f17, 49 * REGBYTES (\state_reg)
-	sd	f18, 50 * REGBYTES (\state_reg)
-	sd	f10, 51 * REGBYTES (\state_reg)
-	sd	f20, 52 * REGBYTES (\state_reg)
-	sd	f21, 53 * REGBYTES (\state_reg)
-	sd	f22, 54 * REGBYTES (\state_reg)
-	sd	f23, 55 * REGBYTES (\state_reg)
-	sd	f24, 56 * REGBYTES (\state_reg)
-	sd	f25, 57 * REGBYTES (\state_reg)
-	sd	f26, 58 * REGBYTES (\state_reg)
-	sd	f27, 59 * REGBYTES (\state_reg)
-	sd	f28, 60 * REGBYTES (\state_reg)
-	sd	f29, 61 * REGBYTES (\state_reg)
-	sd	f30, 62 * REGBYTES (\state_reg)
-	sd	f31, 63 * REGBYTES (\state_reg)
+.macro	store	reg, offt
+.if 0	# TODO detect features at compile time
+	fld	\reg, \offt * REGBYTES (\state_reg)
+.elseif 0
+	flw	\reg, \offt * REGBYTES (\state_reg)
+.endif
+.endm
+	store	f0, 32
+	store	f1, 33
+	store	f2, 34
+	store	f3, 35
+	store	f4, 36
+	store	f5, 37
+	store	f6, 38
+	store	f7, 39
+	store	f8, 40
+	store	f9, 41
+	store	f10, 42
+	store	f11, 43
+	store	f12, 44
+	store	f13, 45
+	store	f14, 46
+	store	f15, 47
+	store	f16, 48
+	store	f17, 49
+	store	f18, 50
+	store	f10, 51
+	store	f20, 52
+	store	f21, 53
+	store	f22, 54
+	store	f23, 55
+	store	f24, 56
+	store	f25, 57
+	store	f26, 58
+	store	f27, 59
+	store	f28, 60
+	store	f29, 61
+	store	f30, 62
+	store	f31, 63
 .endm
 
 .macro load_float_registers state_reg
-	ld	f0, 32 * REGBYTES (\state_reg)
-	ld	f1, 33 * REGBYTES (\state_reg)
-	ld	f2, 34 * REGBYTES (\state_reg)
-	ld	f3, 35 * REGBYTES (\state_reg)
-	ld	f4, 36 * REGBYTES (\state_reg)
-	ld	f5, 37 * REGBYTES (\state_reg)
-	ld	f6, 38 * REGBYTES (\state_reg)
-	ld	f7, 39 * REGBYTES (\state_reg)
-	ld	f8, 40 * REGBYTES (\state_reg)
-	ld	f9, 41 * REGBYTES (\state_reg)
-	ld	f10, 42 * REGBYTES (\state_reg)
-	ld	f11, 43 * REGBYTES (\state_reg)
-	ld	f12, 44 * REGBYTES (\state_reg)
-	ld	f13, 45 * REGBYTES (\state_reg)
-	ld	f14, 46 * REGBYTES (\state_reg)
-	ld	f15, 47 * REGBYTES (\state_reg)
-	ld	f16, 48 * REGBYTES (\state_reg)
-	ld	f17, 49 * REGBYTES (\state_reg)
-	ld	f18, 50 * REGBYTES (\state_reg)
-	ld	f10, 51 * REGBYTES (\state_reg)
-	ld	f20, 52 * REGBYTES (\state_reg)
-	ld	f21, 53 * REGBYTES (\state_reg)
-	ld	f22, 54 * REGBYTES (\state_reg)
-	ld	f23, 55 * REGBYTES (\state_reg)
-	ld	f24, 56 * REGBYTES (\state_reg)
-	ld	f25, 57 * REGBYTES (\state_reg)
-	ld	f26, 58 * REGBYTES (\state_reg)
-	ld	f27, 59 * REGBYTES (\state_reg)
-	ld	f28, 60 * REGBYTES (\state_reg)
-	ld	f29, 61 * REGBYTES (\state_reg)
-	ld	f30, 62 * REGBYTES (\state_reg)
-	ld	f31, 63 * REGBYTES (\state_reg)
+.macro	load	reg, offt
+.if 0	# TODO detect features at compile time
+	fld	\reg, \offt * REGBYTES (\state_reg)
+.elseif 0
+	flw	\reg, \offt * REGBYTES (\state_reg)
+.endif
+.endm
+	load	f0, 32
+	load	f1, 33
+	load	f2, 34
+	load	f3, 35
+	load	f4, 36
+	load	f5, 37
+	load	f6, 38
+	load	f7, 39
+	load	f8, 40
+	load	f9, 41
+	load	f10, 42
+	load	f11, 43
+	load	f12, 44
+	load	f13, 45
+	load	f14, 46
+	load	f15, 47
+	load	f16, 48
+	load	f17, 49
+	load	f18, 50
+	load	f10, 51
+	load	f20, 52
+	load	f21, 53
+	load	f22, 54
+	load	f23, 55
+	load	f24, 56
+	load	f25, 57
+	load	f26, 58
+	load	f27, 59
+	load	f28, 60
+	load	f29, 61
+	load	f30, 62
+	load	f31, 63
 .endm

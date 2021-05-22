@@ -291,6 +291,12 @@ where
 		})
 	}
 
+	/// Returns the physical entry address.
+	pub fn physical_entry(&self) -> *const () {
+		let address = self.entry - self.segments[0].virtual_address;
+		unsafe { self.segments[0].page.cast::<u8>().as_ptr().add(address).cast() }
+	}
+
 	/// Starts executing the binary by jumping to the start of the first segment
 	///
 	/// ## Safety
@@ -298,8 +304,7 @@ where
 	/// Since the binary may contain any arbitrary instructions it is up to the caller to ensure
 	/// adequate protections have been set up.
 	pub unsafe fn execute(&self) {
-		let address = self.entry - self.segments[0].virtual_address;
-		let address = self.segments[0].page.cast::<u8>().as_ptr().add(address);
+		let address = self.physical_entry();
 		let func: unsafe extern "C" fn() = unsafe { mem::transmute(address) };
 		func();
 	}
@@ -342,7 +347,7 @@ impl Drop for Segment {
 //impl test { // TODO this caused an ICE. Reproduce and report this.
 mod test {
 	use super::*;
-	use crate::log;
+	use crate::{log, task};
 
 	const HELLO_WORLD_ELF_RISCV64: &[u8] =
 		include_bytes!("../../services/init/hello_world/build/riscv64");
@@ -351,12 +356,19 @@ mod test {
 		let heap = MEMORY_MANAGER.lock().allocate(3).unwrap();
 		let heap = unsafe { crate::alloc::allocators::WaterMark::new(heap.cast(), 4096) };
 		let elf = ELF::parse(HELLO_WORLD_ELF_RISCV64, heap).unwrap();
+		let mut task_a = task::Task::new().unwrap();
+		let mut task_b = task::Task::new().unwrap();
 		for s in elf.segments.iter() {
 			log::debug_usize("segment flags", s.flags as usize, 2);
 			log::debug_usize("segment order", s.order as usize, 10);
+			task_a.add_mapping(s.page, s.order);
+			task_b.add_mapping(s.page, s.order);
 		}
+		task_a.set_pc(elf.physical_entry());
+		task_b.set_pc(elf.physical_entry());
+		task_a.insert(task_b);
 		log::debug_str("Executing...");
-		unsafe { elf.execute() };
+		task_a.next();
 		log::debug_str("Finished");
 	});
 }
