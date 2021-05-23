@@ -108,6 +108,7 @@ struct FileHeader {
 }
 
 /// Enum of possible errors that can occur while parsing an archive.
+#[derive(Debug)]
 pub enum ArchiveError {
 	/// There is something wrong with a file. The `u32` indicates the file's index.
 	FileError(FileError, u32),
@@ -116,6 +117,7 @@ pub enum ArchiveError {
 }
 
 /// Enum of possible errors that can occur while parsing a file.
+#[derive(Debug)]
 pub enum FileError {
 	InvalidMagic,
 	InvalidChecksum,
@@ -163,7 +165,6 @@ impl<'a> File<'a> {
 			let header = unsafe { &*(data as *const _ as *const FileHeader) };
 
 			if !(&header.magic[..5] == b"07070" && b"12".contains(&header.magic[5])) {
-				for c in header.magic.iter() {}
 				return Err(FileError::InvalidMagic);
 			}
 

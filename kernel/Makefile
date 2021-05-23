@@ -52,7 +52,7 @@ NM_OPT?=
 READELF_OPT?=-a
 
 INITFS?=initfs.cpio
-INITFS_ROOT?=src/
+INITFS_ROOT?=../services/init/hello_world/build/
 
 default: build mkinitfs
 
@@ -168,4 +168,4 @@ $(DRIVE):
 	dd if=/dev/zero of=drive.bin bs=1M count=32
 
 $(INITFS): $(INITFS_ROOT)
-	find $< -type f | cpio -o -H newc > $@
+	OLDPWD=$$PWD /bin/sh -c '(cd $< && find . -type f | cpio -o -H newc > $$OLDPWD/$@)'

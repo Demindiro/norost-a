@@ -3,6 +3,7 @@
 //! These are all globally accessible for ease of use
 
 use crate::io::Device;
+use core::fmt;
 
 #[derive(PartialEq, PartialOrd)]
 #[repr(u8)]
@@ -65,4 +66,32 @@ pub fn debug_usize(msg: &str, num: usize, radix: u8) {
 	let mut buf = [0; 128];
 	let num = crate::util::usize_to_string(&mut buf, num, radix, 1).unwrap();
 	debug(&[msg, " -> ", num]);
+}
+
+pub struct Debug(bool);
+
+impl Debug {
+	pub fn new() -> Self {
+		Self(true)
+	}
+}
+
+impl fmt::Write for Debug {
+	fn write_str(&mut self, string: &str) -> fmt::Result {
+		let _ = crate::io::uart::default(|uart| {
+			if self.0 {
+				uart.write_str("[DEBUG] ");
+				self.0 = false;
+			}
+			uart.write_str(string);
+		});
+		Ok(())
+	}
+}
+
+pub macro_rules! debug {
+	($($args:expr),* $(,)?) => {{
+		use core::fmt::Write;
+		writeln!(crate::log::Debug::new(), $($args),*);
+	}}
 }

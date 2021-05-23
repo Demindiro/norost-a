@@ -19,16 +19,16 @@ SECTIONS
 
 	_text_start = .;
 	.text : {
-		*(.text)
+		*(.text .text.*)
 	}
 	_text_end = .;
 
 	.data : {
-		*(.data)
+		*(.data .text.*)
 	}
 
 	.rodata : {
-		*(.rodata)
+		*(.rodata .rodata.*)
 	}
 
 	_global_pointer = . + 0x800;
@@ -50,6 +50,10 @@ SECTIONS
 		. = ALIGN(8);
 		_stack_end = .;
 		_stack_pointer = .;
+	}
+
+	.initfs : {
+		*(.initfs)
 	}
 
 	_kernel_end = .;

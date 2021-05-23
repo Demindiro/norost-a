@@ -68,6 +68,7 @@ mod vfs;
 
 use core::cell::UnsafeCell;
 use core::convert::TryInto;
+use core::fmt::Write;
 use core::num::NonZeroUsize;
 use core::{mem, ops, panic, ptr};
 
@@ -133,14 +134,10 @@ fn panic(info: &panic::PanicInfo) -> ! {
 	log::fatal(&["Kernel panicked!"]);
 	let msg = info.payload();
 	if let Some(msg) = info.message() {
-		if let Some(msg) = msg.as_str() {
-			log::fatal(&["  Message:  '", msg, "'"]);
-		}
+		log::debug!("  Message:  '{}'", msg);
 	}
 	if let Some(s) = msg.downcast_ref::<&str>() {
 		log::fatal(&["  Payload:  ", s]);
-		//} else if let Some(s) = msg.downcast_ref::<String>() {
-		//	log::fatal(&["  Message: ", s.as_str()]);
 	}
 	if let Some(loc) = info.location() {
 		// If more than 8 characters are needed for line/column I'll kill someone
@@ -216,7 +213,7 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 
 #[no_mangle]
 #[cfg(not(test))]
-fn main(hart_id: usize, dtb: *const u8) {
+extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_size: usize) {
 	// Log architecture info
 	use arch::*;
 	arch::id().log();
@@ -370,32 +367,28 @@ fn main(hart_id: usize, dtb: *const u8) {
 	// Initialize trap table now that the most important setup is done.
 	arch::init();
 
-	io::uart::default(|uart| {
-		use io::Device;
-		let _ = uart.write(b"Greetings!\n");
-		let _ = uart.write(b"Type whatever you want, I'll echo it:\n");
-		loop {
-			let mut buf = [0; 1024];
-			let mut i = 0;
-			loop {
-				match uart.read(&mut buf[i..]) {
-					Ok(n) => {
-						let _ = uart.write(&buf[i..i + n.get()]);
-						i += n.get();
-						if buf[i - 1] == b'\n' || buf[i - 1] == b'\r' {
-							buf[i - 1] = b'\n';
-							break;
-						}
-					}
-					Err(io::ReadError::Empty) => (),
-					Err(io::ReadError::BufferIsZeroSized) => break,
-					Err(_) => (),
-				}
-			}
-			let _ = uart.write(b"\nYou wrote: ");
-			let _ = uart.write(&buf[..i]);
-		}
-	});
+	log::debug!("initfs: {:p}, {}", initfs, initfs_size);
+
+	// Load the initramfs and run init
+	// 128 KiB with 4 KiB pages
+	let alloc = MEMORY_MANAGER.lock().allocate(5).expect("Failed to alloc initfs heap");
+	// SAFETY: the memory is valid and not in use by anything else.
+	let alloc = unsafe {
+		alloc::allocators::WaterMark::new(alloc.cast(), arch::PAGE_SIZE << 5)
+	};
+	// SAFETY: a valid initfs pointer and size should have been passed by boot.s.
+	let initfs = unsafe { core::slice::from_raw_parts(initfs, initfs_size) };
+	let initfs = driver::fs::initramfs::InitRAMFS::parse(initfs, &alloc)
+		.expect("Failed to parse initfs");
+	use driver::fs::FileSystem;
+	let init = initfs.info("/init").expect("No init binary found");
+	let init = alloc::Box::try_new_zeroed_slice_in(init.size as usize, &alloc).expect("Not enough alloc space");
+	// SAFETY: A zeroed slice of u8s is valid.
+	let mut init = unsafe { init.assume_init() };
+	initfs.read("/init", init.as_mut()).unwrap();
+	let init = elf::ELF::parse(init.as_ref(), &alloc).expect("Invalid ELF file");
+	let init = init.create_task().expect("Failed to create init task");
+	init.next();
 }
 
 #[cfg(test)]

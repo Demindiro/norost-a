@@ -308,6 +308,16 @@ where
 		let func: unsafe extern "C" fn() = unsafe { mem::transmute(address) };
 		func();
 	}
+
+	/// Creates a new task from the ELF data.
+	pub fn create_task(&self) -> Result<crate::task::Task, crate::memory::AllocateError> {
+		let mut task = crate::task::Task::new()?;
+		for s in self.segments.iter() {
+			task.add_mapping(s.page, s.order);
+		}
+		task.set_pc(self.physical_entry());
+		Ok(task)
+	}
 }
 
 impl ProgramHeader {
@@ -350,7 +360,7 @@ mod test {
 	use crate::{log, task};
 
 	const HELLO_WORLD_ELF_RISCV64: &[u8] =
-		include_bytes!("../../services/init/hello_world/build/riscv64");
+		include_bytes!("../../services/init/hello_world/build/init");
 
 	test!(parse_hello_world() {
 		let heap = MEMORY_MANAGER.lock().allocate(3).unwrap();

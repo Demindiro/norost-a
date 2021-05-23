@@ -10,6 +10,7 @@ use core::mem;
 /// [std rawvec]: https://github.com/rust-lang/rust/blob/master/library/alloc/src/raw_vec.rs
 use core::ptr::NonNull;
 
+#[derive(Debug)]
 pub enum ReserveError {
 	CapacityOverflow,
 	AllocError,

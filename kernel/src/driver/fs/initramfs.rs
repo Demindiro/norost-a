@@ -42,7 +42,7 @@ use core::{mem, ptr};
 /// Structure representing an initramfs block
 // TODO M should be a special sort of "page allocator". It must NOT implement core::alloc::Allocator,
 // as it'll need some special properties for TLB.
-struct InitRAMFS<A>
+pub struct InitRAMFS<A>
 where
 	A: Allocator,
 {
@@ -89,6 +89,7 @@ where
 }
 
 /// Enum representing possible errors when trying to unpack a CPIO archive.
+#[derive(Debug)]
 pub enum Error {
 	Archive(cpio::ArchiveError),
 	AllocError,
@@ -195,6 +196,78 @@ where
 		}
 
 		Ok(Self { root })
+	}
+
+	/// Find the node with the given name.
+	fn find(&self, path: &str) -> Option<&Node<A>> {
+		if path.chars().next() != Some('/') {
+			todo!()
+		}
+		let mut iter = path.split("/").peekable();
+		iter.next().unwrap();
+		let mut curr = &self.root;
+		while let Some(p) = iter.next() {
+			match curr.iter().find(|n| n.name.as_ref() == p) {
+				Some(n) => if iter.peek().is_none() {
+					return Some(n);
+				}
+				None => todo!(),
+			}
+		}
+		None
+	}
+}
+
+impl<A> super::FileSystem for InitRAMFS<A>
+where
+	A: Allocator + Copy
+{
+	fn info(&self, path: &str) -> Result<super::FileInfo, super::InfoError> {
+		match self.find(path) {
+			Some(n) => match &n.data {
+				Branch::File(f) => Ok(super::FileInfo {
+					user_id: super::UserID(0),
+					group_id: super::GroupID(0),
+					permissions: super::Permissions(0x7),
+					size: f.size as u64,
+					typ: super::FileType::Regular,
+				}),
+				Branch::Directory(d) => todo!(),
+			}
+			None => todo!()
+		}
+	}
+
+	fn read(&self, path: &str, mut buffer: &mut [u8]) -> Result<(), super::ReadError> {
+		match self.find(path) {
+			Some(n) => match &n.data {
+				Branch::File(f) => {
+					let mut page = &f.pages[..];
+					crate::log::debug!("{}", buffer.len());
+					while buffer.len() >= arch::PAGE_SIZE {
+						unsafe {
+							ptr::copy_nonoverlapping(page[0].cast().as_ptr(), buffer.as_mut_ptr(), arch::PAGE_SIZE);
+						}
+						page = &f.pages[1..];
+						buffer = &mut buffer[arch::PAGE_SIZE..];
+					}
+					unsafe {
+						ptr::copy_nonoverlapping(page[0].cast().as_ptr(), buffer.as_mut_ptr(), buffer.len());
+					}
+					Ok(())
+				}
+				Branch::Directory(d) => todo!(),
+			}
+			None => Err(super::ReadError::NonExistent),
+		}
+	}
+
+	fn write(&self, _: &str, _: &[u8]) -> Result<(), super::WriteError> {
+		Err(super::WriteError::ReadOnly)
+	}
+
+	fn set_permissions(&self, _: &str, _: super::Permissions) -> Result<(), super::PermissionsError> {
+		Err(super::PermissionsError::ReadOnly)
 	}
 }
 

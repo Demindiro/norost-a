@@ -5,19 +5,20 @@ READELF=$(TOOLCHAIN)-readelf
 READELF_ARGS?=-a
 OBJDUMP=$(TOOLCHAIN)-objdump
 OBJDUMP_ARGS?=-S
+ARCH?=riscv64
 
-build/riscv64: riscv.s | build/ 
+build/init: $(ARCH).s | build/
 	$(CC) -nostartfiles -nostdlib $< -o $@
-	$(STRIP) -R .eh_frame -R .eh_frame_hdr build/riscv64
+	$(STRIP) -R .eh_frame -R .eh_frame_hdr $@
 
 build/:
 	mkdir build/
 
 readelf:
-	$(READELF) $(READELF_ARGS) build/riscv64
+	$(READELF) $(READELF_ARGS) build/init
 
 objdump:
-	$(OBJDUMP) $(OBJDUMP_ARGS) build/riscv64
+	$(OBJDUMP) $(OBJDUMP_ARGS) build/init
 
 clean:
 	rm -rf build/
