@@ -1,10 +1,12 @@
 .globl __stack_pointer
 .globl _start
 
-.section .initfs, "a"
-initfs:
-	.incbin	"kernel/initfs.cpio"
-	.equ	INITFS_LEN,	. - initfs
+.section .initelf, "a"
+	# Align to page boundary
+	.align	12
+initelf:
+	.incbin	"kernel/init.elf"
+	.equ	INITELF_LEN,	. - initelf
 
 .section .init, "ax"
 _start:
@@ -19,8 +21,8 @@ _start:
 	# Set ra to zero to indicate end of call stack
 	mv		ra, zero
 	# Set pointer and length to initfs
-	la		a2, initfs
-	li		a3, INITFS_LEN
+	la		a2, initelf
+	li		a3, INITELF_LEN
 	call	main
 1:
 	wfi

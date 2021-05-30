@@ -64,7 +64,6 @@ mod powerstate;
 mod sync;
 mod task;
 mod util;
-mod vfs;
 
 use core::cell::UnsafeCell;
 use core::convert::TryInto;
@@ -369,23 +368,15 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 
 	log::debug!("initfs: {:p}, {}", initfs, initfs_size);
 
-	// Load the initramfs and run init
+	// Run init
 	// 128 KiB with 4 KiB pages
 	let alloc = MEMORY_MANAGER.lock().allocate(5).expect("Failed to alloc initfs heap");
 	// SAFETY: the memory is valid and not in use by anything else.
 	let alloc = unsafe {
 		alloc::allocators::WaterMark::new(alloc.cast(), arch::PAGE_SIZE << 5)
 	};
-	// SAFETY: a valid initfs pointer and size should have been passed by boot.s.
-	let initfs = unsafe { core::slice::from_raw_parts(initfs, initfs_size) };
-	let initfs = driver::fs::initramfs::InitRAMFS::parse(initfs, &alloc)
-		.expect("Failed to parse initfs");
-	use driver::fs::FileSystem;
-	let init = initfs.info("/init").expect("No init binary found");
-	let init = alloc::Box::try_new_zeroed_slice_in(init.size as usize, &alloc).expect("Not enough alloc space");
-	// SAFETY: A zeroed slice of u8s is valid.
-	let mut init = unsafe { init.assume_init() };
-	initfs.read("/init", init.as_mut()).unwrap();
+	// SAFETY: a valid init pointer and size should have been passed by boot.s.
+	let init = unsafe { core::slice::from_raw_parts(initfs, initfs_size) };
 	let init = elf::ELF::parse(init.as_ref(), &alloc).expect("Invalid ELF file");
 	let init = init.create_task().expect("Failed to create init task");
 	init.next();

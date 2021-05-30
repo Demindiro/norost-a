@@ -51,13 +51,8 @@ NM_OPT?=
 
 READELF_OPT?=-a
 
-INITFS?=initfs.cpio
-INITFS_ROOT?=../services/init/hello_world/build/
-
 default: build mkinitfs
 
-mkinitfs: $(INITFS)
-	
 build: build-riscv64
 
 build-debug: build-debug-riscv64
@@ -83,6 +78,9 @@ nm: nm-riscv64
 readelf: readelf-riscv64
 
 strip: strip-riscv64
+
+clean:
+	cargo clean
 
 measure-stack-size: build
 	@echo Enter Ctrl-A + X to exit
@@ -166,6 +164,3 @@ strip-riscv64:
 
 $(DRIVE):
 	dd if=/dev/zero of=drive.bin bs=1M count=32
-
-$(INITFS): $(INITFS_ROOT)
-	OLDPWD=$$PWD /bin/sh -c '(cd $< && find . -type f | cpio -o -H newc > $$OLDPWD/$@)'
