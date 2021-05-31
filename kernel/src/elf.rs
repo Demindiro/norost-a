@@ -362,6 +362,7 @@ mod test {
 	const HELLO_WORLD_ELF_RISCV64: &[u8] =
 		include_bytes!("../../services/init/hello_world/build/init");
 
+	/*
 	test!(parse_hello_world() {
 		let heap = MEMORY_MANAGER.lock().allocate(3).unwrap();
 		let heap = unsafe { crate::alloc::allocators::WaterMark::new(heap.cast(), 4096) };
@@ -381,4 +382,5 @@ mod test {
 		task_a.next();
 		log::debug_str("Finished");
 	});
+	*/
 }

@@ -136,7 +136,9 @@ mod sys {
 		/// `a1`.
 		// TODO actually sleep instead of just "yield"
 		[task] sleep(a0, a1) {
-			unsafe { arch::trap_next_task(task) };
+			todo!()
+				// TODO undefined reference
+			//unsafe { arch::trap_next_task(task) };
 		}
 	}
 

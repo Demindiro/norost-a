@@ -34,6 +34,8 @@ where
 	/// systems with 4GiB memory). This also means this page isn't properly aligned.
 	end: NonNull<Page>,
 	// TODO tracking information (trackers can be used to catch bad VMM behaviour)
+	#[cfg(debug_assertions)]
+	last_free_addr: Option<NonNull<Page>>,
 }
 
 /// Structure to keep track of free areas
@@ -93,6 +95,11 @@ where
 	/// The memory range must be unused.
 	#[must_use]
 	pub unsafe fn new(start: NonNull<Page>, count: NonZeroUsize) -> Self {
+		// Clear all pages
+		for i in 0..count.get() {
+			start.as_ptr().add(i).as_mut().unwrap_unchecked().clear();
+		}
+
 		let mut count = count.get();
 
 		// The total amount of bits needed, which is ceil(count / 2) + ceil(count / 4) + ...
@@ -209,6 +216,8 @@ where
 			free_areas: areas,
 			start,
 			end,
+			#[cfg(debug_assertions)]
+			last_free_addr: None,
 		}
 	}
 
@@ -265,6 +274,7 @@ where
 	///
 	/// The memory in the area may not be used after this call.
 	#[must_use]
+	#[track_caller]
 	pub unsafe fn deallocate(
 		&mut self,
 		mut area: NonNull<Page>,
@@ -274,6 +284,11 @@ where
 			// Make the caller aware that its request will never succeed.
 			// In fact, if this error is returned something is very wrong at the callsite.
 			return Err(DeallocateError::OrderTooLarge);
+		}
+
+		// Ensure the pointer is properly aligned.
+		if area.as_ptr() as usize & ((PAGE_SIZE << order) - 1) != 0 {
+			return Err(DeallocateError::BadAlignment);
 		}
 
 		// Ensure a valid range has been passed, to prevent potential buffer overflow exploits.
@@ -291,6 +306,17 @@ where
 		// Ensure the page is aligned properly
 		if !Self::is_area_aligned(area, order) {
 			return Err(DeallocateError::BadAlignment);
+		}
+
+		#[cfg(debug_assertions)]
+		{
+			debug_assert_ne!(self.last_free_addr, Some(area), "Double free");
+			self.last_free_addr = Some(area);
+		}
+
+		// Clear the page
+		for i in 0..1 << order {
+			area.as_ptr().add(i).as_mut().unwrap_unchecked().clear();
 		}
 
 		loop {
@@ -317,7 +343,7 @@ where
 						break curr;
 					} else {
 						prev = &mut curr.as_mut().next;
-						debug_assert!(curr.as_mut().next.is_some());
+						debug_assert!(curr.as_mut().next.is_some(), "No matching buddy");
 						curr = curr.as_mut().next.unwrap_unchecked();
 					}
 				};

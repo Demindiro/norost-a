@@ -14,6 +14,9 @@ pub use riscv::elf::MACHINE as ELF_MACHINE;
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub use riscv::RegisterState;
 
+#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+pub use riscv::Page;
+
 
 /// All supported ELF flags.
 // FIXME we need a way to detect individual features at compile time.
@@ -97,13 +100,6 @@ pub trait ID {
 		let hart = util::usize_to_string(&mut buf, self.hart(), 16, LEN.into()).unwrap();
 		log::info(&["Current hart: ", hart]);
 	}
-}
-
-/// A representation of a single memory page.
-// TODO figure out how to set repr align based on a constant
-#[repr(align(4096))]
-pub struct Page {
-	_data: [u8; PAGE_SIZE],
 }
 
 const _PAGE_ALIGN_CHECK: usize = 0 - (PAGE_SIZE - core::alloc::Layout::new::<Page>().align());

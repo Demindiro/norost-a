@@ -10,6 +10,8 @@
 
 pub mod rv64;
 
+mod vms;
+
 /// Structure used to save register state
 #[repr(C)]
 pub struct RegisterState {
@@ -43,6 +45,37 @@ use core::{array, mem, ptr};
 /// Initialize arch-specific structures such as the interrupt table
 pub fn init() {
 	trap::init();
+}
+
+
+/// A representation of a single memory page.
+// TODO figure out how to set repr align based on a constant
+#[repr(align(4096))]
+pub struct Page {
+	data: [[usize; 8]; PAGE_SIZE / mem::size_of::<[usize; 8]>()],
+}
+
+const _PAGE_SIZE_CHECK: usize = 0 - (4096 - mem::size_of::<Page>());
+
+impl Page {
+	/// Overwrite this page with zeroes
+	#[inline(always)]
+	#[optimize(speed)]
+	pub fn clear(&mut self) {
+		for e in self.data.iter_mut() {
+			// Manual loop unrolling because the compiler is a dumb brick.
+			unsafe {
+				ptr::write_volatile(&mut e[0], 0);
+				ptr::write_volatile(&mut e[1], 0);
+				ptr::write_volatile(&mut e[2], 0);
+				ptr::write_volatile(&mut e[3], 0);
+				ptr::write_volatile(&mut e[4], 0);
+				ptr::write_volatile(&mut e[5], 0);
+				ptr::write_volatile(&mut e[6], 0);
+				ptr::write_volatile(&mut e[7], 0);
+			}
+		}
+	}
 }
 
 /// The size of a single memory page, which is 4KB for all RISC-V architectures.
