@@ -310,8 +310,8 @@ where
 
 		#[cfg(debug_assertions)]
 		{
-			debug_assert_ne!(self.last_free_addr, Some(area), "Double free");
-			self.last_free_addr = Some(area);
+			debug_assert_ne!(self.last_free_addr, Some(area.start()), "Double free");
+			self.last_free_addr = Some(area.start());
 		}
 
 		let mut order = area.order().into();

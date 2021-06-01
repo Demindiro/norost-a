@@ -8,11 +8,13 @@
 
 mod sv39;
 
+pub use sv39::Sv39;
+
 use core::convert::TryFrom;
 
 /// Valid RWX flag combinations
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum RWX {
+pub enum RWX {
 	R = 0b0010,
 	RW = 0b0110,
 	X = 0b1000,
@@ -66,3 +68,11 @@ impl TryFrom<u32> for RWX {
 	}
 }
 
+/// Possible errors when adding a mapping
+#[derive(Debug)]
+pub enum AddError {
+	/// The mapping overlaps with an existing mapping
+	Overlaps,
+	/// The areas don't have the same order (i.e. size).
+	NonEqualOrder,
+}

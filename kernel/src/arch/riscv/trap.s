@@ -192,7 +192,7 @@ trap_handler:
 	mv		a6, x31
 	# An untested attempt at catering to pipelining
 	la		x28, sync_trap_table		# jmp
-	ld		sp, 64 * REGBYTES (x31)		# stack pointer
+	ld		sp, REGSTATE_SIZE + 0 * REGBYTES (x31)		# stack pointer
 	csrr	x29, MCAUSE					# jmp
 	sd		x30, 30 * REGBYTES (x31)	# store A
 	slli	x29, x29, 2					# jmp
@@ -333,11 +333,22 @@ trap_next_task:
 ## Arguments:
 ## - a0: A pointer to the task structure.
 trap_start_task:
+	# Switch to U-mode when executing mret.
+	li		t0, 0 << 11
+	csrw	MSTATUS, t0
+	# Set up the VMS.
+	ld		t0, REGSTATE_SIZE + 1 * REGBYTES (a0)
+	li		t1, 1
+	srli	t0, t0, 12
+	slli	t1, t1, 63
+	or		t0, t0, t1
+	csrw	SATP, t0
 	# Setup the scratch register.
 	csrw	MSCRATCH, a0
 	# Restore the program counter
 	ld		t0, 0 * REGBYTES (a0)
 	csrw	MEPC, t0
+	sfence.vma
 	# Restore all float registers
 	load_float_registers	a0
 	# Restore all integer registers
@@ -375,4 +386,6 @@ trap_start_task:
 	ld		x30, 30 * REGBYTES (a0)
 	ld		x31, 31 * REGBYTES (a0)
 	ld		a0, 10 * REGBYTES (a0)
+0:
+	#j	0b
 	mret

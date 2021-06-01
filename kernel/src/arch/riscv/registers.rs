@@ -5,8 +5,8 @@ pub struct RegisterState {
 	x: [usize; 31],
 	/// The program counter state.
 	pc: usize,
-	/// All FP registers
-	f: [usize; 32],
+	// /// All FP registers
+	//f: [usize; 32],
 }
 
 /// Save/load a single register. Intended for internal use.

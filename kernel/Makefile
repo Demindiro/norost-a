@@ -5,7 +5,7 @@ KERNEL_DEBUG?=../target/riscv64gc-unknown-none-elf/debug/kernel
 
 QEMU_OPT?=
 QEMU_BIOS?=none
-QEMU?=qemu-system-riscv64 \
+QEMU?=../../vm/qemu-6.0.0/build/qemu-system-riscv64 \
 		-s \
 		-machine virt \
 		-nographic \
@@ -51,7 +51,7 @@ NM_OPT?=
 
 READELF_OPT?=-a
 
-default: build mkinitfs
+default: build
 
 build: build-riscv64
 
@@ -161,6 +161,10 @@ readelf-riscv64:
 
 strip-riscv64:
 	riscv64-unknown-linux-gnu-strip -x $(KERNEL)
+
+gdb-run: build
+	@echo Enter Ctrl-A + X to quit
+	gdb --args $(QEMU) $(QEMU_OPT)
 
 $(DRIVE):
 	dd if=/dev/zero of=drive.bin bs=1M count=32

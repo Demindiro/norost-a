@@ -9,8 +9,7 @@
 //! [priv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
 
 pub mod rv64;
-
-mod vms;
+pub mod vms;
 
 /// Structure used to save register state
 #[repr(C)]
@@ -19,8 +18,8 @@ pub struct RegisterState {
 	pub pc: *const (),
 	/// All integer registers except `x0`
 	pub x: [usize; 31],
-	/// All FP registers
-	pub f: [usize; 32],
+	// /// All FP registers
+	//pub f: [usize; 32],
 }
 impl RegisterState {
 	/// Sets the program counter to the given address.
@@ -34,7 +33,7 @@ impl Default for RegisterState {
 		Self {
 			x: [0; 31],
 			pc: ptr::null(),
-			f: [0; 32],
+			//f: [0; 32],
 		}
 	}
 }

@@ -18,7 +18,7 @@
 //! it.
 
 use crate::arch;
-use crate::memory::AllocateError;
+use crate::memory::{AllocateError, Area};
 use crate::MEMORY_MANAGER;
 use core::sync::atomic;
 use core::ptr::NonNull;
@@ -41,6 +41,13 @@ static TASK_ID_COUNTER: atomic::AtomicU32 = atomic::AtomicU32::new(0);
 #[repr(transparent)]
 pub struct Task(NonNull<TaskData>);
 
+/// State that can be shared between multiple tasks.
+#[repr(C)]
+struct SharedState {
+	/// Mapping of virtual memory.
+	virtual_memory: arch::VirtualMemorySystem,
+}
+
 /// A single task.
 ///
 /// Tasks are implemented as a circular linked list for a few reasons:
@@ -56,21 +63,15 @@ pub struct TaskData {
 	register_state: arch::RegisterState,
 	/// A pointer to some stack space for use with syscalls.
 	stack: NonNull<arch::Page>,
+	/// The shared state of this task.
+	// TODO should be reference counted.
+	shared_state: SharedState,
 	/// A pointer to the next task. It points to itself if there is only one task.
 	next_task: Task,
 	/// A pointer to the previous task or itself, which is needed to efficiently remove tasks.
 	prev_task: Task,
 	/// The ID of this task.
 	id: u32,
-	/// A fixed array of the start addresses of allocated memory pages.
-	///
-	/// A value of `None` means there is no entry **and** that it is the last entry.
-	page_addresses: [Option<NonNull<arch::Page>>; FIXED_PAGE_MAP_SIZE],
-	/// The order (i.e. size) of each page map.
-	page_orders: [u8; FIXED_PAGE_MAP_SIZE],
-	/// A pointer to another page with additional page mappings. May be `None` if there are no
-	/// extra mappings.
-	extra_pages: Option<NonNull<arch::Page>>,
 }
 
 struct NoTasks;
@@ -78,6 +79,7 @@ struct NoTasks;
 impl Task {
 	/// Create a new empty task.
 	pub fn new() -> Result<Self, AllocateError> {
+		// FIXME may leak memory on alloc error.
 		let len = arch::PAGE_SIZE << TASK_PAGE_ORDER;
 		let pages = MEMORY_MANAGER.lock().allocate(TASK_PAGE_ORDER)?;
 		let stack = MEMORY_MANAGER.lock().allocate(0)?.start();
@@ -91,20 +93,21 @@ impl Task {
 				next_task: task.clone(),
 				prev_task: task.clone(),
 				id: TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed),
-				page_addresses: [None; FIXED_PAGE_MAP_SIZE],
-				page_orders: [0; FIXED_PAGE_MAP_SIZE],
-				extra_pages: None,
+				shared_state: SharedState {
+					virtual_memory: arch::VirtualMemorySystem::new()?,
+				}
 			});
 		}
 		Ok(task)
 	}
 
 	/// Add a memory mapping to this task.
-	pub fn add_mapping(&self, page: NonNull<arch::Page>, order: u8) -> Result<(), AllocateError> {
-		// FIXME
-		self.inner().page_addresses[0] = Some(page);
-		self.inner().page_orders[0] = order;
-		Ok(())
+	pub fn add_mapping(&self, virtual_address: Area, physical_address: Area, rwx: arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
+		let r = self.inner().shared_state.virtual_memory.add(virtual_address, physical_address, rwx);
+		crate::log::debug_usize("va", virtual_address.start().as_ptr() as usize, 16);
+		crate::log::debug_usize("pa", physical_address.start().as_ptr() as usize, 16);
+		crate::log::debug_usize("va->vms->pa", self.inner().shared_state.virtual_memory.get(virtual_address.start().cast()).unwrap().0.as_ptr() as usize, 16);
+		r
 	}
 
 	/// Set the program counter of this task to the given address.
@@ -118,6 +121,13 @@ impl Task {
 		crate::log::debug_str("NEXT");
 		crate::log::debug_usize("tid", task.id() as usize, 10);
 		crate::log::debug_usize("pc", task.inner().register_state.pc as usize, 16);
+		crate::log::debug_usize("vms", unsafe { *core::mem::transmute::<_, &usize>(&task.inner().shared_state) }, 16);
+		crate::log::debug_usize("self <-> vms", unsafe {
+			core::mem::transmute::<_, usize>(&task.inner().shared_state) - core::mem::transmute::<_, usize>(task.inner())
+		}, 10);
+		let pc = task.inner().shared_state.virtual_memory.get(NonNull::new(task.inner().register_state.pc as *mut _).unwrap());
+		crate::log::debug_usize("pc", pc.unwrap().0 .as_ptr() as usize, 16);
+		crate::log::debug_usize("sp", task.inner().stack.as_ptr() as usize, 16);
 		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
 		unsafe { arch::trap_start_task(task) }
 	}
@@ -136,6 +146,11 @@ impl Task {
 			prev.inner().next_task = task.clone();
 			next.inner().prev_task = task;
 		}
+	}
+
+	/// Return the physical address the given virtual address maps to.
+	pub fn translate_virtual_address(&self, address: NonNull<u8>) -> Option<(NonNull<u8>, crate::arch::RWX)> {
+		self.inner().shared_state.virtual_memory.get(address)
 	}
 
 	/// Return the ID of this task

@@ -135,11 +135,11 @@ const _PROGRAM_HEADER_SIZE_CHECK: usize = 0 - (56 - mem::size_of::<ProgramHeader
 /// A structure representing a single segment.
 struct Segment {
 	/// A pointer to the memory page used by this segment
-	area: Area,
+	physical_area: Area,
+	/// The virtual address of the start of this segment.
+	virtual_area: Area,
 	/// The flags of this segment (i.e. whether it's readable, executable, ...).
 	flags: u8,
-	/// The virtual address of the start of this segment.
-	virtual_address: usize,
 }
 
 /// Error that may be returned when trying to parse an ELF file.
@@ -275,8 +275,8 @@ where
 			unsafe { ptr::copy_nonoverlapping(data, area.start().cast().as_ptr(), header.file_size) };
 			segments[i].write(Segment {
 				flags: header.flags as u8,
-				area,
-				virtual_address: header.virtual_address,
+				physical_area: area,
+				virtual_area: Area::new(NonNull::new(header.virtual_address as *mut _).unwrap(), order).unwrap(),
 			});
 		}
 
@@ -289,31 +289,13 @@ where
 		})
 	}
 
-	/// Returns the physical entry address.
-	pub fn physical_entry(&self) -> *const () {
-		let address = self.entry - self.segments[0].virtual_address;
-		unsafe { self.segments[0].area.start().cast::<u8>().as_ptr().add(address).cast() }
-	}
-
-	/// Starts executing the binary by jumping to the start of the first segment
-	///
-	/// ## Safety
-	///
-	/// Since the binary may contain any arbitrary instructions it is up to the caller to ensure
-	/// adequate protections have been set up.
-	pub unsafe fn execute(&self) {
-		let address = self.physical_entry();
-		let func: unsafe extern "C" fn() = unsafe { mem::transmute(address) };
-		func();
-	}
-
 	/// Creates a new task from the ELF data.
 	pub fn create_task(&self) -> Result<crate::task::Task, crate::memory::AllocateError> {
 		let mut task = crate::task::Task::new()?;
 		for s in self.segments.iter() {
-			task.add_mapping(s.area.start(), s.area.order());
+			task.add_mapping(s.virtual_area, s.physical_area, crate::arch::RWX::RWX).unwrap();
 		}
-		task.set_pc(self.physical_entry());
+		task.set_pc(self.entry as *const _);
 		Ok(task)
 	}
 }
@@ -337,7 +319,7 @@ impl Drop for Segment {
 			// shouldn't be being dropped in the first place).
 			if MEMORY_MANAGER
 				.lock()
-				.deallocate(self.area)
+				.deallocate(self.physical_area)
 				.is_err()
 			{
 				log::error(&[

@@ -7,9 +7,9 @@
 //!
 //! [rv]: https://riscv.org/wp-content/uploads/2017/05/riscv-privileged-v1.10.pdf
 
-use super::RWX;
+use super::{AddError, RWX};
 use crate::arch;
-use crate::arch::Page;
+use crate::arch::{Page, VirtualMemorySystem};
 use crate::MEMORY_MANAGER;
 use crate::memory::{Area, AllocateError};
 use core::convert::TryFrom;
@@ -54,32 +54,26 @@ struct TablePage(NonNull<Page>);
 
 struct VirtualAddress(u64);
 
-pub struct PhysicalAddress(u64);
+struct PhysicalAddress(u64);
 
 /// The root table of a Sv39 VMS.
-struct Sv39(TablePage);
-
-/// Possible errors when adding a mapping
-#[derive(Debug)]
-enum AddError {
-	/// The mapping overlaps with an existing mapping
-	Overlaps,
-	/// The areas don't have the same order (i.e. size).
-	NonEqualOrder,
-}
+pub struct Sv39(TablePage);
 
 impl Entry {
 	const PAGE_MASK: u64 = arch::PAGE_MASK as u64;
 
 	const VALID_MASK: u64 = 0b1;
+
 	const RWX_MASK: u64 = 0b1110;
 	const _RWX_MASK_CHECK: u64 = 0 - (Self::RWX_MASK - RWX::MASK_64);
+
+	const USERMODE_MASK: u64 = 0b1_0000;
 
 	const PPN_2_OFFSET: u8 = 28;
 	const PPN_1_OFFSET: u8 = 19;
 	const PPN_0_OFFSET: u8 = 10;
 
-	const PPN_2_MASK: u64 = 0x1ff_ffff << Self::PPN_2_OFFSET;
+	const PPN_2_MASK: u64 = 0x3ff_ffff << Self::PPN_2_OFFSET;
 	const PPN_1_MASK: u64 = 0x1ff << Self::PPN_1_OFFSET;
 	const PPN_0_MASK: u64 = 0x1ff << Self::PPN_0_OFFSET;
 
@@ -94,14 +88,18 @@ impl Entry {
 		s.0 |= physical_address.ppn_0() << Self::PPN_0_OFFSET;
 		s.set_rwx(rwx);
 		s.set_valid(true);
+		s.set_usermode(true);
+		s.0 |= 0b1100_0000;
 		s
 	}
 
 	/// Create a new entry for a single table entry.
 	#[must_use]
 	fn new_table(table: TablePage) -> Self {
-		let mut s = Self(table.0.as_ptr() as u64);
+		let s = table.0.as_ptr() as u64;
+		let mut s = Self(s >> 2);
 		s.set_valid(true);
+		s.set_usermode(true);
 		s
 	}
 
@@ -129,13 +127,21 @@ impl Entry {
 		self.0 |= u64::from(rwx);
 	}
 
+	/// Set whether this page can be accesses by usermode.
+	fn set_usermode(&mut self, allow: bool) {
+		self.0 &= !Self::USERMODE_MASK;
+		self.0 |= u64::from(allow) * Self::USERMODE_MASK;
+	}
+
 	/// Return as a pointer to a page table.
 	#[must_use]
 	fn as_table(&self) -> Option<TablePage> {
 		if self.is_valid() && self.rwx().is_none() {
 			debug_assert_ne!(self.0 & !Self::PAGE_MASK, 0, "Table pointer is null");
+			let s = self.0 >> Self::PPN_0_OFFSET;
+			let s = s << 12;
 			unsafe {
-				Some(TablePage(NonNull::new_unchecked((self.0 & !Self::PAGE_MASK) as *mut _)))
+				Some(TablePage(NonNull::new_unchecked(s as *mut _)))
 			}
 		} else {
 			None

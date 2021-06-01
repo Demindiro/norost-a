@@ -31,6 +31,7 @@
 #![feature(raw)]
 #![feature(slice_ptr_len)]
 #![feature(stmt_expr_attributes)]
+#![feature(trivial_bounds)]
 #![feature(link_llvm_intrinsics)]
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
@@ -215,6 +216,20 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 #[no_mangle]
 #[cfg(not(test))]
 extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_size: usize) {
+	// TODO FIXME
+	unsafe {
+		// Set pmpcfg0 and pmpaddr0 to allow access to everything in S and U mode
+		// Use TOR mode with top address set to -1
+		asm!("
+			li		t0, -1
+			srli	t0, t0, 10
+			csrw	0x3b0, t0
+			li		t0, 0xf
+			csrw	0x3a0, t0
+		", lateout("t0") _);
+	}
+
+
 	// Log architecture info
 	use arch::*;
 	arch::id().log();

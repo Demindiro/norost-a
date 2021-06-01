@@ -6,6 +6,7 @@ members = [
 
 
 [profile.dev]
+opt-level = 1
 panic = "abort"
 debug = true
 

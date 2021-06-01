@@ -1,5 +1,5 @@
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
-mod riscv;
+pub mod riscv;
 #[cfg(target_arch = "riscv64")]
 use riscv::rv64 as riscv64;
 
@@ -17,6 +17,12 @@ pub use riscv::RegisterState;
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub use riscv::Page;
 
+/// A system to manage virtual to physical memory mappings.
+#[cfg(target_arch = "riscv64")]
+pub type VirtualMemorySystem = riscv::vms::Sv39;
+
+#[cfg(target_arch = "riscv64")]
+pub type RWX = riscv::vms::RWX;
 
 /// All supported ELF flags.
 // FIXME we need a way to detect individual features at compile time.

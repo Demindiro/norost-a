@@ -2,6 +2,14 @@
 .equ	REGBYTES, 8
 .equ	REGORDER, 3
 
+.if 0	# TODO detect features at compile time
+	.equ	REGSTATE_SIZE, 64 * REGBYTES
+.elseif 0
+	.equ	REGSTATE_SIZE, TODO * REGBYTES
+.else
+	.equ	REGSTATE_SIZE, 32 * REGBYTES
+.endif
+
 ## Save only the caller-saved integer registers. Normally used in the interrupt prologue.
 ##
 ## The first argument indicates which register the pointer to the `RegisterState` is located in.

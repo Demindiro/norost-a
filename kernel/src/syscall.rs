@@ -114,10 +114,13 @@ mod sys {
 
 	sys! {
 		/// Writes something.
-		[_] write(a0, a1, a2) {
+		[task] write(a0, a1, a2) {
+			// FIXME this is actually incorrect since we don't check for page boundaries.
+			// However, this call will be removed sometime soon anyways so whatever.
+			let a1 = task.translate_virtual_address(core::ptr::NonNull::new(a1 as *mut _).unwrap()).unwrap();
+			let s = unsafe { core::slice::from_raw_parts(a1.0.as_ptr(), a2) };
 			crate::io::uart::default(|uart| {
 				use crate::io::Device;
-				let s = unsafe { core::slice::from_raw_parts(a1 as *const u8, a2) };
 				uart.write(s);
 				Return(Status::Ok, a2)
 			}).unwrap_or(Return(Status::Retry, 0))
@@ -127,7 +130,10 @@ mod sys {
 	sys! {
 		/// Destroys the current task.
 		[_] exit(a0) {
-			Return(Status::NoCall, 0)
+			crate::log::debug_str("Exiting task and sleeping forever");
+			loop {
+				crate::powerstate::halt();
+			}
 		}
 	}
 
@@ -136,9 +142,8 @@ mod sys {
 		/// `a1`.
 		// TODO actually sleep instead of just "yield"
 		[task] sleep(a0, a1) {
-			todo!()
-				// TODO undefined reference
-			//unsafe { arch::trap_next_task(task) };
+			// TODO undefined reference
+			unsafe { arch::trap_next_task(task) };
 		}
 	}
 
