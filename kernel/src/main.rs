@@ -375,7 +375,7 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	let alloc = MEMORY_MANAGER.lock().allocate(5).expect("Failed to alloc initfs heap");
 	// SAFETY: the memory is valid and not in use by anything else.
 	let alloc = unsafe {
-		alloc::allocators::WaterMark::new(alloc.cast(), arch::PAGE_SIZE << 5)
+		alloc::allocators::WaterMark::new(alloc.start().cast(), arch::PAGE_SIZE << alloc.order())
 	};
 	// SAFETY: a valid init pointer and size should have been passed by boot.s.
 	let init = unsafe { core::slice::from_raw_parts(initfs, initfs_size) };

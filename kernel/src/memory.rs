@@ -77,9 +77,20 @@ pub enum DeallocateError {
 	TrackerMismatch,
 	/// The passed order is larger than the maximum order.
 	OrderTooLarge,
-	/// The alignment is wrong for the given order (i.e. the lower bits aren't `0`).
-	BadAlignment,
 }
+
+/// Structure representing a range of pages with a certain order.
+#[derive(Clone, Copy, Debug)]
+pub struct Area {
+	/// The starting address of this area.
+	start: NonNull<Page>,
+	/// The order of this area
+	order: u8,
+}
+
+/// Structure returned if an area isn't properly aligned.
+#[derive(Debug)]
+pub struct BadAlignment;
 
 const USIZE_BITS: usize = mem::size_of::<usize>() * 8;
 const USIZE_MASK: usize = mem::size_of::<usize>() * 8 - 1;
@@ -223,24 +234,24 @@ where
 
 	/// Attempts to allocate an area of the given order.
 	#[must_use]
-	pub fn allocate(&mut self, order: usize) -> Result<NonNull<Page>, AllocateError> {
-		if order > O {
+	pub fn allocate(&mut self, order: u8) -> Result<Area, AllocateError> {
+		if usize::from(order) > O {
 			// Make the caller aware that its request will never succeed.
 			return Err(AllocateError::OrderTooLarge);
 		}
 
-		for o in order..=O {
+		for o in usize::from(order)..=O {
 			if let Some(mut area) = self.free_areas[o].next {
 				// SAFETY: The area is properly initialized as a FreeArea.
 				self.free_areas[o].next = unsafe { area.as_ref().next };
 				// Mark the left area as allocated.
-				if order < O {
+				if usize::from(order) < O {
 					// SAFETY: The area is in range
 					unsafe { self.bitmap_toggle(area.cast(), o) };
 				}
 
 				// Split the area, then return the last chunk.
-				for o in (order..o).rev() {
+				for o in (usize::from(order)..o).rev() {
 					// SAFETY: The pointer is valid.
 					unsafe {
 						area.as_ptr().write(FreeArea {
@@ -261,7 +272,10 @@ where
 					debug_assert_eq!(area.as_ptr().align_offset(PAGE_SIZE), 0);
 				}
 
-				return Ok(area.cast());
+				return Ok(Area {
+					start: area.cast(),
+					order,
+				});
 			}
 		}
 
@@ -275,25 +289,16 @@ where
 	/// The memory in the area may not be used after this call.
 	#[must_use]
 	#[track_caller]
-	pub unsafe fn deallocate(
-		&mut self,
-		mut area: NonNull<Page>,
-		mut order: usize,
-	) -> Result<(), DeallocateError> {
-		if order > O {
+	pub unsafe fn deallocate(&mut self, area: Area) -> Result<(), DeallocateError> {
+		if usize::from(area.order()) > O {
 			// Make the caller aware that its request will never succeed.
 			// In fact, if this error is returned something is very wrong at the callsite.
 			return Err(DeallocateError::OrderTooLarge);
 		}
 
-		// Ensure the pointer is properly aligned.
-		if area.as_ptr() as usize & ((PAGE_SIZE << order) - 1) != 0 {
-			return Err(DeallocateError::BadAlignment);
-		}
-
 		// Ensure a valid range has been passed, to prevent potential buffer overflow exploits.
-		let area_start = area.as_ptr() as usize;
-		let area_end = area.as_ptr().wrapping_add(1 << order) as usize;
+		let area_start = area.start().as_ptr() as usize;
+		let area_end = area.start().as_ptr().wrapping_add(1 << area.order()) as usize;
 		let self_start = self.start.as_ptr() as usize;
 		let self_end = self.end.as_ptr() as usize;
 		if !(self_start <= area_start && area_start <= self_end) {}
@@ -303,19 +308,17 @@ where
 			return Err(DeallocateError::OutOfBounds);
 		}
 
-		// Ensure the page is aligned properly
-		if !Self::is_area_aligned(area, order) {
-			return Err(DeallocateError::BadAlignment);
-		}
-
 		#[cfg(debug_assertions)]
 		{
 			debug_assert_ne!(self.last_free_addr, Some(area), "Double free");
 			self.last_free_addr = Some(area);
 		}
 
+		let mut order = area.order().into();
+		let mut area = area.start();
+
 		// Clear the page
-		for i in 0..1 << order {
+		for i in 0..1usize << order {
 			area.as_ptr().add(i).as_mut().unwrap_unchecked().clear();
 		}
 
@@ -458,6 +461,41 @@ where
 	}
 }
 
+impl Area {
+	/// Creates a new area of a given order and with a given address.
+	pub fn new(start: NonNull<Page>, order: u8) -> Result<Self, BadAlignment> {
+		(start.as_ptr() as usize & ((PAGE_SIZE << order) - 1) == 0)
+			.then(|| Self { start, order })
+			.ok_or(BadAlignment)
+	}
+
+	/// Returns the start of this area
+	pub fn start(&self) -> NonNull<Page> {
+		self.start
+	}
+
+	/// Returns the order of this area
+	pub fn order(&self) -> u8 {
+		self.order
+	}
+
+	/// Split this area into two areas with half the size. 
+	pub fn split(&self) -> Option<(Self, Self)> {
+		self.order.checked_sub(1).map(|order| (
+			Self {
+				start: self.start,
+				order,
+			},
+			Self {
+				// SAFETY: the pointer won't overflow as that is a guarantee provided by Self
+				// being a valid area.
+				start: unsafe { NonNull::new_unchecked(self.start.as_ptr().add(1 << order)) },
+				order,
+			}
+		))
+	}
+}
+
 #[cfg(test)]
 mod test {
 	use super::*;
@@ -577,7 +615,7 @@ mod test {
 		let a = mm.allocate(1).unwrap();
 		check(&mm, 0, 1);
 		check(&mm, 1, 3);
-		check_bm(&mm, a.cast(), 0, false);
+		check_bm(&mm, a.start(), 0, false);
 	});
 
 	test!(create_1_alloc_1x0() {
@@ -589,7 +627,7 @@ mod test {
 		check(&mm, 1, 4);
 		// False since the first page should be allocated, which has no buddy
 		// (1 page for bitmap, 9 for allocation -> 1 unpaired)
-		check_bm(&mm, a.cast(), 0, false);
+		check_bm(&mm, a.start(), 0, false);
 	});
 
 	test!(create_1_alloc_1x0_1x1() {
@@ -602,7 +640,7 @@ mod test {
 		check(&mm, 0, 0);
 		check(&mm, 1, 3);
 		// False since the last page should be allocated, which has no buddy
-		check_bm(&mm, a.cast(), 0, false);
+		check_bm(&mm, a.start(), 0, false);
 	});
 
 	test!(create_1_alloc_1x1_1x0() {
@@ -615,7 +653,7 @@ mod test {
 		check(&mm, 0, 0);
 		check(&mm, 1, 3);
 		// False since the last page should be allocated, which has no buddy
-		check_bm(&mm, b.cast(), 0, false);
+		check_bm(&mm, b.start(), 0, false);
 	});
 
 	test!(create_2_alloc_1x0_1x1_1x0_1x2() {
@@ -623,35 +661,35 @@ mod test {
 		let mut mm = new::<2>(10);
 		// xa FF | FF FF | FF
 		let a = mm.allocate(0).unwrap();
-		check_bm(&mm, a.cast(), 0, false); // x | a
-		check_bm(&mm, a.cast(), 1, true); // xa | FF
+		check_bm(&mm, a.start(), 0, false); // x | a
+		check_bm(&mm, a.start(), 1, true); // xa | FF
 		// xa bb | FF FF | FF  OR  xa FF | FF FF | bb
 		let b = mm.allocate(1).unwrap();
-		check_bm(&mm, a.cast(), 0, false); // x | a
-		check_bm(&mm, b.cast(), 0, false); // b | b
+		check_bm(&mm, a.start(), 0, false); // x | a
+		check_bm(&mm, b.start(), 0, false); // b | b
 		// xa bb | FF FF | cF  OR  xa cF | FF FF | bb
 		let c = mm.allocate(0).unwrap();
-		check_bm(&mm, a.cast(), 0, false); // x | a
-		check_bm(&mm, a.cast(), 1, false); // xa | bb  OR  xa | cF
-		check_bm(&mm, b.cast(), 0, false); // b | b
-		check_bm(&mm, c.cast(), 0, true); // c | F
+		check_bm(&mm, a.start(), 0, false); // x | a
+		check_bm(&mm, a.start(), 1, false); // xa | bb  OR  xa | cF
+		check_bm(&mm, b.start(), 0, false); // b | b
+		check_bm(&mm, c.start(), 0, true); // c | F
 		// xa bb | dd dd | cF  OR  xa cF | dd dd | bb
 		let d = mm.allocate(2).unwrap();
 		check(&mm, 0, 1);
 		check(&mm, 1, 0);
 		check(&mm, 2, 0);
-		check_bm(&mm, a.cast(), 0, false); // x | a
-		check_bm(&mm, a.cast(), 1, false); // xa | bb  OR  xa | cF
-		check_bm(&mm, b.cast(), 0, false); // b | b
-		check_bm(&mm, c.cast(), 0, true); // c | F
-		check_bm(&mm, d.cast(), 1, false); // dd | dd
-		check_bm(&mm, d.cast(), 0, false); // d | d
+		check_bm(&mm, a.start(), 0, false); // x | a
+		check_bm(&mm, a.start(), 1, false); // xa | bb  OR  xa | cF
+		check_bm(&mm, b.start(), 0, false); // b | b
+		check_bm(&mm, c.start(), 0, true); // c | F
+		check_bm(&mm, d.start(), 1, false); // dd | dd
+		check_bm(&mm, d.start(), 0, false); // d | d
 	});
 
 	test!(create_0_alloc_1x0_dealloc_1x0() {
 		let mut mm = new::<0>(10);
 		let a = mm.allocate(0).unwrap();
-		unsafe { mm.deallocate(a.cast(), 0).unwrap(); }
+		unsafe { mm.deallocate(a).unwrap(); }
 		// No bitmap
 		check(&mm, 0, 10);
 	});
@@ -660,8 +698,8 @@ mod test {
 		let mut mm = new::<0>(10);
 		let a = mm.allocate(0).unwrap();
 		let b = mm.allocate(0).unwrap();
-		unsafe { mm.deallocate(a.cast(), 0).unwrap(); }
-		unsafe { mm.deallocate(b.cast(), 0).unwrap(); }
+		unsafe { mm.deallocate(a).unwrap(); }
+		unsafe { mm.deallocate(b).unwrap(); }
 		// No bitmap
 		check(&mm, 0, 10);
 	});
@@ -669,22 +707,22 @@ mod test {
 	test!(create_1_alloc_1x1_dealloc_1x1() {
 		let mut mm = new::<1>(10);
 		let a = mm.allocate(1).unwrap();
-		unsafe { mm.deallocate(a.cast(), 1).unwrap(); }
+		unsafe { mm.deallocate(a).unwrap(); }
 		check(&mm, 0, 1);
 		check(&mm, 1, 4);
-		check_bm(&mm, a.cast(), 0, false);
+		check_bm(&mm, a.start(), 0, false);
 	});
 
 	test!(create_1_alloc_1x1_dealloc_2x0() {
 		let mut mm = new::<1>(10);
-		let a2: NonNull<Page> = mm.allocate(1).unwrap().cast();
-		let (a, b) = (a2, NonNull::new(a2.as_ptr().wrapping_add(1)).unwrap());
-		unsafe { mm.deallocate(a, 0).unwrap(); }
-		unsafe { mm.deallocate(b, 0).unwrap(); }
+		let a2 = mm.allocate(1).unwrap();
+		let (a, b) = a2.split().unwrap();
+		unsafe { mm.deallocate(a).unwrap(); }
+		unsafe { mm.deallocate(b).unwrap(); }
 		check(&mm, 0, 1);
 		check(&mm, 1, 4);
-		check_bm(&mm, a.cast(), 0, false);
-		check_bm(&mm, b.cast(), 0, false);
+		check_bm(&mm, a.start(), 0, false);
+		check_bm(&mm, b.start(), 0, false);
 	});
 
 	test!(create_3_alloc_1x3_dealloc_2x1_1x1_2x0() {
@@ -694,79 +732,70 @@ mod test {
 		mm.allocate(0);
 		mm.allocate(1);
 		mm.allocate(2);
-		let a4: NonNull<Page> = mm.allocate(3).unwrap().cast();
-		let a = a4;
-		let b = NonNull::new(a4.as_ptr().wrapping_add(2)).unwrap();
-		let c = NonNull::new(a4.as_ptr().wrapping_add(4)).unwrap();
-		let d = NonNull::new(a4.as_ptr().wrapping_add(6)).unwrap();
+		let a4 = mm.allocate(3).unwrap();
+		let (a2, b2) = a4.split().unwrap();
+		let (a, b) = a2.split().unwrap();
+		let (c, d) = b2.split().unwrap();
 		// Intentionally fragment the memory ( FF xx | xx FF )
-		unsafe { mm.deallocate(b, 1).unwrap(); }
-		unsafe { mm.deallocate(c, 1).unwrap(); }
+		unsafe { mm.deallocate(b).unwrap(); }
+		unsafe { mm.deallocate(c).unwrap(); }
 		check(&mm, 0, 0);
 		check(&mm, 1, 2);
 		check(&mm, 2, 0);
 		check(&mm, 3, 0);
-		check_bm(&mm, a.cast(), 1, true);
-		check_bm(&mm, b.cast(), 1, true);
-		check_bm(&mm, c.cast(), 1, true);
-		check_bm(&mm, d.cast(), 1, true);
+		check_bm(&mm, a.start(), 1, true);
+		check_bm(&mm, b.start(), 1, true);
+		check_bm(&mm, c.start(), 1, true);
+		check_bm(&mm, d.start(), 1, true);
 		// FF FF | xx FF
-		unsafe { mm.deallocate(a, 1).unwrap(); }
+		unsafe { mm.deallocate(a).unwrap(); }
 		check(&mm, 0, 0);
 		check(&mm, 1, 1);
 		check(&mm, 2, 1);
 		check(&mm, 3, 0);
-		check_bm(&mm, a.cast(), 1, false);
-		check_bm(&mm, b.cast(), 1, false);
-		check_bm(&mm, c.cast(), 1, true);
-		check_bm(&mm, d.cast(), 1, true);
+		check_bm(&mm, a.start(), 1, false);
+		check_bm(&mm, b.start(), 1, false);
+		check_bm(&mm, c.start(), 1, true);
+		check_bm(&mm, d.start(), 1, true);
 		// FF FF | FF FF
-		unsafe { mm.deallocate(d, 0).unwrap(); }
-		unsafe { mm.deallocate(NonNull::new(d.as_ptr().add(1)).unwrap(), 0).unwrap(); }
+		let (e, f) = d.split().unwrap();
+		unsafe { mm.deallocate(e).unwrap(); }
+		unsafe { mm.deallocate(f).unwrap(); }
 		check(&mm, 0, 0);
 		check(&mm, 1, 0);
 		check(&mm, 2, 0);
 		check(&mm, 3, 1);
-		check_bm(&mm, a.cast(), 1, false);
-		check_bm(&mm, b.cast(), 1, false);
-		check_bm(&mm, c.cast(), 1, false);
-		check_bm(&mm, d.cast(), 1, false);
+		check_bm(&mm, a.start(), 1, false);
+		check_bm(&mm, b.start(), 1, false);
+		check_bm(&mm, c.start(), 1, false);
+		check_bm(&mm, d.start(), 1, false);
 	});
 
 	test!(err_alloc_empty() {
 		let mut mm = new::<0>(2);
 		let _ = mm.allocate(0).unwrap();
 		let _ = mm.allocate(0).unwrap();
-		assert_eq!(mm.allocate(0), Err(AllocateError::Empty));
+		assert_eq!(mm.allocate(0).unwrap_err(), AllocateError::Empty);
 	});
 
 	test!(err_alloc_order_too_large() {
 		let mut mm = new::<1>(10);
-		assert_eq!(mm.allocate(2), Err(AllocateError::OrderTooLarge));
+		assert_eq!(mm.allocate(2).unwrap_err(), AllocateError::OrderTooLarge);
 	});
 
 	test!(err_dealloc_order_of_bounds() {
 		let mut mm = new::<0>(4);
-		let a = mm.allocate(0).unwrap();
-		let e = unsafe { mm.deallocate(NonNull::new(a.as_ptr().wrapping_sub(1)).unwrap(), 0) };
-		assert_eq!(e, Err(DeallocateError::OutOfBounds));
-		let e = unsafe { mm.deallocate(NonNull::new(a.as_ptr().wrapping_add(4)).unwrap(), 0) };
-		assert_eq!(e, Err(DeallocateError::OutOfBounds));
-	});
-
-	test!(err_dealloc_bad_align() {
-		let mut mm = new::<1>(16);
-		let a = mm.allocate(1).unwrap();
-		let e = (a.as_ptr() as usize + 1) as *mut _;
-		let e = unsafe { mm.deallocate(NonNull::new(e).unwrap(), 0) };
-		assert_eq!(e, Err(DeallocateError::BadAlignment));
-		let e = unsafe { mm.deallocate(NonNull::new(a.as_ptr().wrapping_add(1)).unwrap(), 1) };
-		assert_eq!(e, Err(DeallocateError::BadAlignment));
+		let a = mm.allocate(0).unwrap().start();
+		let e = unsafe { mm.deallocate(Area::new(NonNull::new(a.as_ptr().wrapping_sub(1)).unwrap(), 0).unwrap()) };
+		assert_eq!(e.unwrap_err(), DeallocateError::OutOfBounds);
+		let e = unsafe { mm.deallocate(Area::new(NonNull::new(a.as_ptr().wrapping_add(4)).unwrap(), 0).unwrap()) };
+		assert_eq!(e.unwrap_err(), DeallocateError::OutOfBounds);
 	});
 
 	test!(err_dealloc_order_too_large() {
 		let mut mm = new::<1>(10);
-		let a = mm.allocate(1).unwrap();
-		assert_eq!(unsafe { mm.deallocate(a, 2) }, Err(DeallocateError::OrderTooLarge));
+		let mut a = mm.allocate(1).unwrap();
+		a.order = 2;
+		assert_eq!(unsafe { mm.deallocate(a) }, Err(DeallocateError::OrderTooLarge));
 	});
 }

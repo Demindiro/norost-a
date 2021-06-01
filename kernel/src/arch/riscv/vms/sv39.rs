@@ -11,7 +11,7 @@ use super::RWX;
 use crate::arch;
 use crate::arch::Page;
 use crate::MEMORY_MANAGER;
-use crate::memory::AllocateError;
+use crate::memory::{Area, AllocateError};
 use core::convert::TryFrom;
 use core::ptr::NonNull;
 use core::ops;
@@ -64,6 +64,8 @@ struct Sv39(TablePage);
 enum AddError {
 	/// The mapping overlaps with an existing mapping
 	Overlaps,
+	/// The areas don't have the same order (i.e. size).
+	NonEqualOrder,
 }
 
 impl Entry {
@@ -213,7 +215,7 @@ impl ops::DerefMut for Table {
 impl TablePage {
 	/// Create a new table with empty (zeroed) entries.
 	fn new() -> Result<Self, AllocateError> {
-		Ok(Self(MEMORY_MANAGER.lock().allocate(0)?))
+		Ok(Self(MEMORY_MANAGER.lock().allocate(0)?.start()))
 	}
 }
 
@@ -343,21 +345,15 @@ impl Sv39 {
 	/// `Err(AlreadyUsed)` if the mapping was already in use.
 	/// `Err(NoSpace)` if there is no address range that is large enough.
 	/// `Err(OutOfBounds)` if the `order` is too large for the given address.
-	pub fn add(&mut self, virtual_address: NonNull<Page>, physical_address: NonNull<Page>, rwx: RWX, order: u8) -> Result<(), AddError> {
-		debug_assert_eq!(virtual_address.as_ptr() as u64 & ((Self::PAGE_SIZE << order) - 1), 0, "Virtual page isn't properly aligned");
-		debug_assert_eq!(physical_address.as_ptr() as u64 & ((Self::PAGE_SIZE << order) - 1), 0, "Physical page isn't properly aligned");
-		self.add_gigapage(virtual_address, physical_address, rwx, order)
-			.or_else(|| self.add_megapage(virtual_address, physical_address, rwx, order))
-			.unwrap_or_else(|| self.add_page(virtual_address, physical_address, rwx, order))
-	}
+	pub fn add(&mut self, virtual_address: Area, physical_address: Area, rwx: RWX) -> Result<(), AddError> {
+		if virtual_address.order() != physical_address.order() {
+			return Err(AddError::NonEqualOrder);
+		}
 
-	/// Try to add a gigapage.
-	///
-	/// ## Returns
-	///
-	/// `None` if the page isn't properly aligned and/or the order is too small.
-	fn add_gigapage(&mut self, virtual_address: NonNull<Page>, physical_address: NonNull<Page>, rwx: RWX, order: u8) -> Option<Result<(), AddError>> {
-		let va = virtual_address;
+		let order = virtual_address.order();
+		let va = virtual_address.start();
+		let pa = physical_address.start();
+
 		if order >= Self::GIGA_PAGE_ORDER {
 			let count = 1 << (order - Self::GIGA_PAGE_ORDER);
 			let mut index = VirtualAddress(va.as_ptr() as u64).ppn_2();
@@ -366,7 +362,7 @@ impl Sv39 {
 				todo!();
 			}
 			let mut va_curr = va.as_ptr() as u64;
-			let mut pa_curr = physical_address.as_ptr() as u64;
+			let mut pa_curr = pa.as_ptr() as u64;
 
 			// Write entries as we go. If the range turns out to be too small, clear them.
 			while index != end {
@@ -383,20 +379,7 @@ impl Sv39 {
 				index += 1;
 			}
 
-			Some(Ok(()))
-		} else {
-			None
-		}
-	}
-
-	/// Try to add a megapage.
-	///
-	/// ## Returns
-	///
-	/// `None` if the page isn't properly aligned and/or the order is too small.
-	fn add_megapage(&mut self, virtual_address: NonNull<Page>, physical_address: NonNull<Page>, rwx: RWX, order: u8) -> Option<Result<(), AddError>> {
-		let va = virtual_address;
-		if order >= Self::MEGA_PAGE_ORDER {
+		} else if order >= Self::MEGA_PAGE_ORDER {
 			let count = 1 << (order - Self::MEGA_PAGE_ORDER);
 			let start = VirtualAddress(va.as_ptr() as u64).ppn_21();
 			let mut index = start;
@@ -405,7 +388,7 @@ impl Sv39 {
 				todo!();
 			}
 			let mut va_curr = va.as_ptr() as u64;
-			let mut pa_curr = physical_address.as_ptr() as u64;
+			let mut pa_curr = pa.as_ptr() as u64;
 
 			let clear = #[cold] #[inline(never)] |s: &mut Self, index, err| {
 				for i in start..index {
@@ -425,7 +408,7 @@ impl Sv39 {
 					e.as_table().unwrap()
 				} else {
 					// Clear previously written entries
-					return Some(clear(self, index, AddError::Overlaps));
+					return clear(self, index, AddError::Overlaps);
 				};
 
 				let e = &mut tbl[index & (Self::ENTRIES_PER_TABLE - 1)];
@@ -437,72 +420,65 @@ impl Sv39 {
 				index += 1;
 			}
 
-			Some(Ok(()))
 		} else {
-			None
-		}
-	}
 
-	/// Try to add a regular page.
-	fn add_page(&mut self, virtual_address: NonNull<Page>, physical_address: NonNull<Page>, rwx: RWX, order: u8) -> Result<(), AddError> {
-		let va = virtual_address;
-
-		let count = 1 << order;
-		let start = VirtualAddress(va.as_ptr() as u64).ppn_210();
-		let mut index = start;
-		let end = (index + count) & (Self::ENTRIES_PER_TABLE * Self::ENTRIES_PER_TABLE * Self::ENTRIES_PER_TABLE - 1);
-		if end <= index {
-			todo!();
-		}
-		let mut va_curr = va.as_ptr() as u64;
-		let mut pa_curr = physical_address.as_ptr() as u64;
-
-		let clear = #[cold] #[inline(never)] |s: &mut Self, index, err| {
-			for i in start..index {
-				s.0[i >> 18]
-					.as_table().unwrap()[(i >> 9) & 0x1ff]
-					.as_table().unwrap()[i & 0x1ff] = Entry::INVALID;
+			let count = 1 << order;
+			let start = VirtualAddress(va.as_ptr() as u64).ppn_210();
+			let mut index = start;
+			let end = (index + count) & (Self::ENTRIES_PER_TABLE * Self::ENTRIES_PER_TABLE * Self::ENTRIES_PER_TABLE - 1);
+			if end <= index {
+				todo!();
 			}
-			Err(err)
-		};
+			let mut va_curr = va.as_ptr() as u64;
+			let mut pa_curr = pa.as_ptr() as u64;
 
-		// Write entries as we go. If the range turns out to be too small, clear them.
-		while index != end {
-
-			let e = &mut self.0[index >> 18];
-			let mut tbl = if let Some(tbl) = e.as_table() {
-				tbl
-			} else if !e.is_valid() {
-				*e = Entry::new_table(TablePage::new().expect("TODO"));
-				e.as_table().unwrap()
-			} else {
-				// Clear previously written entries
-				return clear(self, index, AddError::Overlaps);
+			let clear = #[cold] #[inline(never)] |s: &mut Self, index, err| {
+				for i in start..index {
+					s.0[i >> 18]
+						.as_table().unwrap()[(i >> 9) & 0x1ff]
+						.as_table().unwrap()[i & 0x1ff] = Entry::INVALID;
+				}
+				Err(err)
 			};
 
-			let e = &mut tbl[(index >> 9) & 0x1ff];
-			let mut tbl = if let Some(tbl) = e.as_table() {
-				tbl
-			} else if !e.is_valid() {
-				*e = Entry::new_table(TablePage::new().expect("TODO"));
-				e.as_table().unwrap()
-			} else {
-				// Clear previously written entries
-				return clear(self, index, AddError::Overlaps);
-			};
+			// Write entries as we go. If the range turns out to be too small, clear them.
+			while index != end {
 
-			let e = &mut tbl[index & 0x1ff];
-			if e.is_valid() {
-				// Clear previously written entries
-				return clear(self, index, AddError::Overlaps);
+				let e = &mut self.0[index >> 18];
+				let mut tbl = if let Some(tbl) = e.as_table() {
+					tbl
+				} else if !e.is_valid() {
+					*e = Entry::new_table(TablePage::new().expect("TODO"));
+					e.as_table().unwrap()
+				} else {
+					// Clear previously written entries
+					return clear(self, index, AddError::Overlaps);
+				};
+
+				let e = &mut tbl[(index >> 9) & 0x1ff];
+				let mut tbl = if let Some(tbl) = e.as_table() {
+					tbl
+				} else if !e.is_valid() {
+					*e = Entry::new_table(TablePage::new().expect("TODO"));
+					e.as_table().unwrap()
+				} else {
+					// Clear previously written entries
+					return clear(self, index, AddError::Overlaps);
+				};
+
+				let e = &mut tbl[index & 0x1ff];
+				if e.is_valid() {
+					// Clear previously written entries
+					return clear(self, index, AddError::Overlaps);
+				}
+
+				let va = VirtualAddress(va_curr);
+				let pa = PhysicalAddress(pa_curr);
+				*e = Entry::new_leaf(pa, rwx);
+				va_curr += Self::PAGE_SIZE;
+				pa_curr += Self::PAGE_SIZE;
+				index += 1;
 			}
-
-			let va = VirtualAddress(va_curr);
-			let pa = PhysicalAddress(pa_curr);
-			*e = Entry::new_leaf(pa, rwx);
-			va_curr += Self::PAGE_SIZE;
-			pa_curr += Self::PAGE_SIZE;
-			index += 1;
 		}
 
 		Ok(())
@@ -562,19 +538,24 @@ impl Drop for Sv39 {
 				for e in tbl.iter() {
 					if let Some(tbl) = e.as_table() {
 						// PPN[0]
+						let a = Area::new(tbl.0, 0).unwrap();
+						// SAFETY: We own a unique reference to a valid page.
 						unsafe {
-							MEMORY_MANAGER.lock().deallocate(tbl.0, 0);
+							MEMORY_MANAGER.lock().deallocate(a);
 						}
 					}
 				}
+				let a = Area::new(tbl.0, 0).unwrap();
+				// SAFETY: We own a unique reference to a valid page.
 				unsafe {
-					MEMORY_MANAGER.lock().deallocate(tbl.0, 0);
+					MEMORY_MANAGER.lock().deallocate(a);
 				}
 			}
 		}
+		let a = Area::new(self.0.0, 0).unwrap();
 		// SAFETY: We own a unique reference to a valid page.
 		unsafe {
-			MEMORY_MANAGER.lock().deallocate(self.0.0, 0);
+			MEMORY_MANAGER.lock().deallocate(a);
 		}
 	}
 }
@@ -598,25 +579,41 @@ mod test {
 		let pa_2 = NonNull::new(0x111000 as *mut _).unwrap();
 		let va_2 = NonNull::new(0x200000 as *mut _).unwrap();
 
-		sv.add(va_0.cast(), pa_0.cast(), RWX::R, 0).unwrap();
+		sv.add(
+			Area::new(va_0.cast(), 0).unwrap(),
+			Area::new(pa_0.cast(), 0).unwrap(),
+			RWX::R,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), None);
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_0.cast(), pa_1.cast(), RWX::RX, 0).unwrap_err();
+		sv.add(
+			Area::new(va_0.cast(), 0).unwrap(),
+			Area::new(pa_1.cast(), 0).unwrap(),
+			RWX::RX,
+		).unwrap_err();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), None);
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_1.cast(), pa_1.cast(), RWX::RX, 0).unwrap();
+		sv.add(
+			Area::new(va_1.cast(), 0).unwrap(),
+			Area::new(pa_1.cast(), 0).unwrap(),
+			RWX::RX,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_2.cast(), pa_2.cast(), RWX::X, 0).unwrap();
+		sv.add(
+			Area::new(va_2.cast(), 0).unwrap(),
+			Area::new(pa_2.cast(), 0).unwrap(),
+			RWX::X,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));
@@ -632,11 +629,19 @@ mod test {
 		let va_0 = NonNull::new(0x2000 as *mut _).unwrap();
 		let va_1 = NonNull::new(0x3000 as *mut _).unwrap();
 
-		sv.add(va_0.cast(), pa_0.cast(), RWX::R, 1).unwrap();
+		sv.add(
+			Area::new(va_0.cast(), 1).unwrap(),
+			Area::new(pa_0.cast(), 1).unwrap(),
+			RWX::R,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::R)));
 
-		sv.add(va_1.cast(), pa_1.cast(), RWX::RX, 0).unwrap_err();
+		sv.add(
+			Area::new(va_1.cast(), 0).unwrap(),
+			Area::new(pa_1.cast(), 0).unwrap(),
+			RWX::RX,
+		).unwrap_err();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::R)));
 	});
@@ -654,19 +659,31 @@ mod test {
 		let va_1 = NonNull::new(0x280_0000 as *mut _).unwrap();
 		let va_2 = NonNull::new(0x1000_0000 as *mut _).unwrap();
 
-		sv.add(va_0.cast(), pa_0.cast(), RWX::R, 9).unwrap();
+		sv.add(
+			Area::new(va_0.cast(), 9).unwrap(),
+			Area::new(pa_0.cast(), 9).unwrap(),
+			RWX::R,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), None);
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_1.cast(), pa_1.cast(), RWX::RX, 9).unwrap();
+		sv.add(
+			Area::new(va_1.cast(), 9).unwrap(),
+			Area::new(pa_1.cast(), 9).unwrap(),
+			RWX::RX,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_2.cast(), pa_2.cast(), RWX::RW, 9).unwrap();
+		sv.add(
+			Area::new(va_2.cast(), 9).unwrap(),
+			Area::new(pa_2.cast(), 9).unwrap(),
+			RWX::RW,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));
@@ -686,19 +703,31 @@ mod test {
 		let va_1 = NonNull::new(0x2_0000_0000 as *mut _).unwrap();
 		let va_2 = NonNull::new(0x1_8000_0000 as *mut _).unwrap();
 
-		sv.add(va_0.cast(), pa_0.cast(), RWX::R, 18).unwrap();
+		sv.add(
+			Area::new(va_0.cast(), 18).unwrap(),
+			Area::new(pa_0.cast(), 18).unwrap(),
+			RWX::R,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), None);
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_1.cast(), pa_1.cast(), RWX::RX, 18).unwrap();
+		sv.add(
+			Area::new(va_1.cast(), 18).unwrap(),
+			Area::new(pa_1.cast(), 18).unwrap(),
+			RWX::RX,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_2.cast(), pa_2.cast(), RWX::RW, 18).unwrap();
+		sv.add(
+			Area::new(va_2.cast(), 18).unwrap(),
+			Area::new(pa_2.cast(), 18).unwrap(),
+			RWX::RW,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));
@@ -718,19 +747,31 @@ mod test {
 		let va_1 = NonNull::new(0x2_0000_0000 as *mut _).unwrap();
 		let va_2 = NonNull::new(0x1_8000_0000 as *mut _).unwrap();
 
-		sv.add(va_0.cast(), pa_0.cast(), RWX::R, 18).unwrap();
+		sv.add(
+			Area::new(va_0.cast(), 18).unwrap(),
+			Area::new(pa_0.cast(), 18).unwrap(),
+			RWX::R,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), None);
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_1.cast(), pa_1.cast(), RWX::RX, 10).unwrap();
+		sv.add(
+			Area::new(va_1.cast(), 10).unwrap(),
+			Area::new(pa_1.cast(), 10).unwrap(),
+			RWX::RX,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));
 		assert_eq!(sv.get(va_2), None);
 
-		sv.add(va_2.cast(), pa_2.cast(), RWX::RW, 2).unwrap();
+		sv.add(
+			Area::new(va_2.cast(), 2).unwrap(),
+			Area::new(pa_2.cast(), 2).unwrap(),
+			RWX::RW,
+		).unwrap();
 		assert_eq!(sv.get(va_0), Some((pa_0, RWX::R)));
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));

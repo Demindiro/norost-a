@@ -30,7 +30,7 @@ use core::ptr::NonNull;
 const FIXED_PAGE_MAP_SIZE: usize = 16;
 
 /// The order (i.e. size) of each `Task` structure.
-const TASK_PAGE_ORDER: usize = 1;
+const TASK_PAGE_ORDER: u8 = 1;
 
 /// A global counter for assigning Task IDs.
 // TODO handle wrap around + try to keep TIDs low
@@ -80,8 +80,8 @@ impl Task {
 	pub fn new() -> Result<Self, AllocateError> {
 		let len = arch::PAGE_SIZE << TASK_PAGE_ORDER;
 		let pages = MEMORY_MANAGER.lock().allocate(TASK_PAGE_ORDER)?;
-		let stack = MEMORY_MANAGER.lock().allocate(0)?;
-		let task_data = pages.cast::<TaskData>();
+		let stack = MEMORY_MANAGER.lock().allocate(0)?.start();
+		let task_data = pages.start().cast::<TaskData>();
 		let task = Self(task_data);
 		// SAFETY: task is valid
 		unsafe {

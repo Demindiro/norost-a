@@ -13,6 +13,7 @@
 use crate::alloc::Box;
 use crate::log;
 use crate::{arch, memory, MEMORY_MANAGER};
+use crate::memory::Area;
 use core::alloc::{AllocError, Allocator};
 use core::ptr::NonNull;
 use core::{mem, ptr};
@@ -134,13 +135,11 @@ const _PROGRAM_HEADER_SIZE_CHECK: usize = 0 - (56 - mem::size_of::<ProgramHeader
 /// A structure representing a single segment.
 struct Segment {
 	/// A pointer to the memory page used by this segment
-	page: NonNull<arch::Page>,
-	/// The virtual address of the start of this segment.
-	virtual_address: usize,
-	/// The order (i.e. size) of the allocated page.
-	order: u8,
+	area: Area,
 	/// The flags of this segment (i.e. whether it's readable, executable, ...).
 	flags: u8,
+	/// The virtual address of the start of this segment.
+	virtual_address: usize,
 }
 
 /// Error that may be returned when trying to parse an ELF file.
@@ -266,18 +265,17 @@ where
 				order += 1;
 				align >>= 1;
 			}
-			let page = MEMORY_MANAGER
+			let area = MEMORY_MANAGER
 				.lock()
-				.allocate(order as usize)
+				.allocate(order)
 				.map_err(ParseError::AllocateError)?;
 			// FIXME can panic if the header is bad
 			let data = data[header.offset..][..header.file_size].as_ptr();
 			// SAFETY: FIXME
-			unsafe { ptr::copy_nonoverlapping(data, page.cast().as_ptr(), header.file_size) };
+			unsafe { ptr::copy_nonoverlapping(data, area.start().cast().as_ptr(), header.file_size) };
 			segments[i].write(Segment {
 				flags: header.flags as u8,
-				order,
-				page,
+				area,
 				virtual_address: header.virtual_address,
 			});
 		}
@@ -294,7 +292,7 @@ where
 	/// Returns the physical entry address.
 	pub fn physical_entry(&self) -> *const () {
 		let address = self.entry - self.segments[0].virtual_address;
-		unsafe { self.segments[0].page.cast::<u8>().as_ptr().add(address).cast() }
+		unsafe { self.segments[0].area.start().cast::<u8>().as_ptr().add(address).cast() }
 	}
 
 	/// Starts executing the binary by jumping to the start of the first segment
@@ -313,7 +311,7 @@ where
 	pub fn create_task(&self) -> Result<crate::task::Task, crate::memory::AllocateError> {
 		let mut task = crate::task::Task::new()?;
 		for s in self.segments.iter() {
-			task.add_mapping(s.page, s.order);
+			task.add_mapping(s.area.start(), s.area.order());
 		}
 		task.set_pc(self.physical_entry());
 		Ok(task)
@@ -339,7 +337,7 @@ impl Drop for Segment {
 			// shouldn't be being dropped in the first place).
 			if MEMORY_MANAGER
 				.lock()
-				.deallocate(self.page, self.order as usize)
+				.deallocate(self.area)
 				.is_err()
 			{
 				log::error(&[
