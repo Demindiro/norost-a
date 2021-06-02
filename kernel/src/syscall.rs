@@ -26,7 +26,7 @@ pub static TABLE: [Syscall; TABLE_LEN] = [
 	sys::exit,			// 2
 	sys::sleep,			// 3
 	sys::task_id,		// 4
-	sys::placeholder,	// 5
+	sys::mem_alloc,		// 5
 	sys::placeholder,	// 6
 	sys::placeholder,	// 7
 ];
@@ -151,6 +151,26 @@ mod sys {
 		/// Returns the ID of the current task.
 		[task] task_id() {
 			Return(Status::Ok, task.id() as usize)
+		}
+	}
+
+	sys! {
+		/// Allocates a range of private pages for the current task.
+		[task] mem_alloc(address, count, flags) {
+			crate::log::debug!("mem_alloc 0x{:x}, {}, {}", address, count, flags);
+			// FIXME huge security hole due to lack of checking.
+			use crate::arch::RWX;
+			let rwx = match flags & 7 {
+				0b001 => RWX::R,
+				0b100 => RWX::X,
+				0b011 => RWX::RW,
+				0b101 => RWX::RX,
+				0b111 => RWX::RWX,
+				_ => todo!("Add an error code"),
+			};
+			task.allocate_memory(core::ptr::NonNull::new(address as *mut _).unwrap(), count, rwx);
+			crate::log::debug!("Done");
+			Return(Status::Ok, address)
 		}
 	}
 

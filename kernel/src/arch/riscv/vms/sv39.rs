@@ -341,6 +341,18 @@ impl Sv39 {
 		Ok(Self(TablePage::new()?))
 	}
 
+	/// Allocate the given amount of private pages and insert it as virtual memory at the
+	/// given address.
+	pub fn allocate(&mut self, virtual_address: NonNull<Page>, count: usize, rwx: RWX) -> Result<(), AddError> {
+		let mut va = virtual_address;
+		// FIXME deallocate pages on failure.
+		memory::mem_allocate_range(count, |addr| {
+			self.add(Area::new(va, 0).unwrap(), Area::new(addr, 0).unwrap(), rwx).unwrap();
+			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
+		}).unwrap();
+		Ok(())
+	}
+
 	/// Add a mapping. If no virtual address is given, the first available
 	/// entry with enough space is used.
 	///

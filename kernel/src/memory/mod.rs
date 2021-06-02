@@ -76,6 +76,29 @@ pub fn mem_allocate(order: u8) -> Result<Area, AllocateError> {
 	}
 }
 
+/// Allocate a number of pages. The pages are not necessarily contiguous. To avoid needing to
+/// lock once per page returned or needing an array to write out to, a closure must be passed
+/// instead which can write the allocated pages out directly to whatever structure.
+///
+/// This may fail even when some pages are allocated. It is up to the caller to deallocate them.
+#[optimize(speed)]
+pub fn mem_allocate_range<F>(count: usize, mut f: F) -> Result<(), AllocateError>
+where
+	F: FnMut(NonNull<Page>),
+{
+	for _ in 0..count {
+		// TODO add a re-entrant lock to workaround this sillyness.
+		#[cfg(debug_assertions)]
+		let mut a = unsafe { BUDDY.as_ref().expect("No initialized buddy allocator").lock() };
+		#[cfg(not(debug_assertions))]
+		let mut a = unsafe { BUDDY.as_ref().unwrap_unchecked().lock() };
+		let p = a.allocate(0)?.start();
+		drop(a);
+		f(p);
+	}
+	Ok(())
+}
+
 /// Dereference an area, i.e. a range of pages. If the reference count reaches zero, the area is
 /// zeroed out and deallocated.
 #[optimize(speed)]
