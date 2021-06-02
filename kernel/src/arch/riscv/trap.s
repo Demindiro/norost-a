@@ -386,6 +386,4 @@ trap_start_task:
 	ld		x30, 30 * REGBYTES (a0)
 	ld		x31, 31 * REGBYTES (a0)
 	ld		a0, 10 * REGBYTES (a0)
-0:
-	#j	0b
 	mret

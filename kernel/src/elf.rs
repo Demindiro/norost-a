@@ -12,8 +12,8 @@
 
 use crate::alloc::Box;
 use crate::log;
-use crate::{arch, memory, MEMORY_MANAGER};
-use crate::memory::Area;
+use crate::arch;
+use crate::memory::{self, Area};
 use core::alloc::{AllocError, Allocator};
 use core::ptr::NonNull;
 use core::{mem, ptr};
@@ -265,9 +265,7 @@ where
 				order += 1;
 				align >>= 1;
 			}
-			let area = MEMORY_MANAGER
-				.lock()
-				.allocate(order)
+			let area = memory::mem_allocate(order)
 				.map_err(ParseError::AllocateError)?;
 			// FIXME can panic if the header is bad
 			let data = data[header.offset..][..header.file_size].as_ptr();
@@ -317,11 +315,7 @@ impl Drop for Segment {
 		unsafe {
 			// SAFETY: we own the page and nothing else is using the memory (if something was, we
 			// shouldn't be being dropped in the first place).
-			if MEMORY_MANAGER
-				.lock()
-				.deallocate(self.physical_area)
-				.is_err()
-			{
+			if memory::mem_deallocate(self.physical_area).is_err() {
 				log::error(&[
 					file!(),
 					":",
@@ -344,7 +338,7 @@ mod test {
 
 	/*
 	test!(parse_hello_world() {
-		let heap = MEMORY_MANAGER.lock().allocate(3).unwrap();
+		let heap = memory::mem_allocate(3).unwrap();
 		let heap = unsafe { crate::alloc::allocators::WaterMark::new(heap.cast(), 4096) };
 		let elf = ELF::parse(HELLO_WORLD_ELF_RISCV64, heap).unwrap();
 		let mut task_a = task::Task::new().unwrap();

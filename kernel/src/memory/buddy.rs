@@ -1,4 +1,4 @@
-//! Kernel-only memory manager
+//! # Buddy allocator
 //!
 //! This module keeps track of free pages in a given range of memory.
 //!
@@ -11,11 +11,13 @@
 //! [buddy]: https://www.kernel.org/doc/gorman/html/understand/understand009.html
 
 pub use crate::arch::{Page, PAGE_SIZE};
+use super::Area;
+use crate::sync::Mutex;
 use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};
 use core::{mem, slice};
 
-pub struct Manager<const O: usize>
+pub struct BuddyAllocator<const O: usize>
 where
 	[(); O + 1]: Sized,
 {
@@ -37,6 +39,11 @@ where
 	#[cfg(debug_assertions)]
 	last_free_addr: Option<NonNull<Page>>,
 }
+
+unsafe impl<const O: usize> Sync for BuddyAllocator<O>
+where
+	[(); O + 1]: Sized,
+{}
 
 /// Structure to keep track of free areas
 struct FreeAreaList<'a> {
@@ -79,27 +86,14 @@ pub enum DeallocateError {
 	OrderTooLarge,
 }
 
-/// Structure representing a range of pages with a certain order.
-#[derive(Clone, Copy, Debug)]
-pub struct Area {
-	/// The starting address of this area.
-	start: NonNull<Page>,
-	/// The order of this area
-	order: u8,
-}
-
-/// Structure returned if an area isn't properly aligned.
-#[derive(Debug)]
-pub struct BadAlignment;
-
 const USIZE_BITS: usize = mem::size_of::<usize>() * 8;
 const USIZE_MASK: usize = mem::size_of::<usize>() * 8 - 1;
 
-impl<const O: usize> Manager<O>
+impl<const O: usize> BuddyAllocator<O>
 where
 	[(); O + 1]: Sized,
 {
-	/// Creates a new `MemoryManager` with governance over the given range of pages.
+	/// Creates a new `MemoryBuddyAllocator` with governance over the given range of pages.
 	///
 	/// ## Safety
 	///
@@ -272,10 +266,10 @@ where
 					debug_assert_eq!(area.as_ptr().align_offset(PAGE_SIZE), 0);
 				}
 
-				return Ok(Area {
-					start: area.cast(),
-					order,
-				});
+				// SAFETY: we own it.
+				unsafe {
+					return Ok(Area::new_unchecked(area.cast(), order));
+				}
 			}
 		}
 
@@ -461,41 +455,6 @@ where
 	}
 }
 
-impl Area {
-	/// Creates a new area of a given order and with a given address.
-	pub fn new(start: NonNull<Page>, order: u8) -> Result<Self, BadAlignment> {
-		(start.as_ptr() as usize & ((PAGE_SIZE << order) - 1) == 0)
-			.then(|| Self { start, order })
-			.ok_or(BadAlignment)
-	}
-
-	/// Returns the start of this area
-	pub fn start(&self) -> NonNull<Page> {
-		self.start
-	}
-
-	/// Returns the order of this area
-	pub fn order(&self) -> u8 {
-		self.order
-	}
-
-	/// Split this area into two areas with half the size. 
-	pub fn split(&self) -> Option<(Self, Self)> {
-		self.order.checked_sub(1).map(|order| (
-			Self {
-				start: self.start,
-				order,
-			},
-			Self {
-				// SAFETY: the pointer won't overflow as that is a guarantee provided by Self
-				// being a valid area.
-				start: unsafe { NonNull::new_unchecked(self.start.as_ptr().add(1 << order)) },
-				order,
-			}
-		))
-	}
-}
-
 #[cfg(test)]
 mod test {
 	use super::*;
@@ -505,17 +464,17 @@ mod test {
 	const START: usize = 0x8100_0000;
 
 	/// Creates a new memory manager.
-	fn new<const O: usize>(count: usize) -> Manager<O>
+	fn new<const O: usize>(count: usize) -> BuddyAllocator<O>
 	where
 		[(); O + 1]: Sized,
 	{
 		let start = NonNull::new(START as *mut Page).unwrap();
-		unsafe { Manager::<O>::new(start, NonZeroUsize::new(count).unwrap()) }
+		unsafe { BuddyAllocator::<O>::new(start, NonZeroUsize::new(count).unwrap()) }
 	}
 
 	/// Checks the amount of free areas of the given order.
 	#[track_caller]
-	fn check<const O: usize>(manager: &Manager<O>, order: usize, expected: usize)
+	fn check<const O: usize>(manager: &BuddyAllocator<O>, order: usize, expected: usize)
 	where
 		[(); O + 1]: Sized,
 	{
@@ -539,7 +498,7 @@ mod test {
 	/// Checks if the given bit is toggled properly
 	#[track_caller]
 	fn check_bm<const O: usize>(
-		manager: &Manager<O>,
+		manager: &BuddyAllocator<O>,
 		area: NonNull<Page>,
 		order: usize,
 		expected: bool,
@@ -794,8 +753,8 @@ mod test {
 
 	test!(err_dealloc_order_too_large() {
 		let mut mm = new::<1>(10);
-		let mut a = mm.allocate(1).unwrap();
-		a.order = 2;
+		let a = mm.allocate(1).unwrap();
+		let a = unsafe { Area::new_unchecked(a.start(), 2) };
 		assert_eq!(unsafe { mm.deallocate(a) }, Err(DeallocateError::OrderTooLarge));
 	});
 }

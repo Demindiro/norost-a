@@ -32,6 +32,7 @@
 #![feature(slice_ptr_len)]
 #![feature(stmt_expr_attributes)]
 #![feature(trivial_bounds)]
+#![feature(untagged_unions)]
 #![feature(link_llvm_intrinsics)]
 #![test_runner(crate::test::runner)]
 #![reexport_test_harness_main = "test_main"]
@@ -76,60 +77,6 @@ use core::{mem, ops, panic, ptr};
 
 /// The default amount of kernel heap memory for the default allocator.
 const HEAP_MEM_MAX: usize = 0x100_000;
-
-/// The default MAX_ORDER of the memory manager. This is set to 27 which allows
-/// areas up to 512 GiB, or a single "terapage" in RISC-V lingo. This should be
-/// sufficient for a very, very long time.
-///
-/// See [`memory`](crate::memory) for more information.
-///
-/// ## References
-///
-/// Mention of "terapages" can be found in [the RISC-V manual for privileged instructions][riscv],
-/// "Sv48: Page-Based 48-bit Virtual-Memory System", section 4.5.1, page 37.
-///
-/// [riscv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
-const MEMORY_MANAGER_MAX_ORDER: usize = 27;
-
-/// A global reference to the memory manager, of which there can only be one managed by the kernel.
-pub static MEMORY_MANAGER: BootOnceCell<sync::Mutex<memory::Manager<MEMORY_MANAGER_MAX_ORDER>>> =
-	BootOnceCell(UnsafeCell::new(None));
-
-/// A variant of a `OnceCell` that is set during early boot, which means it doesn't check whether
-/// the inner value is set. This technically makes it unsafe, but if the invariant is uphold it _is_
-/// safe, hence the `deref` method is safe to use.
-pub struct BootOnceCell<T>(UnsafeCell<Option<T>>);
-
-impl<T> BootOnceCell<T> {
-	/// Sets the inner value. This should be called only once.
-	///
-	/// ## Safety
-	///
-	/// This method is called once early at boot time.
-	#[inline]
-	#[track_caller]
-	unsafe fn __init(&self, value: T) {
-		debug_assert!(
-			self.0.get().as_ref().is_none(),
-			"Inner value is already set"
-		);
-		self.0.get().write(Some(value));
-	}
-}
-
-impl<T> ops::Deref for BootOnceCell<T> {
-	type Target = T;
-
-	fn deref(&self) -> &Self::Target {
-		// SAFETY: if the `init` method was called, the inner value is safe to dereference.
-		unsafe {
-			debug_assert!(self.0.get().as_ref().is_some(), "Inner value isn't set");
-			(&*self.0.get()).as_ref().unwrap_unchecked()
-		}
-	}
-}
-
-unsafe impl<T> Sync for BootOnceCell<T> {}
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
@@ -360,11 +307,7 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
 	let mm = NonZeroUsize::new(size / arch::PAGE_SIZE).expect("Memory range is zero-sized");
-	let mm = unsafe { memory::Manager::<MEMORY_MANAGER_MAX_ORDER>::new(address.cast(), mm) };
-	// SAFETY: the init function hasn't been called yet.
-	unsafe {
-		MEMORY_MANAGER.__init(sync::Mutex::new(mm));
-	}
+	let mm = unsafe { memory::mem_add_range(address.cast(), mm) };
 
 	// Log some of the properties we just fetched
 	log::info(&["Device model: '", model, "'"]);
@@ -387,7 +330,7 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 
 	// Run init
 	// 128 KiB with 4 KiB pages
-	let alloc = MEMORY_MANAGER.lock().allocate(5).expect("Failed to alloc initfs heap");
+	let alloc = memory::mem_allocate(5).expect("Failed to alloc initfs heap");
 	// SAFETY: the memory is valid and not in use by anything else.
 	let alloc = unsafe {
 		alloc::allocators::WaterMark::new(alloc.start().cast(), arch::PAGE_SIZE << alloc.order())
@@ -428,13 +371,9 @@ mod test {
 			// overwriting it's state.
 			// Incredibly unsafe, but w/e.
 			unsafe {
-				MEMORY_MANAGER
-					.0
-					.get()
-					.write(Some(sync::Mutex::new(memory::Manager::new(
-						MEMORY_MANAGER_ADDRESS,
+				memory::mem_add_range(MEMORY_MANAGER_ADDRESS,
 						NonZeroUsize::new(256).unwrap(),
-					))));
+					);
 			}
 			f();
 		}

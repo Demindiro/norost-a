@@ -10,8 +10,7 @@
 use super::{AddError, RWX};
 use crate::arch;
 use crate::arch::{Page, VirtualMemorySystem};
-use crate::MEMORY_MANAGER;
-use crate::memory::{Area, AllocateError};
+use crate::memory::{self, Area, AllocateError};
 use core::convert::TryFrom;
 use core::ptr::NonNull;
 use core::ops;
@@ -221,7 +220,7 @@ impl ops::DerefMut for Table {
 impl TablePage {
 	/// Create a new table with empty (zeroed) entries.
 	fn new() -> Result<Self, AllocateError> {
-		Ok(Self(MEMORY_MANAGER.lock().allocate(0)?.start()))
+		Ok(Self(memory::mem_allocate(0)?.start()))
 	}
 }
 
@@ -547,21 +546,21 @@ impl Drop for Sv39 {
 						let a = Area::new(tbl.0, 0).unwrap();
 						// SAFETY: We own a unique reference to a valid page.
 						unsafe {
-							MEMORY_MANAGER.lock().deallocate(a);
+							memory::mem_deallocate(a);
 						}
 					}
 				}
 				let a = Area::new(tbl.0, 0).unwrap();
 				// SAFETY: We own a unique reference to a valid page.
 				unsafe {
-					MEMORY_MANAGER.lock().deallocate(a);
+					memory::mem_deallocate(a);
 				}
 			}
 		}
 		let a = Area::new(self.0.0, 0).unwrap();
 		// SAFETY: We own a unique reference to a valid page.
 		unsafe {
-			MEMORY_MANAGER.lock().deallocate(a);
+			memory::mem_deallocate(a);
 		}
 	}
 }

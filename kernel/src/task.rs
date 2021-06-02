@@ -18,8 +18,7 @@
 //! it.
 
 use crate::arch;
-use crate::memory::{AllocateError, Area};
-use crate::MEMORY_MANAGER;
+use crate::memory::{self, AllocateError, Area};
 use core::sync::atomic;
 use core::ptr::NonNull;
 
@@ -81,8 +80,8 @@ impl Task {
 	pub fn new() -> Result<Self, AllocateError> {
 		// FIXME may leak memory on alloc error.
 		let len = arch::PAGE_SIZE << TASK_PAGE_ORDER;
-		let pages = MEMORY_MANAGER.lock().allocate(TASK_PAGE_ORDER)?;
-		let stack = MEMORY_MANAGER.lock().allocate(0)?.start();
+		let pages = memory::mem_allocate(TASK_PAGE_ORDER)?;
+		let stack = memory::mem_allocate(0)?.start();
 		let task_data = pages.start().cast::<TaskData>();
 		let task = Self(task_data);
 		// SAFETY: task is valid
