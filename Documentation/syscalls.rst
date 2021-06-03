@@ -38,6 +38,8 @@ Listing
 +------------------------+----+
 | mem_alloc_             | xx |
 +------------------------+----+
+| mem_alloc_shared_      | xx |
++------------------------+----+
 | mem_dealloc_           | xx |
 +------------------------+----+
 | mem_alloc_range_       | xx |
@@ -179,20 +181,6 @@ A ``io_ring_reponder`` has the following fields:
 ``size`` must be a power of two.
 
 
-io_destroy_responder
-''''''''''''''''''''
-
-+--------+----------------------------+----------------------------+
-| **ID** |                         xx |                            |
-+--------+----------------------------+----------------------------+
-| **a0** | ``*mut io_ring_responder`` | ``request_buffer``         |
-+--------+----------------------------+----------------------------+
-| **r0** | ``io_ring_destroy_status`` | ``status``                 |
-+--------+----------------------------+----------------------------+
-
-Removes the registered ``io_ring_responder`` from the kernel.
-
-
 mem_alloc
 '''''''''
 
@@ -201,20 +189,40 @@ mem_alloc
 +--------+---------------------------+----------------------------+
 | **a0** | ``*const mem_page``       | ``virtual_address``        |
 +--------+---------------------------+----------------------------+
-| **a1** | ``usize``                 | ``order``                  |
+| **a1** | ``usize``                 | ``count``                  |
 +--------+---------------------------+----------------------------+
-| **a2** | ``usize``                 | ``count``                  |
-+--------+---------------------------+----------------------------+
-| **a3** | ``u8``                    | ``flags``                  |
+| **a2** | ``u8``                    | ``flags``                  |
 +--------+---------------------------+----------------------------+
 | **r0** | ``mem_alloc_status``      | ``status``                 |
 +--------+---------------------------+----------------------------+
 | **r1** | ``*const mem_page``       | ``allocation``             |
 +--------+---------------------------+----------------------------+
 
-Allocates a number of pages with the given ``order``. The ``order`` can be
-used for alignment or to allocate huge pages. The allocated pages will be
-mapped to ``virtual_address``.
+Allocate ``count`` pages. The allocated pages will be mapped to
+``virtual_address``.
+
+``virtual_address`` must be properly aligned.
+
+Valid flags are:
+
+* ``PROTECT_ALLOW_READ`` (``0x1``): Allow reading the pages.
+
+* ``PROTECT_ALLOW_WRITE`` (``0x2``): Allow writing the pages.
+
+* ``PROTECT_ALLOW_EXECUTE`` (``0x4``): Allow fetching and executing
+  instructions from the pages.
+
+* ``SHAREABLE`` (``0x8``): Allow sharing the pages with other tasks.
+
+* ``SIZE_MEGAPAGE`` (``0x10``): Allocate a megapage. The size and alignment
+  is architecture-dependent.
+
+* ``SIZE_GIGAPAGE`` (``0x20``): Allocate a gigapage. The size and alignment
+  is architecture-dependent.
+
+* ``SIZE_TERAPAGE`` (``0x30``): Allocate a terapage. The size and alignment
+  is architecture-dependent.
+
 
 The pages are guaranteed to be zeroed.
 
@@ -227,50 +235,13 @@ mem_dealloc
 +--------+---------------------------+----------------------------+
 | **a0** | ``*const mem_page``       | ``virtual_address``        |
 +--------+---------------------------+----------------------------+
-| **a1** | ``usize``                 | ``order``                  |
-+--------+---------------------------+----------------------------+
-| **a2** | ``usize``                 | ``count``                  |
+| **a1** | ``usize``                 | ``count``                  |
 +--------+---------------------------+----------------------------+
 | **r0** | ``mem_dealloc_status``    | ``status``                 |
 +--------+---------------------------+----------------------------+
 
-Deallocates a number of pages with the given ``order`` at the given address.
-
-
-mem_alloc_range
-'''''''''''''''
-
-+--------+---------------------------+----------------------------+
-| **ID** |                        xx |                            |
-+--------+---------------------------+----------------------------+
-| **a0** | ``*const mem_page``       | ``virtual_address``        |
-+--------+---------------------------+----------------------------+
-| **a1** | ``usize``                 | ``order``                  |
-+--------+---------------------------+----------------------------+
-| **a2** | ``usize``                 | ``count``                  |
-+--------+---------------------------+----------------------------+
-| **r0** | ``mem_dealloc_status``    | ``status``                 |
-+--------+---------------------------+----------------------------+
-
-Allocates multiple ranges of pages at once.
-
-
-mem_dealloc_range
-'''''''''''''''''
-
-+--------+---------------------------+----------------------------+
-| **ID** |                        xx |                            |
-+--------+---------------------------+----------------------------+
-| **a0** | ``*const mem_page``       | ``virtual_address``        |
-+--------+---------------------------+----------------------------+
-| **a1** | ``usize``                 | ``order``                  |
-+--------+---------------------------+----------------------------+
-| **a2** | ``usize``                 | ``count``                  |
-+--------+---------------------------+----------------------------+
-| **r0** | ``mem_dealloc_status``    | ``status``                 |
-+--------+---------------------------+----------------------------+
-
-Deallocates multiple ranges of pages at once.
+Deallocates a range of pages starting from the given address. The address must
+be properly aligned.
 
 
 mem_get_flags
