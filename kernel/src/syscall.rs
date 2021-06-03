@@ -21,14 +21,14 @@ pub const TABLE_LEN: usize = 8;
 /// Table with all syscalls.
 #[export_name = "syscall_table"]
 pub static TABLE: [Syscall; TABLE_LEN] = [
-	sys::read,			// 0
-	sys::write,			// 1
-	sys::exit,			// 2
-	sys::sleep,			// 3
-	sys::task_id,		// 4
-	sys::mem_alloc,		// 5
-	sys::placeholder,	// 6
-	sys::placeholder,	// 7
+	sys::read,				// 0
+	sys::write,				// 1
+	sys::exit,				// 2
+	sys::sleep,				// 3
+	sys::task_id,			// 4
+	sys::mem_alloc,			// 5
+	sys::mem_alloc_shared,	// 6
+	sys::placeholder,		// 7
 ];
 
 /// Enum representing whether a syscall was successfull or failed.
@@ -169,6 +169,26 @@ mod sys {
 				_ => todo!("Add an error code"),
 			};
 			task.allocate_memory(core::ptr::NonNull::new(address as *mut _).unwrap(), count, rwx);
+			crate::log::debug!("Done");
+			Return(Status::Ok, address)
+		}
+	}
+
+	sys! {
+		/// Allocates a range of shareable pages for the current task.
+		[task] mem_alloc_shared(address, count, flags) {
+			crate::log::debug!("mem_alloc_shared 0x{:x}, {}, {}", address, count, flags);
+			// FIXME huge security hole due to lack of checking.
+			use crate::arch::RWX;
+			let rwx = match flags & 7 {
+				0b001 => RWX::R,
+				0b100 => RWX::X,
+				0b011 => RWX::RW,
+				0b101 => RWX::RX,
+				0b111 => RWX::RWX,
+				_ => todo!("Add an error code"),
+			};
+			task.allocate_shared_memory(core::ptr::NonNull::new(address as *mut _).unwrap(), count, rwx);
 			crate::log::debug!("Done");
 			Return(Status::Ok, address)
 		}

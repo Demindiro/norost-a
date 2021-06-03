@@ -15,6 +15,9 @@ use core::convert::TryFrom;
 use core::ptr::NonNull;
 use core::ops;
 
+// TODO move this to crate::memory
+type Counter = NonNull<core::sync::atomic::AtomicU16>;
+
 /// Page table entry
 ///
 /// The format from MSb to LSb is:
@@ -48,15 +51,36 @@ enum Either {
 #[repr(align(4096))]
 struct Table([Entry; 512]);
 
+/// Counter table (level 2).
+struct CountersTable([
+	Option<NonNull<[
+		Option<NonNull<[
+			Option<Counter>;
+			512
+		]>>;
+		512
+	]>>;
+	512
+]);
+
 /// Page-allocated page table.
 struct TablePage(NonNull<Page>);
+
+/// Page-allocated counter table.
+struct CountersTablePage(Option<NonNull<CountersTable>>);
 
 struct VirtualAddress(u64);
 
 struct PhysicalAddress(u64);
 
 /// The root table of a Sv39 VMS.
-pub struct Sv39(TablePage);
+#[repr(C)]
+pub struct Sv39 {
+	/// The address mappings.
+	addresses: TablePage,
+	/// The counters for any shared mappings.
+	counters: CountersTablePage,
+}
 
 impl Entry {
 	const PAGE_MASK: u64 = arch::PAGE_MASK as u64;
@@ -242,6 +266,59 @@ impl ops::DerefMut for TablePage {
 	}
 }
 
+impl CountersTablePage {
+	/// Create a new table with empty (zeroed) entries.
+	fn new() -> Result<Self, AllocateError> {
+		Ok(Self(None))
+	}
+
+	fn set<'a>(&'a mut self, index: u64, counter: Counter) -> Result<(), AllocateError> {
+		let index = index as usize;
+		let index = (index >> 18, (index >> 9) & 0x1ff, index & 0x1ff);
+		unsafe {
+			let tbl = match self.0 {
+				Some(mut c) => c.as_mut().0.as_mut(),
+				None => {
+					let mut c = memory::mem_allocate(0)?.start().cast();
+					self.0 = Some(c);
+					c.as_mut().0.as_mut()
+				}
+			};
+			let tbl = match tbl[index.0] {
+				Some(mut c) => c.as_mut(),
+				None => {
+					let mut c = memory::mem_allocate(0)?.start().cast();
+					tbl[index.0] = Some(c);
+					c.as_mut()
+				}
+			};
+			let tbl = match tbl[index.1] {
+				Some(mut c) => c.as_mut(),
+				None => {
+					let mut c = memory::mem_allocate(0)?.start().cast();
+					tbl[index.1] = Some(c);
+					c.as_mut()
+				}
+			};
+			assert!(tbl[index.2].is_none());
+			tbl[index.2] = Some(counter);
+		}
+		Ok(())
+	}
+
+	fn get<'a>(&'a self, index: u64) -> Option<Counter> {
+		let index = index as usize;
+		let index = (index >> 18, (index >> 9) & 0x1ff, index & 0x1ff);
+		unsafe {
+			self.0
+				.map(|c| c.as_ref().0.as_ref())
+				.and_then(|c| c.as_ref()[index.0].as_ref())
+				.and_then(|c| c.as_ref()[index.1].as_ref())
+				.and_then(|c| c.as_ref()[index.2])
+		}
+	}
+}
+
 impl VirtualAddress {
 	const OFFSET_MASK: u64 = 0x3ff;
 
@@ -338,7 +415,10 @@ impl Sv39 {
 
 	/// Create a new Sv39 mapping.
 	pub fn new() -> Result<Self, AllocateError> {
-		Ok(Self(TablePage::new()?))
+		Ok(Self {
+			addresses: TablePage::new()?,
+			counters: CountersTablePage::new().unwrap(),
+		})
 	}
 
 	/// Allocate the given amount of private pages and insert it as virtual memory at the
@@ -385,7 +465,7 @@ impl Sv39 {
 			while index != end {
 				let va = VirtualAddress(va_curr);
 				let pa = PhysicalAddress(pa_curr);
-				let e = &mut self.0[index];
+				let e = &mut self.addresses[index];
 				if e.is_valid() {
 					// Clear previously written entries
 					todo!()
@@ -409,7 +489,7 @@ impl Sv39 {
 
 			let clear = #[cold] #[inline(never)] |s: &mut Self, index, err| {
 				for i in start..index {
-					s.0[i >> 9]
+					s.addresses[i >> 9]
 						.as_table().unwrap()[i & 0x1ff] = Entry::INVALID;
 				}
 				Err(err)
@@ -417,7 +497,7 @@ impl Sv39 {
 
 			// Write entries as we go. If the range turns out to be too small, clear them.
 			while index != end {
-				let e = &mut self.0[index >> 9];
+				let e = &mut self.addresses[index >> 9];
 				let mut tbl = if let Some(tbl) = e.as_table() {
 					tbl
 				} else if !e.is_valid() {
@@ -451,7 +531,7 @@ impl Sv39 {
 
 			let clear = #[cold] #[inline(never)] |s: &mut Self, index, err| {
 				for i in start..index {
-					s.0[i >> 18]
+					s.addresses[i >> 18]
 						.as_table().unwrap()[(i >> 9) & 0x1ff]
 						.as_table().unwrap()[i & 0x1ff] = Entry::INVALID;
 				}
@@ -461,7 +541,7 @@ impl Sv39 {
 			// Write entries as we go. If the range turns out to be too small, clear them.
 			while index != end {
 
-				let e = &mut self.0[index >> 18];
+				let e = &mut self.addresses[index >> 18];
 				let mut tbl = if let Some(tbl) = e.as_table() {
 					tbl
 				} else if !e.is_valid() {
@@ -501,6 +581,28 @@ impl Sv39 {
 		Ok(())
 	}
 
+	/// Allocate and add a shared mapping.
+	pub fn allocate_shared(&mut self, address: NonNull<Page>, count: usize, rwx: RWX) -> Result<(), ()> {
+		let mut va = address;
+		// FIXME deallocate pages on failure.
+		memory::mem_allocate_range(count, |page| {
+			let page = crate::memory::SharedPage::new(page).unwrap();
+			let (page, counter) = page.into_raw_parts();
+			self.add(Area::new(va, 0).unwrap(), Area::new(page, 0).unwrap(), rwx).unwrap();
+			let index = (va.as_ptr() as usize >> 12) as u64;
+			self.counters.set(index, counter);
+			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
+		}).unwrap();
+		Ok(())
+	}
+
+	/// TODO
+	#[must_use]
+	pub fn is_shared(&self, address: NonNull<u8>) -> bool {
+		let index = address.as_ptr() as usize >> 12;
+		self.counters.get(index as u64).is_some()
+	}
+
 	/// Remove a mapping.
 	/// 
 	/// ## Returns
@@ -521,7 +623,7 @@ impl Sv39 {
 	pub fn get(&self, virtual_address: NonNull<u8>) -> Option<(NonNull<u8>, RWX)> {
 		let va = VirtualAddress(virtual_address.as_ptr() as u64);
 		
-		let entry = &self.0[va.ppn_2()];
+		let entry = &self.addresses[va.ppn_2()];
 		let (ppn_2, ppn_1, ppn_0, rwx) = match entry.as_either()? {
 			Either::Table(tbl) => {
 				let entry = &tbl[va.ppn_1()];
@@ -549,7 +651,7 @@ impl Sv39 {
 impl Drop for Sv39 {
 	fn drop(&mut self) {
 		// PPN[2]
-		for e in self.0.iter() {
+		for e in self.addresses.iter() {
 			if let Some(tbl) = e.as_table() {
 				// PPN[1]
 				for e in tbl.iter() {
@@ -569,7 +671,7 @@ impl Drop for Sv39 {
 				}
 			}
 		}
-		let a = Area::new(self.0.0, 0).unwrap();
+		let a = Area::new(self.addresses.0, 0).unwrap();
 		// SAFETY: We own a unique reference to a valid page.
 		unsafe {
 			memory::mem_deallocate(a);
@@ -749,6 +851,16 @@ mod test {
 		assert_eq!(sv.get(va_0_5), Some((pa_0_5, RWX::R)));
 		assert_eq!(sv.get(va_1), Some((pa_1, RWX::RX)));
 		assert_eq!(sv.get(va_2), Some((pa_2, RWX::RW)));
+	});
+
+	test!(shared() {
+		let mut sv = Sv39::new().unwrap();
+
+		let va_0 = NonNull::new(0x14000_0000 as *mut _).unwrap();
+
+		sv.allocate_shared(va_0, 3, RWX::R);
+		assert_eq!(sv.get(va_0.cast()).unwrap().1, RWX::R);
+		assert!(sv.is_shared(va_0.cast()));
 	});
 
 	test!(mixed() {

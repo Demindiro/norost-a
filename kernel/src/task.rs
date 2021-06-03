@@ -152,9 +152,14 @@ impl Task {
 		self.inner().shared_state.virtual_memory.get(address)
 	}
 
-	/// Allocate memory at the given virtual address.
+	/// Allocate private memory at the given virtual address.
 	pub fn allocate_memory(&self, address: NonNull<crate::arch::Page>, count: usize, rwx: crate::arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
 		self.inner().shared_state.virtual_memory.allocate(address, count, rwx)
+	}
+
+	/// Allocate shared memory at the given virtual address.
+	pub fn allocate_shared_memory(&self, address: NonNull<crate::arch::Page>, count: usize, rwx: crate::arch::RWX) -> Result<(), ()> {
+		self.inner().shared_state.virtual_memory.allocate_shared(address, count, rwx)
 	}
 
 	/// Return the ID of this task

@@ -15,7 +15,7 @@ static COUNTERS: Mutex<ReferenceCounters> = Mutex::new(ReferenceCounters {
 });
 
 /// Representation of a page that can be safely shared.
-struct SharedPage {
+pub struct SharedPage {
 	/// Pointer to the page.
 	page: NonNull<Page>,
 	/// Pointer to a counter. This counter is 16 bits by default as that is likely a reasonable
@@ -26,7 +26,7 @@ struct SharedPage {
 
 /// Structure returned if the reference count would overflow.
 #[derive(Debug)]
-struct ReferenceCountOverflow;
+pub struct ReferenceCountOverflow;
 
 /// Structure used to manage reference counter tables.
 ///
@@ -77,7 +77,7 @@ const _SIZE_CHECK: usize = 0 - (PAGE_SIZE - mem::size_of::<ReferenceCountersTabl
 
 impl SharedPage {
 	/// Create a new shared page.
-	pub unsafe fn new(page: NonNull<Page>) -> Result<Self, AllocateError> {
+	pub fn new(page: NonNull<Page>) -> Result<Self, AllocateError> {
 		Ok(Self {
 			page,
 			counter: COUNTERS.lock().allocate()?,
@@ -104,6 +104,17 @@ impl SharedPage {
 				break Err(ReferenceCountOverflow);
 			}
 		}
+	}
+
+	/// Splits the shared page into it's address and counter parts. This will not run `drop`.
+	pub fn into_raw_parts(self) -> (NonNull<Page>, NonNull<AtomicU16>) {
+		let s = mem::ManuallyDrop::new(self);
+		(s.page, s.counter)
+	}
+
+	/// Creates a SharedPage from its raw parts.
+	pub unsafe fn from_raw_parts(page: NonNull<Page>, counter: NonNull<AtomicU16>) -> Self {
+		Self { page, counter }
 	}
 }
 
@@ -196,7 +207,11 @@ impl ReferenceCountersTable {
 
 	#[must_use]
 	unsafe fn offset(&self, counter: NonNull<CounterOrOffset>) -> NonZeroU16 {
-		NonZeroU16::new_unchecked((counter.as_ptr() as usize - self as *const _ as usize) as u16)
+		let o = (counter.as_ptr() as usize - self as *const _ as usize) as u16;
+		#[cfg(debug_assertions)]
+		{ NonZeroU16::new(o).unwrap() }
+		#[cfg(not(debug_assertions))]
+		NonZeroU16::new_unchecked(o)
 	}
 }
 
@@ -204,7 +219,15 @@ impl ReferenceCountersTable {
 mod test {
 	use super::*;
 
+	fn reset() {
+		*COUNTERS.lock() = ReferenceCounters {
+			free: None,
+			full: None,
+		}
+	}
+
 	test!(alloc_drop() {
+		reset();
 		let page = mem_allocate(0).unwrap().start();
 		unsafe {
 			SharedPage::new(page).unwrap();
@@ -212,10 +235,19 @@ mod test {
 	});
 
 	test!(alloc_clone_drop() {
+		reset();
 		let page = mem_allocate(0).unwrap().start();
 		let page = unsafe {
 			SharedPage::new(page).unwrap()
 		};
 		let page = page.try_clone().unwrap();
+	});
+
+	test!(alloc_into_raw_parts() {
+		reset();
+		let page = mem_allocate(0).unwrap().start();
+		let page = unsafe { SharedPage::new(page).unwrap() };
+		let (page, counter) = page.into_raw_parts();
+		let page = unsafe { SharedPage::from_raw_parts(page, counter) };
 	});
 }

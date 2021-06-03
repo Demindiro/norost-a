@@ -17,6 +17,7 @@ mod shared;
 
 pub use area::{Area, BadAlignment};
 pub use buddy::{AllocateError, DeallocateError};
+pub use shared::SharedPage;
 
 use crate::sync::Mutex;
 

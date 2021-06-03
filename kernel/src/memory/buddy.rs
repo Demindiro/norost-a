@@ -268,6 +268,9 @@ where
 
 				// SAFETY: we own it.
 				unsafe {
+					area.as_ptr().write(FreeArea {
+						next: None
+					});
 					return Ok(Area::new_unchecked(area.cast(), order));
 				}
 			}

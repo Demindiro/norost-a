@@ -318,6 +318,7 @@ trap_init:
 ##
 ## Arguments:
 ## - a0: A pointer to the task structure.
+.globl trap_next_task
 trap_next_task:
 	# Save the program counter
 	csrr	t0, MEPC
