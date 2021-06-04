@@ -25,6 +25,18 @@ pub enum RWX {
 impl RWX {
 	const MASK_32: u32 = 0b1110;
 	const MASK_64: u64 = 0b1110;
+
+	pub fn r(self) -> bool {
+		self == Self::R || self == Self::RW || self == Self::RX || self == Self::RWX
+	}
+
+	pub fn w(self) -> bool {
+		self == Self::RW || self == Self::RWX
+	}
+
+	pub fn x(self) -> bool {
+		self == Self::X || self == Self::RX || self == Self::RWX
+	}
 }
 
 impl From<RWX> for u32 {

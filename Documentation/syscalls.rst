@@ -32,9 +32,9 @@ Listing
 +========================+====+
 | io_wait_               |  0 |
 +------------------------+----+
-| io_resize_requester_   |  1 |
+| io_set_client_buffers_ |  1 |
 +------------------------+----+
-| io_resize_responder_   |  2 |
+| io_set_server_buffers_ |  2 |
 +------------------------+----+
 | mem_alloc_             |  3 |
 +------------------------+----+
@@ -103,40 +103,27 @@ Valid ``flags`` are:
 * ``IO_WAIT_MAX_TIME`` (``0x8``): Wait only for a certain amount of time.
 
 
-io_resize_requester
-'''''''''''''''''''
+io_set_client_buffers
+'''''''''''''''''''''
 
 +--------+----------------------------+----------------------------+
 | **ID** |                         xx |                            |
 +--------+----------------------------+----------------------------+
-| **a0** | ``*mut io_ring_requester`` | ``request_buffer``         |
+| **a0** | ``*mut io_ring_crq``       | ``request_buffer``         |
 +--------+----------------------------+----------------------------+
-| **a1** | ``usize``                  | ``size``                   |
+| **a1** | ``u8``                     | ``size``                   |
++--------+----------------------------+----------------------------+
+| **a3** | ``*mut io_ring_ccq``       | ``completion_buffer``      |
++--------+----------------------------+----------------------------+
+| **a4** | ``u8``                     | ``size``                   |
 +--------+----------------------------+----------------------------+
 | **r0** | ``io_ring_create_status``  | ``status``                 |
 +--------+----------------------------+----------------------------+
 
-Resizes the ``io_ring_requester`` buffer for this task.
+Sets the buffers to be used for client request and completion entries.
 
-A ``io_ring_requester`` has the following fields:
-
-* A ``*mut io_ring_request`` ``requests``. If this is ``null``, the kernel
-  will pick an address. Otherwise, the kernel will attempt to map the
-  buffer to this address.
-
-* A ``usize`` ``request_head``, which is an *unmasked* index of the head.
-
-* A ``usize`` ``request_tail``, which is an *unmasked* index of the tail.
-
-* A ``*mut io_ring_response`` ``responses``. If this is ``null``, the kernel
-  will pick an address. Otherwise, the kernel will attempt to map the
-  buffer to this address.
-
-* A ``usize`` ``response_head``, which is an *unmasked* index of the head.
-
-* A ``usize`` ``response_tail``, which is an *unmasked* index of the tail.
-
-``size`` must be a power of two.
+``size`` is the power of the of the size, i.e. the actual size is
+``pow(2, size)``.
 
 
 io_resize_responder

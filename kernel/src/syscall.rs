@@ -4,6 +4,7 @@
 
 use crate::{arch, task};
 use core::convert::TryFrom;
+use core::num::NonZeroU8;
 use core::ptr::NonNull;
 
 /// The type of a syscall, specifically the amount and type of arguments it takes.
@@ -118,15 +119,38 @@ mod sys {
 
 	sys! {
 		/// Waits for one or all I/O events to complete
-		[_] io_wait() {
-			todo!();
+		[task] io_wait(flags, time) {
+			crate::log::debug!("io_wait 0b{:b}, {}", flags, time);
+			// FIXME actually wait for I/O
+			unsafe { crate::arch::trap_next_task(task); }
 		}
 	}
 
 	sys! {
 		/// Resize the task's requester buffers to be able to hold the given amount of entries.
-		[task] io_resize_requester(a0, a1, a2) {
-			todo!();
+		[task] io_resize_requester(request_queue, request_size, completion_queue, completion_size) {
+			crate::log::debug!(
+				"io_resize_requester 0x{:x}, {}, 0x{:x}, {}", 
+				request_queue,
+				request_size,
+				completion_queue,
+				completion_size,
+			);
+			let a = if request_queue == 0 {
+				None
+			} else {
+				let rq = NonNull::new(request_queue as *mut _);
+				let rs = request_size as u8;
+				let cq = NonNull::new(completion_queue as *mut _);
+				let cs = completion_size as u8;
+				let r = rq.and_then(|rq| cq.map(|cq| ((rq, rs), (cq, cs))));
+				if r.is_none() {
+					return Return(Status::NullArgument, 0);
+				}
+				r
+			};
+			task.set_client_buffers(a);
+			Return(Status::Ok, 0)
 		}
 	}
 
@@ -156,9 +180,9 @@ mod sys {
 			let rwx = match flags & 7 {
 				PROTECT_R => RWX::R,
 				PROTECT_X => RWX::X,
-				PROTECT_R | PROTECT_W => RWX::RW,
-				PROTECT_R | PROTECT_X => RWX::RX,
-				PROTECT_R | PROTECT_W | PROTECT_X => RWX::RWX,
+				f if f == PROTECT_R | PROTECT_W => RWX::RW,
+				f if f == PROTECT_R | PROTECT_X => RWX::RX,
+				f if f == PROTECT_R | PROTECT_W | PROTECT_X => RWX::RWX,
 				_ => return Return(Status::MemoryInvalidProtectionFlags, 0),
 			};
 			if flags & SHAREABLE > 0 {

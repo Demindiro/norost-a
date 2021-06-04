@@ -7,6 +7,8 @@
 initelf:
 	.incbin	"kernel/init.elf"
 	.equ	INITELF_LEN,	. - initelf
+initelf_size:
+	.quad	INITELF_LEN
 
 .section .init, "ax"
 _start:
@@ -22,7 +24,9 @@ _start:
 	mv		ra, zero
 	# Set pointer and length to initfs
 	la		a2, initelf
-	li		a3, INITELF_LEN
+	#li		a3, INITELF_LEN
+	la		a3, initelf_size
+	ld		a3, 0(a3)
 	call	main
 1:
 	wfi

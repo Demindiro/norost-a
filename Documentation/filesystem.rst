@@ -23,30 +23,28 @@ File I/O is IPC in reality:
 * To write to a file, a process passes data to another process which may
   manage one or more devices.
 
-To keep copying to a minimul, memory pages of the requesting/responding
-process are mapped into that of the responding/requesting process. When
-a process is done with a range of memory pages it must free them themselves.
+To keep copying to a minimum, memory pages of the client/server task are
+mapped into that of the server/client task. When a task is done with a range
+of memory pages it must free them themselves.
 
 
-Requesting processes
-''''''''''''''''''''
+Client tasks
+''''''''''''
 
-To send requests, a process uses two ring buffers with identical size:
+To send requests, a task uses two ring buffers with identical size:
 
-* A *request queue* (RQ)
+* A *request queue* (CRQ)
 
-* A *completion queue* (CQ)
+* A *completion queue* (CCQ)
 
-The size of both queues are always a power of 2 so that wrapping the
-head and ``tail`` can be performed with a bitwise ``and`` operation.
-
-Each queue begins with both the ``head`` and ``tail`` which are both
-``usize`` s. The entries come after these two fields.
+The size of both queues are always a power of 2 so that wrapping the index
+can be performed with a bitwise ``and`` operation.
 
 
-A request is a struct with the following fields:
+A CRQ entry is a struct with the following fields:
 
 * An ``u8`` ``opcode`` field, which describes the operation to be performed.
+  If this field is ``0``, it marks the end of entries to be processed.
 
 * An ``u8`` ``priority`` field.
 
@@ -68,17 +66,17 @@ A request is a struct with the following fields:
 * An ``usize`` ``userdata`` field, which can be used to keep track of
   requests.
 
-The structure is 40 bytes large on 64-bit and 24 bytes large on 32-bit
+The structure is 64 bytes large on 64-bit and 32 bytes large on 32-bit
 systems.
 
 
-When a request has finished, an entry will be added to the CQ which has
+When a request has finished, an entry will be added to the CCQ which has
 the following fields:
 
 * A ``data`` field, which is a union of;
 
   * A ``*mut mem_page`` or ``*const mem_page`` ``buffer`` field, which may
-    be ``null`´ depending on the operation.
+    be ``null`` depending on the operation.
 
   * An ``u32`` ``file_handle``.
 
@@ -93,42 +91,47 @@ the following fields:
 
 This structure is 32 bytes large on 64-bit and 16 bytes on 32-bit systems.
 
+The kernel does not check whether a completion entry has been processed by
+the task. It is up to the task to prevent overwriting existing entries.
+
 
 To send a request, the operation goes as follows:
 
-1. Write out the request.
+1. Write out the request **without** the ``opcode``.
 
 2. Execute a memory fence.
 
-3. Increment the ``tail`` and wrap if necessary.
+3. Write out the ``opcode``.
 
-The memory fence is necessary so that the ``tail`` won't be updated until
+The memory fence is necessary so that the ``opcode`` won't be written until
 all the fields of the RQ entry have been written out.
 
 
-New entries in the CQ can be detected by comparing the ``head`` and the
-``tail``.
+New entries can be detected by any application-specific method. Using ``0``
+for the ``userdata`` field to indicate empty entries is the conventional
+approach.
 
 
-Responding processes
-''''''''''''''''''''
+Server tasks
+''''''''''''
 
-To receive requests, a process uses two ring buffers with identical size:
+To receive requests, a task uses two ring buffers with identical size:
 
-* A *request (input) queue* (IQ)
+* A *request queue* (SRQ)
 
-* A *response (output) queue* (OQ)
+* A *completion queue* (SCQ)
 
 The size of both queues are always a power of 2 so that wrapping the
-head and ``tail`` can be performed with a bitwise ``and`` operation.
+index can be performed with a bitwise ``and`` operation.
 
 Each queue begins with both the ``head`` and ``tail`` which are both
 ``usize`` s. The entries come after these two fields.
 
 
-An IQ entry has the following fields:
+An SRQ entry has the following fields:
 
 * An ``u8`` ``opcode`` field, which describes the operation to be performed.
+  If it is ``0``, the entry is empty.
 
 * An ``u8`` ``priority`` field.
 
@@ -139,7 +142,9 @@ An IQ entry has the following fields:
   * An ``usize`` ``file_handle`` field, which describes the object to perform
   the operation on.
 
-  * A ``*const str`` ``name`` field.
+  * A ``*const small_str`` ``name`` field.
+
+  * A ``*const small_[u8]`` ``uuid`` field.
 
 * An ``usize`` ``offset`` field.
 
@@ -152,16 +157,17 @@ An IQ entry has the following fields:
 * An ``usize`` ``length`` field.
 
 * An ``usize`` ``id`` field, which can be used to keep track of requests.
+  This field is never ``0``.
 
-The structure is 40 bytes large on 64-bit and 24 bytes large on 32-bit
+The structure is 64 bytes large on 64-bit and 32 bytes large on 32-bit
 systems.
 
-It is identical to the requesting process' RQ entry bar the ``userdata``
-field, which is exluded and replaced with an ``id`` field to prevent info
+It is identical to the requesting process' CRQ entry bar the ``userdata``
+field, which is excluded and replaced with an ``id`` field to prevent info
 leaks and simplify the kernel implementation.
 
 
-An OQ entry has the following fields:
+A SCQ entry has the following fields:
 
 * A ``data`` field, which is a union of;
 
@@ -179,27 +185,27 @@ An OQ entry has the following fields:
 * An ``usize`` ``id`` field, which is identical to that of the
   corresponding request.
 
+
 This structure is 32 bytes large on 64-bit and 16 bytes on 32-bit systems.
 
-Again, it is largely identical to that of the requesting process' CQ entry
+Again, it is largely identical to that of the requesting task's CCQ entry
 bar the ``userdata`` / ``id`` field.
+
+A ``0`` ``id`` field means the entry is empty.
 
 
 To send a response, the operation goes as follows:
 
-1. Write out the reponse.
+1. Write out the entry **without** the ``id`` field.
 
 2. Execute a memory fence.
 
-3. Increment the ``tail`` and wrap if necessary.
+3. Write out the ``id`` field.
 
 The memory fence is necessary so that the ``tail`` won't be updated until
 all the fields of the OQ entry have been written out.
 
 
-To mark a request as accepted, the ``head`` should be incremented and wrapped
-if necessary. It may be desireable to copy the IQ entry to a separate buffer
-to prevent stalling on a slow request.
 
 
 Operations
@@ -213,7 +219,7 @@ Listing
 +=========================+======+
 | READ_                   |   xx |
 +-------------------------+------+
-| WRITE_                  |   xx |
+| WRITE_                  |    2 |
 +-------------------------+------+
 | OPEN_                   |   xx |
 +-------------------------+------+

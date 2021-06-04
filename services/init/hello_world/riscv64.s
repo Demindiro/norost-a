@@ -3,58 +3,53 @@
 
 .section .rodata, "a"
 
+	.align		12
 running:
 	.ascii		"Running!"
 	.byte		0x0a			# newline
-.equ	RUNNING_LEN,		. - running
+	.equ		RUNNING_LEN,		. - running
 
+	.align		12
 hello_world:
 	.ascii		"Hello, world!"
 	.byte		0x0a			# newline
-.equ	HELLO_WORLD_LEN,	. - hello_world
+	.equ		HELLO_WORLD_LEN,	. - hello_world
+
+
+.section .bss, "aw"
+
+	.align		12
+request_queue:
+	.fill		4096, 1, 0
+
+	.align		12
+completion_queue:
+	.fill		4096, 1, 0
 
 
 .section .text, "ax"
 
 _start:
+	# Set kernel pointer to request and completion queue
+	li		a7, 1					# io_set_client_buffers
+	la		a0, request_queue		# request buffer
+	li		a1, 0					# size of request buffer (2^0 == 1)
+	la		a2, completion_queue	# completion buffer
+	li		a3, 0					# size of completion buffer (2^0 == 1)
+	ecall
+
 	# Write start message
-	li		a7, 1				# write syscall
-	li		a0, 42				# File descriptor (unused atm)
-	la		a1, running			# Pointer to buffer
-	li		a2, RUNNING_LEN		# Buffer size
-	ecall
-
-	# Get TID
-	li		a7, 4				# task_id syscall
-	ecall
-	mv		t1, a1
-
-	# Write hello world 4 times, with the length being shortened by the task ID
-	li		t0, 4
-0:
-	# Write
-	li		a7, 1				# write syscall
-	li		a0, 42				# File descriptor (unused atm)
-	la		a1, hello_world		# Pointer to buffer
-	li		a2, HELLO_WORLD_LEN	# Buffer size
-	add		a1, a1, t1
-	sub		a2, a2, t1
-	ecall
-
-	# Sleep / yield
-	li		a7, 3				# sleep syscall
-	li		a0, 0				# seconds
-	li		a1, 0				# nanoseconds
-	ecall
-
-	# Loop
-	addi	t0, t0, -1
-	blt		zero, t0, 0b
+	la		a0, hello_world
+	li		a1, HELLO_WORLD_LEN
+	call	puts
 
 	call	test_alloc_memory
 	call	test_alloc_shared_memory
 
-	# Exit
+0:
+	j		0b
+
+	# Exit TODO
 	li		a7, 2				# exit syscall
 	li		a0, 0				# exit code
 	ecall
@@ -65,7 +60,7 @@ _start:
 test_alloc_memory:
 
 	# Allocate one memory page.
-	li		a7,	5				# mem_alloc
+	li		a7,	3				# mem_alloc
 	li		a0, MEM_ALLOC_ADDR	# address
 	li		a1, 1				# amount of pages
 	li		a2, 0b011			# flags (RW)
@@ -87,11 +82,11 @@ test_alloc_memory:
 	sd		t0, 0(t2)
 
 	# Print the alphabet
-	li		a7, 1				# write syscall
-	li		a0, 42				# File descriptor (unused atm)
-	# Pointer to buffer is already set (a1)
-	li		a2, 27				# Buffer size
-	ecall
+	mv		a0, a1
+	li		a1, 27
+	mv		s0, ra
+	call	puts
+	mv		ra, s0
 
 	ret
 
@@ -101,10 +96,10 @@ test_alloc_memory:
 test_alloc_shared_memory:
 
 	# Allocate one memory page.
-	li		a7,	6				# mem_alloc_shared
+	li		a7,	3				# mem_alloc_shared
 	li		a0, MEM_ALLOC_ADDR	# address
 	li		a1, 1				# amount of pages
-	li		a2, 0b011			# flags (RW)
+	li		a2, 0b1011			# flags (SHAREABLE + RW)
 	ecall
 
 	# Write the alphabet to the page.
@@ -123,10 +118,37 @@ test_alloc_shared_memory:
 	sd		t0, 0(t2)
 
 	# Print the alphabet
-	li		a7, 1				# write syscall
-	li		a0, 42				# File descriptor (unused atm)
-	# Pointer to buffer is already set (a1)
-	li		a2, 27				# Buffer size
+	mv		a0, a1
+	li		a1, 27
+	mv		s0, ra
+	call	puts
+	mv		ra, s0
+
+	ret
+
+## Write a string to stdout
+##
+## Arguments:
+## * a0: the string. Must be page-aligned and written on a shareable page.
+## * a1: the length of the string
+puts:
+	la		t0, request_queue
+	sb		zero, 1(t0)				# priority
+	sh		zero, 2(t0)				# flags
+	sw		zero, 4(t0)				# file handle
+	sd		zero, 8(t0)				# offset
+	sd		a0, 16(t0)				# page
+	sd		a1, 24(t0)				# length
+	li		t1, 0xdeadbeef
+	sd		t1, 32(t0)				# userdata
+	# Ensure the rest of the data is written out before writing the opcode.
+	fence
+	li		t1, 2					# WRITE
+	sb		t1, 0(t0)				# write opcode
+
+	# Sync IO
+	li		a7, 0				# io_wait
+	mv		a0, zero			# flags
 	ecall
 
 	ret

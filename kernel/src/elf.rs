@@ -255,16 +255,20 @@ where
 		for i in 0..count {
 			// SAFETY: the data is large enough and aligned and the header size matches.
 			let header = unsafe {
-				&*((data as *const [u8] as *const u8).add(header.program_header_offset)
-					as *const ProgramHeader)
+				let h = data as *const [u8] as *const u8;
+				let h = h.add(header.program_header_offset);
+				let h = h as *const ProgramHeader;
+				&*h.add(i)
 			};
 			let mut order = 0;
 			let mut align = header.alignment / arch::PAGE_SIZE;
 			// naive integer log2
-			while align > 0 {
+			while align > 1 {
 				order += 1;
 				align >>= 1;
 			}
+			// FIXME
+			order = 2;
 			let area = memory::mem_allocate(order)
 				.map_err(ParseError::AllocateError)?;
 			// FIXME can panic if the header is bad
@@ -291,6 +295,8 @@ where
 	pub fn create_task(&self) -> Result<crate::task::Task, crate::memory::AllocateError> {
 		let mut task = crate::task::Task::new()?;
 		for s in self.segments.iter() {
+			crate::log::debug_usize("va start", s.virtual_area.start().as_ptr() as usize, 16);
+			crate::log::debug_usize("va size", s.virtual_area.order() as usize, 10);
 			task.add_mapping(s.virtual_area, s.physical_area, crate::arch::RWX::RWX).unwrap();
 		}
 		task.set_pc(self.entry as *const _);

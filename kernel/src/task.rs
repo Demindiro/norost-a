@@ -17,8 +17,10 @@
 //! highest level. This does sacrifice some security but there is not much that can be done about
 //! it.
 
-use crate::arch;
+use crate::arch::{self, Page, PAGE_SIZE};
 use crate::memory::{self, AllocateError, Area};
+use core::mem;
+use core::num::NonZeroU8;
 use core::sync::atomic;
 use core::ptr::NonNull;
 
@@ -47,6 +49,12 @@ struct SharedState {
 	virtual_memory: arch::VirtualMemorySystem,
 }
 
+/// Structure representing an index and mask in a ring buffer.
+struct RingIndex {
+	mask: u16,
+	index: u16,
+}
+
 /// A single task.
 ///
 /// Tasks are implemented as a circular linked list for a few reasons:
@@ -65,6 +73,22 @@ pub struct TaskData {
 	/// The shared state of this task.
 	// TODO should be reference counted.
 	shared_state: SharedState,
+	/// The virtual address of the client request buffer.
+	client_request_queue: Option<NonNull<Page>>,
+	/// The virtual address of the client completion buffer.
+	client_completion_queue: Option<NonNull<Page>>,
+	/// The virtual address of the server request buffer.
+	server_request_queue: Option<NonNull<Page>>,
+	/// The virtual address of the server completion buffer.
+	server_completion_queue: Option<NonNull<Page>>,
+	/// The index of the next entry to be processed in the client request buffer.
+	client_request_index: RingIndex,
+	/// The index of the next entry to be processed in the client completion buffer.
+	client_completion_index: RingIndex,
+	/// The index of the next entry to be processed in the server request buffer.
+	server_request_index: RingIndex,
+	/// The index of the next entry to be processed in the server completion buffer.
+	server_completion_index: RingIndex,
 	/// A pointer to the next task. It points to itself if there is only one task.
 	next_task: Task,
 	/// A pointer to the previous task or itself, which is needed to efficiently remove tasks.
@@ -73,7 +97,72 @@ pub struct TaskData {
 	id: u32,
 }
 
+union ClientRequestEntryData {
+	pages: Option<NonNull<Page>>,
+	name: *const u8,
+	uuid: *const u8,
+}
+
+/// A client request entry.
+#[repr(align(64))]
+#[repr(C)]
+struct ClientRequestEntry {
+	opcode: Option<NonZeroU8>,
+	priority: i8,
+	flags: u16,
+	file_handle: u32,
+	offset: usize,
+	data: ClientRequestEntryData,
+	length: usize,
+	userdata: usize,
+}
+
+union ClientCompletionEntryData {
+	pages: Option<NonNull<Page>>,
+	file_handle: usize,
+}
+
+/// A client completion entry.
+#[repr(align(32))]
+#[repr(C)]
+struct ClientCompletionEntry {
+	data: ClientCompletionEntryData,
+	length: usize,
+	status: u32,
+	userdata: usize,
+}
+
+const _SIZE_CHECK_CRE: usize = 0 - (64 - mem::size_of::<ClientRequestEntry>());
+const _SIZE_CHECK_CCE: usize = 0 - (32 - mem::size_of::<ClientCompletionEntry>());
+
 struct NoTasks;
+
+impl Default for RingIndex {
+	fn default() -> Self {
+		Self {
+			mask: 0,
+			index: 0,
+		}
+	}
+}
+
+impl RingIndex {
+	#[inline(always)]
+	fn set_mask(&mut self, mask: u8) {
+		let mask = (1 << mask) - 1;
+		self.index &= mask;
+		self.mask = mask;
+	}
+
+	fn increment(&mut self) {
+		self.index += 1;
+		self.index &= self.mask;
+	}
+	
+	fn get(&self) -> usize {
+		self.index.into()
+	}
+}
 
 impl Task {
 	/// Create a new empty task.
@@ -94,7 +183,15 @@ impl Task {
 				id: TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed),
 				shared_state: SharedState {
 					virtual_memory: arch::VirtualMemorySystem::new()?,
-				}
+				},
+				client_request_queue: None,
+				client_completion_queue: None,
+				server_request_queue: None,
+				server_completion_queue: None,
+				client_request_index: RingIndex::default(),
+				client_completion_index: RingIndex::default(),
+				server_request_index: RingIndex::default(),
+				server_completion_index: RingIndex::default(),
 			});
 		}
 		Ok(task)
@@ -114,10 +211,31 @@ impl Task {
 		self.inner().register_state.set_pc(address);
 	}
 
-	/// Begin executing the next task.
+	/// Process I/O entries and begin executing the next task.
 	pub fn next(self) -> ! {
 		let task = self.inner().next_task.clone();
-		crate::log::debug_str("NEXT");
+		if let Some(cq) = task.inner().client_request_queue {
+			let cqi = &mut task.inner().client_request_index;
+			let (cq, rwx) = task.inner().shared_state.virtual_memory.get(cq.cast()).unwrap();
+			assert!(rwx.r());
+			let mut cq = cq.cast::<[ClientRequestEntry; PAGE_SIZE / mem::size_of::<ClientRequestEntry>()]>();
+			let cq = unsafe { cq.as_mut() };
+			loop {
+				let cq = &mut cq[cqi.get()];
+				if let Some(op) = cq.opcode {
+					// Just assume write for now.
+					let s = unsafe { cq.data.pages.unwrap().cast::<u8>() };
+					let s = task.inner().shared_state.virtual_memory.get(s).unwrap().0.as_ptr();
+					let s = unsafe { core::slice::from_raw_parts(s, cq.length) };
+					let s = unsafe { core::str::from_utf8_unchecked(s) };
+					crate::log::debug!("Printy stuff (len: {}):\n{}", cq.length, s);
+					cq.opcode = None;
+				} else {
+					break;
+				}
+				cqi.increment();
+			}
+		}
 		crate::log::debug_usize("tid", task.id() as usize, 10);
 		crate::log::debug_usize("pc", task.inner().register_state.pc as usize, 16);
 		crate::log::debug_usize("vms", unsafe { *core::mem::transmute::<_, &usize>(&task.inner().shared_state) }, 16);
@@ -170,6 +288,19 @@ impl Task {
 	/// Return the ID of this task
 	pub fn id(&self) -> u32 {
 		self.inner().id
+	}
+
+	/// Set the task client request and completion buffer pointers and sizes.
+	pub fn set_client_buffers(&self, buffers: Option<((NonNull<Page>, u8), (NonNull<Page>, u8))>) {
+		if let Some(((rb, rbs), (cb, cbs))) = buffers {
+			self.inner().client_request_index.set_mask(rbs);
+			self.inner().client_completion_index.set_mask(cbs);
+			self.inner().client_request_queue = Some(rb);
+			self.inner().client_completion_queue = Some(cb);
+		} else {
+			self.inner().client_request_queue = None;
+			self.inner().client_completion_queue = None;
+		}
 	}
 
 	fn inner<'a>(&'a self) -> &'a mut TaskData {
