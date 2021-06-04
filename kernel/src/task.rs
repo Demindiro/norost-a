@@ -162,6 +162,11 @@ impl Task {
 		self.inner().shared_state.virtual_memory.allocate_shared(address, count, rwx)
 	}
 
+	/// Deallocate memory
+	pub fn deallocate_memory(&self, address: NonNull<crate::arch::Page>, count: usize) -> Result<(), ()> {
+		self.inner().shared_state.virtual_memory.deallocate(address, count)
+	}
+
 	/// Return the ID of this task
 	pub fn id(&self) -> u32 {
 		self.inner().id

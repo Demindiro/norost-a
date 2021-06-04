@@ -603,13 +603,13 @@ impl Sv39 {
 		self.counters.get(index as u64).is_some()
 	}
 
-	/// Remove a mapping.
+	/// Remove a mapping and deallocate the associated memory.
 	/// 
 	/// ## Returns
 	///
 	/// `Ok(())` if the mapping existed and was removed successfully.
 	/// `Err(Invalid)` if the mapping doesn't exist.
-	pub fn remove(&mut self, virtual_address: NonNull<Page>, order: u8) -> Result<(), ()> {
+	pub fn deallocate(&mut self, virtual_address: NonNull<Page>, count: usize) -> Result<(), ()> {
 		todo!()
 	}
 

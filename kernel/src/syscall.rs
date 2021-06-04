@@ -4,6 +4,7 @@
 
 use crate::{arch, task};
 use core::convert::TryFrom;
+use core::ptr::NonNull;
 
 /// The type of a syscall, specifically the amount and type of arguments it takes.
 pub type Syscall = extern "C" fn(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize, task: task::Task) -> Return;
@@ -21,14 +22,14 @@ pub const TABLE_LEN: usize = 8;
 /// Table with all syscalls.
 #[export_name = "syscall_table"]
 pub static TABLE: [Syscall; TABLE_LEN] = [
-	sys::read,				// 0
-	sys::write,				// 1
-	sys::exit,				// 2
-	sys::sleep,				// 3
-	sys::task_id,			// 4
-	sys::mem_alloc,			// 5
-	sys::mem_alloc_shared,	// 6
-	sys::placeholder,		// 7
+	sys::io_wait,				// 0
+	sys::io_resize_requester,	// 1
+	sys::io_resize_responder,	// 2
+	sys::mem_alloc,				// 3
+	sys::mem_dealloc,			// 4
+	sys::mem_get_flags,			// 5
+	sys::mem_set_flags,			// 6
+	sys::placeholder,			// 7
 ];
 
 /// Enum representing whether a syscall was successfull or failed.
@@ -37,9 +38,19 @@ pub enum Status {
 	/// The call succeeded.
 	Ok = 0,
 	/// There is no syscall with the given ID (normally used by [´arch´](crate::arch)).
-	NoCall,
-	/// The resource is temporarily unavailable and the caller should try again
-	Retry,
+	InvalidCall = 1,
+	/// One of the arguments is `None` when it shouldn't be.
+	NullArgument = 2,
+	/// The address range overlaps with an existing range.
+	MemoryOverlap = 3,
+	/// There is no more memory available.
+	MemoryUnavailable = 4,
+	/// The flags of one or more memory pages are locked.
+	MemoryLocked = 5,
+	/// The memory at the address is not allocated (i.e. it doesn't exist).
+	MemoryNotAllocated = 6,
+	/// THe combination of protection flags is invalid.
+	MemoryInvalidProtectionFlags = 7,
 }
 
 impl From<Status> for u8 {
@@ -106,98 +117,87 @@ mod sys {
 	}
 
 	sys! {
-		/// Reads something.
-		[_] read() {
-			Return(Status::NoCall, 0)
+		/// Waits for one or all I/O events to complete
+		[_] io_wait() {
+			todo!();
 		}
 	}
 
 	sys! {
-		/// Writes something.
-		[task] write(a0, a1, a2) {
-			// FIXME this is actually incorrect since we don't check for page boundaries.
-			// However, this call will be removed sometime soon anyways so whatever.
-			let a1 = task.translate_virtual_address(core::ptr::NonNull::new(a1 as *mut _).unwrap()).unwrap();
-			let s = unsafe { core::slice::from_raw_parts(a1.0.as_ptr(), a2) };
-			crate::io::uart::default(|uart| {
-				use crate::io::Device;
-				uart.write(s);
-				Return(Status::Ok, a2)
-			}).unwrap_or(Return(Status::Retry, 0))
+		/// Resize the task's requester buffers to be able to hold the given amount of entries.
+		[task] io_resize_requester(a0, a1, a2) {
+			todo!();
 		}
 	}
 
 	sys! {
-		/// Destroys the current task.
-		[_] exit(a0) {
-			crate::log::debug_str("Exiting task and sleeping forever");
-			loop {
-				crate::powerstate::halt();
-			}
+		/// Resize the task's requester buffers to be able to hold the given amount of entries.
+		[_] io_resize_responder(a0) {
+			todo!();
 		}
 	}
 
 	sys! {
-		/// Sleeps for the given amount of seconds given in `a0` and the amount of nanoseconds in
-		/// `a1`.
-		// TODO actually sleep instead of just "yield"
-		[task] sleep(a0, a1) {
-			// TODO undefined reference
-			unsafe { arch::trap_next_task(task) };
-		}
-	}
-
-	sys! {
-		/// Returns the ID of the current task.
-		[task] task_id() {
-			Return(Status::Ok, task.id() as usize)
-		}
-	}
-
-	sys! {
-		/// Allocates a range of private pages for the current task.
+		/// Allocates a range of private or shared pages for the current task.
 		[task] mem_alloc(address, count, flags) {
-			crate::log::debug!("mem_alloc 0x{:x}, {}, {}", address, count, flags);
-			// FIXME huge security hole due to lack of checking.
+			const PROTECT_R: usize = 0x1;
+			const PROTECT_W: usize = 0x2;
+			const PROTECT_X: usize = 0x4;
+			const SHAREABLE: usize = 0x8;
+			const MEGAPAGE: usize = 0x10;
+			const GIGAPAGE: usize = 0x20;
+			const TERAPAGE: usize = 0x30;
+			crate::log::debug!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
 			use crate::arch::RWX;
-			let rwx = match flags & 7 {
-				0b001 => RWX::R,
-				0b100 => RWX::X,
-				0b011 => RWX::RW,
-				0b101 => RWX::RX,
-				0b111 => RWX::RWX,
-				_ => todo!("Add an error code"),
+			let address = match NonNull::new(address as *mut _) {
+				Some(a) => a,
+				None => return Return(Status::NullArgument, 0),
 			};
-			task.allocate_memory(core::ptr::NonNull::new(address as *mut _).unwrap(), count, rwx);
-			crate::log::debug!("Done");
-			Return(Status::Ok, address)
+			let rwx = match flags & 7 {
+				PROTECT_R => RWX::R,
+				PROTECT_X => RWX::X,
+				PROTECT_R | PROTECT_W => RWX::RW,
+				PROTECT_R | PROTECT_X => RWX::RX,
+				PROTECT_R | PROTECT_W | PROTECT_X => RWX::RWX,
+				_ => return Return(Status::MemoryInvalidProtectionFlags, 0),
+			};
+			if flags & SHAREABLE > 0 {
+				task.allocate_shared_memory(address, count, rwx).unwrap();
+			} else {
+				task.allocate_memory(address, count, rwx).unwrap();
+			}
+			Return(Status::Ok, address.as_ptr() as usize)
 		}
 	}
 
 	sys! {
-		/// Allocates a range of shareable pages for the current task.
-		[task] mem_alloc_shared(address, count, flags) {
-			crate::log::debug!("mem_alloc_shared 0x{:x}, {}, {}", address, count, flags);
-			// FIXME huge security hole due to lack of checking.
-			use crate::arch::RWX;
-			let rwx = match flags & 7 {
-				0b001 => RWX::R,
-				0b100 => RWX::X,
-				0b011 => RWX::RW,
-				0b101 => RWX::RX,
-				0b111 => RWX::RWX,
-				_ => todo!("Add an error code"),
+		/// Frees a range of pages of the current task.
+		[task] mem_dealloc(address, count) {
+			let address = match NonNull::new(address as *mut _) {
+				Some(a) => a,
+				None => return Return(Status::NullArgument, 0),
 			};
-			task.allocate_shared_memory(core::ptr::NonNull::new(address as *mut _).unwrap(), count, rwx);
-			crate::log::debug!("Done");
-			Return(Status::Ok, address)
+			task.deallocate_memory(address, count).unwrap();
+			Return(Status::Ok, 0)
+		}
+	}
+
+	sys! {
+		[task] mem_get_flags() {
+			todo!()
+		}
+	}
+
+	sys! {
+		[task] mem_set_flags() {
+			todo!()
 		}
 	}
 
 	sys! {
 		/// Placeholder so that I don't need to update TABLE_LEN constantly.
 		[_] placeholder() {
-			Return(Status::NoCall, 0)
+			Return(Status::InvalidCall, 0)
 		}
 	}
 }

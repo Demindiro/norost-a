@@ -30,25 +30,19 @@ Listing
 +------------------------+----+
 |          Call          | ID |
 +========================+====+
-| io_wait_               | xx |
+| io_wait_               |  0 |
 +------------------------+----+
-| io_resize_requester_   | xx |
+| io_resize_requester_   |  1 |
 +------------------------+----+
-| io_resize_responder_   | xx |
+| io_resize_responder_   |  2 |
 +------------------------+----+
-| mem_alloc_             | xx |
+| mem_alloc_             |  3 |
 +------------------------+----+
-| mem_alloc_shared_      | xx |
+| mem_dealloc_           |  4 |
 +------------------------+----+
-| mem_dealloc_           | xx |
+| mem_get_flags_         |  5 |
 +------------------------+----+
-| mem_alloc_range_       | xx |
-+------------------------+----+
-| mem_dealloc_range_     | xx |
-+------------------------+----+
-| mem_get_flags_         | xx |
-+------------------------+----+
-| mem_set_flags_         | xx |
+| mem_set_flags_         |  6 |
 +------------------------+----+
 | dev_reserve_           | xx |
 +------------------------+----+
@@ -225,6 +219,15 @@ Valid flags are:
 
 
 The pages are guaranteed to be zeroed.
+
+Possible errors are:
+
+* ``INVALID_FLAGS`` (``1``): The combination of protection flags is not
+  supported.
+
+* ``OVERLAP`` (``2``): The address range overlaps with an existing range.
+
+* ``
 
 
 mem_dealloc
@@ -505,3 +508,37 @@ Set a handler for a signal. This overrides the default handler.
 Passing ``null`` restores the default handler.
 
 
+Error codes
+~~~~~~~~~~~
+
+To keep implementation and debugging simple, some of the error codes are
+shared between system calls. The table below lists the code of each error.
+
++----------------------+----+--------------------------------------------------+
+| Error                | ID | Description                                      |
++======================+====+==================================================+
+| OK                   |  0 | No error.                                        |
++----------------------+----+--------------------------------------------------+
+| INVALID_CALL         |  1 | The call doesn't exist.                          |
++----------------------+----+--------------------------------------------------+
+| NULL_ARGUMENT        |  2 | One of the arguments is ``null`` when it         |
+|                      |    | shouldn't be.                                    |
++----------------------+----+--------------------------------------------------+
+| MEM_OVERLAP          |  3 | The address range overlaps with another range.   |
++----------------------+----+--------------------------------------------------+
+| MEM_UNAVAILABLE      |  4 | There is no more memory available.               |
++----------------------+----+--------------------------------------------------+
+| MEM_LOCKED           |  5 | The flags of one or more memory pages are        |
+|                      |    | locked.                                          |
++----------------------+----+--------------------------------------------------+
+| MEM_NOT_ALLOCATED    |  6 | The memory at the address is no allocated, i.e.  |
+|                      |    | it doesn't exist.                                |
++----------------------+----+--------------------------------------------------+
+| MEM_INVALID_PROTECT  |  7 | The combination of memory protection flags isn't |
+|                      |    | supported.                                       |
++----------------------+----+--------------------------------------------------+
+| MEM_BAD_ALIGNMENT    |  8 | The address isn't properly aligned.              |
++----------------------+----+--------------------------------------------------+
+| IO_MEM_NOT_SHAREABLE | xx | The memory cannot be shared between tasks as it  |
+|                      |    | is private memory.                               |
++----------------------+----+--------------------------------------------------+
