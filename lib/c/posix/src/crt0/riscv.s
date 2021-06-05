@@ -30,7 +30,8 @@ _start:
 	# Set return address to zero to indicate end of call stack
 	sd		zero, 0(sp)
 
-	# Initialize library
+	# Initialize libraries
+	call	__dux_init
 	call	__posix_init
 
 	# Run main

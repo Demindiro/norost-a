@@ -1,6 +1,9 @@
 #include "common.h"
+#include "dux.h"
 #include "fcntl.h"
 #include "kernel.h"
+
+#define NULL 0
 
 ssize_t write(int fd, const void *buf, size_t count) {
 
@@ -12,7 +15,11 @@ ssize_t write(int fd, const void *buf, size_t count) {
 		out[i] = in[i];
 	}
 
-	struct kernel_client_request_entry *cre = &request_queue[request_index];
+	struct kernel_client_request_entry *cre = dux_reserve_client_request_entry();
+	if (cre == NULL) {
+		// FIXME formal error codes.
+		return -1;
+	}
 	cre->priority = 0;
 	cre->flags = 0;
 	cre->file_handle = fd;
@@ -21,13 +28,15 @@ ssize_t write(int fd, const void *buf, size_t count) {
 	cre->length = count;
 	asm volatile ("fence");
 	cre->opcode = IO_WRITE;
-	request_index++;
-	request_index &= request_mask;
-	io_wait(0, 0);
+	kernel_io_wait(0, 0);
 
+	/*
 	struct kernel_client_completion_entry *cce = &completion_queue[completion_index];
 	completion_index++;
 	completion_index &= request_mask;
 
 	return cce->status;
+	*/
+
+	return 0;
 }

@@ -7,12 +7,14 @@ OBJDUMP=$(TOOLCHAIN)-objdump
 OBJDUMP_ARGS?=-S
 ARCH?=riscv64
 
-INCLUDE+= -nostartfiles -nostdlib
+INCLUDE+= -nostartfiles -nostdlib -fno-builtin
+INCLUDE+= -I../../../lib/c/dux/include/
 INCLUDE+= -I../../../lib/c/posix/include/
 INCLUDE+= -I../../../lib/c/kernel/include/
 INCLUDE+= -I../../../lib/c/types/include/
 
-SOURCES= ../../../lib/c/posix/src/*.c
+SOURCES+= ../../../lib/c/posix/src/*.c
+SOURCES+= ../../../lib/c/dux/src/*.c
 INIT= ../../../lib/c/posix/src/crt0/riscv.s
 
 build/init: hello.c | build/

@@ -1,9 +1,15 @@
 #ifndef __KERNEL_H
 #define __KERNEL_H
 
+#include "stdint.h"
+
 #define IO_NONE   (0)
 #define IO_READ   (1)
 #define IO_WRITE  (2)
+
+#define PROT_READ  (0x1)
+#define PROT_WRITE (0x2)
+#define PROT_EXEC  (0x4)
 
 /**
  * Structure returned by kernel calls.
@@ -41,6 +47,14 @@ struct kernel_client_completion_entry {
 	size_t length;
 	uint32_t status;
 	size_t userdata;
+};
+
+struct kernel_server_request_entry {
+	size_t TODO;
+};
+
+struct kernel_server_completion_entry {
+	size_t TODO;
 };
 
 #define SYSCALL(...) \
@@ -92,24 +106,21 @@ struct kernel_client_completion_entry {
 		SYSCALL("r"(a7)) \
 	}
 
-SYSCALL_2(io_wait, 0, uint16_t /* flags */, uint64_t /* time */)
+SYSCALL_2(kernel_io_wait, 0, uint16_t /* flags */, uint64_t /* time */)
 
-SYSCALL_4(io_set_client_buffers, 1, void * /* requests */,
-	size_t /* requests_size */, void * /* completions */,
-	size_t /* completion_sizes */)
+SYSCALL_4(kernel_io_set_client_buffers, 1, void * /* requests */, size_t /* requests_size */,
+	void * /* completions */, size_t /* completion_sizes */)
 
-SYSCALL_4(io_set_server_buffers, 2, void * /* requests */,
-	size_t /* requests_size */, void * /* completions */,
-	size_t /* completion_sizes */)
+SYSCALL_4(kernel_io_set_server_buffers, 2, void * /* requests */, size_t /* requests_size */,
+	void * /* completions */, size_t /* completion_sizes */)
 
-SYSCALL_3(mem_alloc, 3, void * /* address */, size_t /* count */,
-	uint8_t /* flags */)
+SYSCALL_3(kernel_mem_alloc, 3, void * /* address */, size_t /* count */, uint8_t /* flags */)
 
-SYSCALL_2(mem_dealloc, 4, void * /* address */, size_t /* count */)
+SYSCALL_2(kernel_mem_dealloc, 4, void * /* address */, size_t /* count */)
 
-SYSCALL_1(mem_get_flags, 5, void * /* address */)
+SYSCALL_1(kernel_mem_get_flags, 5, void * /* address */)
 
-SYSCALL_2(mem_set_flags, 6, void * /* address */, size_t /* count */)
+SYSCALL_2(kernel_mem_set_flags, 6, void * /* address */, size_t /* count */)
 
 #undef SYSCALL_4
 #undef SYSCALL_3
