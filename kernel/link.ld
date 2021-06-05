@@ -57,4 +57,8 @@ SECTIONS
 	}
 
 	_kernel_end = .;
+
+	.symtab : {
+		*(.symtab)
+	}
 }

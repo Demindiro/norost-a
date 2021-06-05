@@ -7,9 +7,16 @@ OBJDUMP=$(TOOLCHAIN)-objdump
 OBJDUMP_ARGS?=-S
 ARCH?=riscv64
 
-build/init: $(ARCH).s | build/
-	$(CC) -nostartfiles -nostdlib $< -o $@
-	$(STRIP) -R .eh_frame -R .eh_frame_hdr $@
+INCLUDE+= -nostartfiles -nostdlib
+INCLUDE+= -I../../../lib/c/posix/include/
+INCLUDE+= -I../../../lib/c/kernel/include/
+INCLUDE+= -I../../../lib/c/types/include/
+
+SOURCES= ../../../lib/c/posix/src/*.c
+INIT= ../../../lib/c/posix/src/crt0/riscv.s
+
+build/init: hello.c | build/
+	$(CC) -O3 $(INCLUDE) $(SOURCES) $(INIT) $< -o $@
 
 build/:
 	mkdir build/

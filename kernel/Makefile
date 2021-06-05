@@ -170,4 +170,5 @@ $(DRIVE):
 	dd if=/dev/zero of=drive.bin bs=1M count=32
 
 mkinit:
-	cd ../services/init/hello_world && make
+	cd ../services/init/hello_world && make clean && make
+	touch src/main.rs

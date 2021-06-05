@@ -250,8 +250,8 @@ where
 			return Err(ParseError::ProgramHeadersLargerThanFile);
 		}
 
-		let mut segments =
-			Box::try_new_uninit_slice_in(count, allocator).map_err(ParseError::AllocError)?;
+		// Count the amount of loadable segments.
+		let mut loadable_count = 0;
 		for i in 0..count {
 			// SAFETY: the data is large enough and aligned and the header size matches.
 			let header = unsafe {
@@ -260,6 +260,28 @@ where
 				let h = h as *const ProgramHeader;
 				&*h.add(i)
 			};
+			if header.typ == ProgramHeader::TYPE_LOAD {
+				loadable_count += 1;
+			}
+		}
+
+		let mut segments =
+			Box::try_new_uninit_slice_in(loadable_count, allocator).map_err(ParseError::AllocError)?;
+		let mut segment_count = 0;
+		for i in 0..count {
+			// SAFETY: the data is large enough and aligned and the header size matches.
+			let header = unsafe {
+				let h = data as *const [u8] as *const u8;
+				let h = h.add(header.program_header_offset);
+				let h = h as *const ProgramHeader;
+				&*h.add(i)
+			};
+
+			// Skip non-loadable segments
+			if header.typ != ProgramHeader::TYPE_LOAD {
+				continue;
+			}
+
 			let mut order = 0;
 			let mut align = header.alignment / arch::PAGE_SIZE;
 			// naive integer log2
@@ -268,18 +290,20 @@ where
 				align >>= 1;
 			}
 			// FIXME
-			order = 2;
+			order = 0;
 			let area = memory::mem_allocate(order)
 				.map_err(ParseError::AllocateError)?;
 			// FIXME can panic if the header is bad
 			let data = data[header.offset..][..header.file_size].as_ptr();
 			// SAFETY: FIXME
 			unsafe { ptr::copy_nonoverlapping(data, area.start().cast().as_ptr(), header.file_size) };
-			segments[i].write(Segment {
+			crate::log::debug_usize("header.virtual_address", header.virtual_address, 16);
+			segments[segment_count].write(Segment {
 				flags: header.flags as u8,
 				physical_area: area,
 				virtual_area: Area::new(NonNull::new(header.virtual_address as *mut _).unwrap(), order).unwrap(),
 			});
+			segment_count += 1;
 		}
 
 		// SAFETY: all segments are initialized.
@@ -295,6 +319,7 @@ where
 	pub fn create_task(&self) -> Result<crate::task::Task, crate::memory::AllocateError> {
 		let mut task = crate::task::Task::new()?;
 		for s in self.segments.iter() {
+			crate::log::debug_str("");
 			crate::log::debug_usize("va start", s.virtual_area.start().as_ptr() as usize, 16);
 			crate::log::debug_usize("va size", s.virtual_area.order() as usize, 10);
 			task.add_mapping(s.virtual_area, s.physical_area, crate::arch::RWX::RWX).unwrap();
@@ -308,6 +333,8 @@ impl ProgramHeader {
 	const FLAG_EXEC: u32 = 0x1;
 	const FLAG_WRITE: u32 = 0x2;
 	const FLAG_READ: u32 = 0x4;
+
+	const TYPE_LOAD: u32 = 1;
 }
 
 impl Segment {
