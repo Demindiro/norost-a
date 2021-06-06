@@ -81,8 +81,13 @@
 .globl trap_stop_task
 .globl trap_start_task
 
+.section .data
+global_mapping:
+	.quad	0
+
 .section .text
 
+trap_section_start:
 	.balign 4	# 0
 interrupt_table:
 	jal		zero, trap_handler
@@ -156,7 +161,7 @@ sync_trap_table:
 trap_handler:
 	# Save all integer registers. While we could just save the caller-saved registers, doing so
 	# would risk an information leak and makes context switching a lot harder than it need be.
-	csrrw	x31, MSCRATCH, x31
+	csrrw	x31, SSCRATCH, x31
 	sd		x1, 1 * REGBYTES (x31)
 	sd		x2, 2 * REGBYTES (x31)
 	sd		x3, 3 * REGBYTES (x31)
@@ -193,16 +198,16 @@ trap_handler:
 	# An untested attempt at catering to pipelining
 	la		x28, sync_trap_table		# jmp
 	ld		sp, REGSTATE_SIZE + 0 * REGBYTES (x31)		# stack pointer
-	csrr	x29, MCAUSE					# jmp
+	csrr	x29, SCAUSE					# jmp
 	sd		x30, 30 * REGBYTES (x31)	# store A
 	slli	x29, x29, 2					# jmp
-	csrrw	x30, MSCRATCH, x31			# store B	(restores original mscratch)
+	csrrw	x30, SSCRATCH, x31			# store B	(restores original mscratch)
 	add		x28, x28, x29				# jmp
 	sd		x30, 31 * REGBYTES (x31)	# store B
 	# Execute the appropriate routine
 	jalr	ra, x28						# jmp
 	# Restore all integer registers
-	csrr	x31, MSCRATCH
+	csrr	x31, SSCRATCH
 	ld		x1, 1 * REGBYTES (x31)
 	ld		x2, 2 * REGBYTES (x31)
 	ld		x3, 3 * REGBYTES (x31)
@@ -236,17 +241,24 @@ trap_handler:
 	ld		x29, 29 * REGBYTES (x31)
 	ld		x30, 30 * REGBYTES (x31)
 	ld		x31, 31 * REGBYTES (x31)
-	mret
+	sret
 
 # Handler for syscalls.
 trap_syscall:
+
+	# FIXME we shouldn't have to do this ever.
+	la		s0, global_mapping
+	ld		s0, 0(s0)
+	csrrw	s0, satp, s0
+	sfence.vma
+
 	addi	sp, sp, -1 * REGBYTES
 
 	# Skip the ecall instruction, which is always 4 bytes long (there is no
 	# compressed version of it).
-	csrr	t0, MEPC
+	csrr	t0, SEPC
 	addi	t0, t0, 4
-	csrw	MEPC, t0
+	csrw	SEPC, t0
 
 	# Check if the syscall exists, otherwise return the 'no syscall' error code
 	li		t1, SYSCALL_MAX
@@ -259,12 +271,15 @@ trap_syscall:
 	ld		t0, 0(t0)
 
 	# Perform the call
-	mv		s0, ra
 	jalr	ra, t0
+
+	# FIXME we shouldn't have to do this ever.
+	csrw	satp, s0
+	sfence.vma
 
 	# Restore all integer registers except a0 and a1, then return
 0:
-	csrr	x31, MSCRATCH
+	csrr	x31, SSCRATCH
 	ld		x1, 1 * REGBYTES (x31)
 	ld		x2, 2 * REGBYTES (x31)
 	ld		x3, 3 * REGBYTES (x31)
@@ -297,7 +312,7 @@ trap_syscall:
 	ld		x29, 29 * REGBYTES (x31)
 	ld		x30, 30 * REGBYTES (x31)
 	ld		x31, 31 * REGBYTES (x31)
-	mret
+	sret
 
 1:
 	li		a0, SYSCALL_ERR_NOCALL
@@ -308,7 +323,7 @@ trap_syscall:
 trap_init:
 	la		t0, interrupt_table
 	#ori		t0, t0, 1
-	csrw	MTVEC, t0
+	csrw	STVEC, t0
 	ret
 
 
@@ -321,7 +336,7 @@ trap_init:
 .globl trap_next_task
 trap_next_task:
 	# Save the program counter
-	csrr	t0, MEPC
+	csrr	t0, SEPC
 	sd		t0, 0 * REGBYTES (a0)
 	save_pc_register		a0, t0
 	# Save all float registers
@@ -334,9 +349,13 @@ trap_next_task:
 ## Arguments:
 ## - a0: A pointer to the task structure.
 trap_start_task:
+	# FIXME we should do this in init (or never, rather)
+	csrr	t0, satp
+	la		t1, global_mapping
+	sd		t0, 0(t1)
 	# Switch to U-mode when executing mret.
 	li		t0, 0 << 11
-	csrw	MSTATUS, t0
+	csrw	SSTATUS, t0
 	# Set up the VMS.
 	ld		t0, REGSTATE_SIZE + 1 * REGBYTES (a0)
 	li		t1, 1
@@ -345,10 +364,10 @@ trap_start_task:
 	or		t0, t0, t1
 	csrw	SATP, t0
 	# Setup the scratch register.
-	csrw	MSCRATCH, a0
+	csrw	SSCRATCH, a0
 	# Restore the program counter
 	ld		t0, 0 * REGBYTES (a0)
-	csrw	MEPC, t0
+	csrw	SEPC, t0
 	sfence.vma
 	# Restore all float registers
 	load_float_registers	a0
@@ -387,4 +406,19 @@ trap_start_task:
 	ld		x30, 30 * REGBYTES (a0)
 	ld		x31, 31 * REGBYTES (a0)
 	ld		a0, 10 * REGBYTES (a0)
-	mret
+	sret
+
+trap_section_end:
+
+#.if		trap_section_end - trap_section_start <= 4096
+#	# OK
+#.else
+#	.err	"Trap section covers more than one page"
+#.abort
+#.endif
+#.if		(trap_section_start & ~0xfff) - (trap_section_end  & ~0xfff) == 0
+#	# OK
+#.else
+#	.err	"Trap section crosses page boundaries"
+#.abort
+#.endif

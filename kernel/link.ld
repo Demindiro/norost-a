@@ -1,17 +1,15 @@
 OUTPUT_FORMAT("elf64-littleriscv")
 OUTPUT_ARCH(riscv)
 
-MEMORY
-{
-   RAM (rwx) : ORIGIN = 0x80000000, LENGTH = 32M
-}
-
 STACK_SIZE = 64K;
 
 ENTRY(_start)
 
+KERNEL_START = -256K;
+
 SECTIONS
 {
+	. = KERNEL_START;
 	.init : {
 		_kernel_start = .;
 		KEEP (*(SORT_NONE(.init)))
@@ -24,7 +22,7 @@ SECTIONS
 	_text_end = .;
 
 	.data : {
-		*(.data .text.*)
+		*(.data .data.*)
 	}
 
 	.rodata : {
@@ -39,17 +37,21 @@ SECTIONS
 	}
 
 	.bss : {
-		*(.bss)
+		*(.bss .bss.*)
 		*(COMMON)
 	}
 
-	.stack (NOLOAD): {
+	.stack : {
 		. = ALIGN(8);
 		_stack_start = .;
 		. = . + STACK_SIZE;
 		. = ALIGN(8);
 		_stack_end = .;
 		_stack_pointer = .;
+	}
+
+	.initobject : {
+		*(.initobject)
 	}
 
 	.initfs : {
@@ -60,5 +62,9 @@ SECTIONS
 
 	.symtab : {
 		*(.symtab)
+	}
+
+	.psymtab : {
+		*(.psymtab)
 	}
 }

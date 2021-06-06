@@ -23,6 +23,7 @@ pub fn log(pre: &str, strings: &[&str]) {
 	// TODO how should we handle write failures?
 	// Right now UART "can't fail", but what if it
 	// does at some point?
+	/*
 	let _ = crate::io::uart::default(|uart| {
 		let _ = uart.write_str(pre);
 		for &s in strings.iter() {
@@ -30,6 +31,16 @@ pub fn log(pre: &str, strings: &[&str]) {
 		}
 		let _ = uart.write_str("\n");
 	});
+	*/
+	for b in pre.bytes() {
+		crate::arch::riscv::sbi::console_putchar(b);
+	}
+	for s in strings.iter() {
+		for b in s.bytes() {
+			crate::arch::riscv::sbi::console_putchar(b);
+		}
+	}
+	crate::arch::riscv::sbi::console_putchar(b'\n');
 }
 
 fn log_prefix(level: LogLevel, prefix: &str, strings: &[&str]) {
@@ -78,13 +89,15 @@ impl Debug {
 
 impl fmt::Write for Debug {
 	fn write_str(&mut self, string: &str) -> fmt::Result {
-		let _ = crate::io::uart::default(|uart| {
-			if self.0 {
-				uart.write_str("[DEBUG] ");
-				self.0 = false;
+		if self.0 {
+			for &b in b"[DEBUG] " {
+				crate::arch::riscv::sbi::console_putchar(b);
 			}
-			uart.write_str(string);
-		});
+			self.0 = false;
+		}
+		for b in string.bytes() {
+			crate::arch::riscv::sbi::console_putchar(b);
+		}
 		Ok(())
 	}
 }

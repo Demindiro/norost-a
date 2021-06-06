@@ -10,6 +10,7 @@
 
 pub mod rv64;
 pub mod vms;
+pub mod sbi;
 
 /// Structure used to save register state
 #[repr(C)]

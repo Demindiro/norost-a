@@ -415,8 +415,20 @@ impl Sv39 {
 
 	/// Create a new Sv39 mapping.
 	pub fn new() -> Result<Self, AllocateError> {
+		let mut tp = TablePage::new()?;
+		unsafe {
+			let mut global: u64;
+			asm!("
+				csrr	t0, satp
+				slli	t0, t0, 12
+			", out("t0") global);
+			let global: TablePage = core::mem::transmute(global);
+			for i in 1..512 {
+				tp[i] = core::mem::transmute::<_, _>(*core::mem::transmute::<_, &u64>(&global[i]));
+			}
+		}
 		Ok(Self {
-			addresses: TablePage::new()?,
+			addresses: tp,
 			counters: CountersTablePage::new().unwrap(),
 		})
 	}

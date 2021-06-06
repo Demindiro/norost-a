@@ -3,8 +3,8 @@
 .globl _start
 
 # Reserve 64 Kb stack space to start with
-.equ STACK_TOP_ADDRESS, 0x100000000
-.equ STACK_INITIAL_ADDRESS, 0xffff0000
+.equ STACK_TOP_ADDRESS, 0x010000000
+.equ STACK_INITIAL_ADDRESS, 0x0fff0000
 .equ STACK_INITIAL_SIZE, 16
 .equ PROT_RW, 0b011
 

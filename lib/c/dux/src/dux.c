@@ -52,8 +52,9 @@ void __dux_init(void)
 	// FIXME need a mem_get_mappings syscall of sorts.
 	
 	// Allocate a single page for keeping track of the memory ranges.
-	reserved_ranges = 0xff000000;
-	void *reserved_ranges_end = 0xff0effff; // 64KiB, or 4096 entries ought to be enough.
+	// FIXME changed top 4 bits from f to 0 to workaround shitty kernel.
+	reserved_ranges = 0x0ff00000;
+	void *reserved_ranges_end = 0x0ff0efff; // 64KiB, or 4096 entries ought to be enough.
 	kret = kernel_mem_alloc(reserved_ranges, 1, PROT_READ | PROT_WRITE);
 	if (kret.status != 0) {
 		// FIXME handle errors properly

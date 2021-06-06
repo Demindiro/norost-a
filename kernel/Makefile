@@ -1,19 +1,30 @@
+CROSS_COMPILE?=riscv64-unknown-linux-gnu-
+CC=$(CROSS_COMPILE)gcc
+
 DRIVE?=drive.bin
 
-KERNEL?=../target/riscv64gc-unknown-none-elf/release/kernel
+FIRMWARE?=../../riscv/opensbi/build/platform/generic/firmware/fw_jump.bin
+
+#BOOT?=../../u-boot/u-boot.bin
+#BOOT?=/home/david/Documents/u-boot/u-boot.bin
+
+KERNEL?=../target/kernel
 KERNEL_DEBUG?=../target/riscv64gc-unknown-none-elf/debug/kernel
 
+IMG?=../target/dux.img
+
 QEMU_OPT?=
-QEMU_BIOS?=none
-QEMU?=../../vm/qemu-6.0.0/build/qemu-system-riscv64 \
+QEMU?=qemu-system-riscv64 \
 		-s \
 		-machine virt \
 		-nographic \
-		-m 32M \
+		-m 256M \
 		-smp 1 \
-		-bios $(QEMU_BIOS) \
-		-drive file=$(DRIVE),format=raw \
-		-kernel $(KERNEL)
+		-bios $(FIRMWARE) \
+		-kernel ../target/kernel.bin
+		#-kernel $(BOOT) \
+		#-drive file=$(IMG),format=raw,id=hd0 \
+		#-device virtio-blk-device,drive=hd0
 QEMU_DEBUG?=qemu-system-riscv64 \
 		-s \
 		-machine virt \
@@ -113,11 +124,15 @@ expand-%:
 
 build-riscv64:
 	$(CARGO)
+	fallocate -l 10MB $(IMG)
+	#mformat -i $(IMG) ::
+	#mcopy -i $(IMG) $(KERNEL) ::
 
 build-debug-riscv64:
 	$(CARGO_DEBUG)
+	genisoimage -o $(ISO) $(KERNEL_DEBUG)
 
-run-riscv64: build-riscv64 $(DRIVE)
+run-riscv64: build-riscv64 mkboot
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU) $(QEMU_OPT)
 
@@ -129,7 +144,7 @@ gdb-riscv64:
 	riscv64-unknown-linux-gnu-gdb \
 		-ex='set arch riscv64' \
 		-ex='target extended-remote localhost:1234' \
-		$(KERNEL)
+		../target/riscv64gc-unknown-none-elf/release/kernel
 
 gdb-debug-riscv64:
 	riscv64-unknown-linux-gnu-gdb \
@@ -148,7 +163,7 @@ test-debug-riscv64: $(DRIVE)
 	$(QEMU_DEBUG) $(QEMU_OPT)
 
 objdump-riscv64:
-	riscv64-unknown-linux-gnu-objdump -C $(OBJDUMP_OPT) $(KERNEL)
+	riscv64-unknown-linux-gnu-objdump -C $(OBJDUMP_OPT) ../target/riscv64gc-unknown-none-elf/release/kernel
 
 objdump-debug-riscv64:
 	riscv64-unknown-linux-gnu-objdump -C $(OBJDUMP_OPT) $(KERNEL_DEBUG)
@@ -157,7 +172,7 @@ nm-riscv64:
 	riscv64-unknown-linux-gnu-nm -C $(NM_OPT) $(KERNEL)
 
 readelf-riscv64:
-	riscv64-unknown-linux-gnu-readelf -C $(READELF_OPT) $(KERNEL)
+	riscv64-unknown-linux-gnu-readelf -C $(READELF_OPT) ../target/riscv64gc-unknown-none-elf/release/kernel
 
 strip-riscv64:
 	riscv64-unknown-linux-gnu-strip -x $(KERNEL)
@@ -172,3 +187,13 @@ $(DRIVE):
 mkinit:
 	cd ../services/init/hello_world && make clean && make
 	touch src/main.rs
+
+mkboot: build
+	$(CC) -Wl,-Tsrc/boot/riscv.ld src/boot/riscv.s -o ../target/kernel -nostartfiles -nostdlib
+	riscv64-unknown-linux-gnu-objcopy -O binary ../target/kernel ../target/kernel.bin
+
+objdump-boot: mkboot
+	riscv64-unknown-linux-gnu-objdump -C $(OBJDUMP_OPT) ../target/kernel
+
+readelf-boot: mkboot
+	riscv64-unknown-linux-gnu-readelf -C $(READELF_OPT) ../target/kernel

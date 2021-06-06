@@ -125,62 +125,54 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 	log::debug(&["  Boot CPU physical ID: ", num]);
 	log::debug(&["  Reserved memory regions:"]);
 	for rmr in dtb.reserved_memory_regions() {
-		let mut buf = [0; 32];
-		let addr = util::usize_to_string(&mut buf, rmr.address.get() as usize, 16, 1).unwrap();
-		let mut buf = [0; 32];
-		let size = util::usize_to_string(&mut buf, rmr.size.get() as usize, 16, 1).unwrap();
-		log::debug(&["    ", addr, " ", size]);
+		let addr = rmr.address.get() as usize;
+		let size = rmr.size.get() as usize;
+		log::debug!("  {:x} <-> {:x} (len: {:x})", addr, addr + size, size);
 	}
-	fn print_node(level: usize, buf: &mut [&str; 64], mut node: driver::Node) {
-		buf[level * 2] = "'";
-		buf[level * 2 + 1] = node.name;
-		buf[level * 2 + 2] = "'";
-		log::debug(&buf[..level * 2 + 3]);
-		buf[level * 2] = "  Properties:";
-		log::debug(&buf[..level * 2 + 1]);
+	log::debug(&["  OK THEN"]);
+	fn print_node(level: usize, mut node: driver::Node) {
+		log::debug!("{0:>1$}{2} {{", "", level * 2, node.name);
 		while let Some(property) = node.next_property() {
-			buf[level * 2] = "    '";
-			buf[level * 2 + 1] = property.name;
-			buf[level * 2 + 2] = "'";
-			log::debug(&buf[..level * 2 + 3]);
+			if property.value.len() > 0 &&
+				property.value[..property.value.len() - 1]
+					.iter()
+					// Everything between ' ' and '~' is human-readable
+					.all(|&c| b' ' <= c && c <= b'~') &&
+				property.value.last().unwrap() == &0
+			{
+				// SAFETY: The string is a valid null-terminated string
+				let s = unsafe {
+					core::str::from_utf8_unchecked(&property.value[..property.value.len() - 1])
+				};
+				writeln!(crate::log::Debug::new(), "{0:>1$}{2} = {3:?}", "", level * 2 + 2, property.name, s);
+			} else {
+				writeln!(crate::log::Debug::new(), "{0:>1$}{2} = {3:02x?}", "", level * 2 + 2, property.name, &property.value);
+			}
 		}
-		buf[level * 2] = "  Child nodes:";
-		log::debug(&buf[..level * 2 + 1]);
 		while let Some(node) = node.next_child_node() {
-			buf[level * 2] = "  ";
-			buf[level * 2 + 1] = "  ";
-			print_node(level + 1, buf, node);
+			print_node(level + 1, node);
 		}
+		log::debug!("{0:>1$}}}", "", level * 2);
 	}
-	log::debug(&["  Nodes:"]);
 	let mut interpreter = dtb.interpreter();
-	let mut buf = ["  "; 64];
 	while let Some(mut node) = interpreter.next_node() {
-		print_node(1, &mut buf, node);
+		print_node(1, node);
 	}
 }
 
 #[no_mangle]
 #[cfg(not(test))]
 extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_size: usize) {
-	// TODO FIXME
-	unsafe {
-		// Set pmpcfg0 and pmpaddr0 to allow access to everything in S and U mode
-		// Use TOR mode with top address set to -1
-		asm!("
-			li		t0, -1
-			srli	t0, t0, 10
-			csrw	0x3b0, t0
-			li		t0, 0xf
-			csrw	0x3a0, t0
-		", lateout("t0") _);
-	}
 
+	crate::log::info(&["I WAS ALIVE ALL ALONG!!!"]);
+	crate::log::info(&["KONOOOOOOOOOOOOOOOOOOOOOOO"]);
 
+	/*
 	// Log architecture info
 	use arch::*;
 	arch::id().log();
 	arch::capabilities().log();
+	*/
 
 	// Parse DTB and reserve some memory for heap usage
 	let dtb = unsafe { driver::DeviceTree::parse_dtb(dtb).unwrap() };
@@ -224,9 +216,57 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	let size_cells = size_cells.expect("Address cells isn't set");
 
 	let mut heap = None;
+	let mut reserved_memory = [(0, 0); 16];
 
 	while let Some(mut node) = root.next_child_node() {
-		if heap.is_none() && node.name.starts_with("memory@") {
+		if node.name.starts_with("reserved-memory")  {
+			// Also, what is the significance of the "ranges" property? It's
+			// always empty anyways.
+			// Ref: https://elixir.bootlin.com/linux/latest/source/Documentation/devicetree/bindings/reserved-memory/reserved-memory.txt
+			let mut address_cells = address_cells;
+			let mut size_cells = size_cells;
+			while let Some(prop) = node.next_property() {
+				match prop.name {
+					"#address-cells" => address_cells = u32::from_be_bytes(prop.value.try_into().unwrap()),
+					"#size-cells" => size_cells = u32::from_be_bytes(prop.value.try_into().unwrap()),
+					"ranges" => (),
+					_ => (),
+				}
+			}
+			let mut rm_i = 0;
+			while let Some(mut child) = node.next_child_node() {
+				while let Some(prop) = child.next_property() {
+					match prop.name {
+						"reg" => {
+							let val = prop.value;
+							let (start, val) = match address_cells {
+								0 => (0, val),
+								1 => (
+									u32::from_be_bytes(val[..4].try_into().unwrap()) as usize,
+									&val[4..],
+								),
+								2 => (
+									u64::from_be_bytes(val[..8].try_into().unwrap()) as usize,
+									&val[8..],
+								),
+								_ => panic!("Unsupported address size"),
+							};
+							let size = match size_cells {
+								0 => 0,
+								1 => u32::from_be_bytes(val.try_into().unwrap()) as usize,
+								2 => u64::from_be_bytes(val.try_into().unwrap()) as usize,
+								_ => panic!("Unsupported size size"),
+							};
+							log::debug!("{:?}", prop.value);
+							log::debug!("0x{:x} - 0x{:x}", start, start + size - 1);
+							reserved_memory[rm_i] = (start, start + size - 1);
+							rm_i += 1;
+						}
+						_ => (),
+					}
+				}
+			}
+		} else if heap.is_none() && node.name.starts_with("memory@") {
 			while let Some(prop) = node.next_property() {
 				match prop.name {
 					"reg" => {
@@ -304,6 +344,8 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 
 	// Initialize the memory manager
 	let (address, size) = heap.expect("No memory device (check the DTB!)");
+	// FIXME this is utter shit
+	let (address, size) = (core::ptr::NonNull::new(0x8400_0000 as *mut u8).unwrap(), 256 * arch::PAGE_SIZE);
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
 	let mm = NonZeroUsize::new(size / arch::PAGE_SIZE).expect("Memory range is zero-sized");
