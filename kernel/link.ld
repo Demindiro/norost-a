@@ -1,11 +1,11 @@
 OUTPUT_FORMAT("elf64-littleriscv")
 OUTPUT_ARCH(riscv)
 
-STACK_SIZE = 64K;
+STACK_SIZE = 4K;
 
 ENTRY(_start)
 
-KERNEL_START = -256K;
+KERNEL_START = -64K;
 
 SECTIONS
 {
