@@ -297,7 +297,6 @@ where
 			let data = data[header.offset..][..header.file_size].as_ptr();
 			// SAFETY: FIXME
 			unsafe { ptr::copy_nonoverlapping(data, area.start().cast().as_ptr(), header.file_size) };
-			crate::log::debug_usize("header.virtual_address", header.virtual_address, 16);
 			segments[segment_count].write(Segment {
 				flags: header.flags as u8,
 				physical_area: area,
@@ -319,9 +318,6 @@ where
 	pub fn create_task(&self) -> Result<crate::task::Task, crate::memory::AllocateError> {
 		let mut task = crate::task::Task::new()?;
 		for s in self.segments.iter() {
-			crate::log::debug_str("");
-			crate::log::debug_usize("va start", s.virtual_area.start().as_ptr() as usize, 16);
-			crate::log::debug_usize("va size", s.virtual_area.order() as usize, 10);
 			task.add_mapping(s.virtual_area, s.physical_area, crate::arch::RWX::RWX).unwrap();
 		}
 		task.set_pc(self.entry as *const _);
@@ -349,12 +345,7 @@ impl Drop for Segment {
 			// SAFETY: we own the page and nothing else is using the memory (if something was, we
 			// shouldn't be being dropped in the first place).
 			if memory::mem_deallocate(self.physical_area).is_err() {
-				log::error(&[
-					file!(),
-					":",
-					concat!(line!()),
-					" Failed to deallocate memory page",
-				]);
+				log!(concat!(file!(), ":", line!(), " Failed to deallocate memory page"));
 			}
 		}
 	}

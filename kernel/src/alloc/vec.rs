@@ -59,7 +59,6 @@ where
 	pub fn try_push(&mut self, element: T) -> Result<&mut T, ReserveError> {
 		if self.len() >= self.raw_vec.capacity() {
 			let cap = self.raw_vec.capacity();
-			crate::log::debug_usize("cap", cap, 10);
 			self.raw_vec.try_reserve((cap * 3 / 2 + 1) - cap)?;
 		}
 		// SAFETY: the index is in range

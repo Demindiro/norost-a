@@ -422,20 +422,18 @@ impl super::Capabilities for MISA {
 		let mut buf = [0; 32];
 		// SAFETY: Inspecting `misa` is always safe
 		let misa = unsafe { csr!(MISA) };
-		let mxl = self.mxl();
-		let misa = util::usize_to_string(&mut buf, misa, 16, mxl.xlen() / 4).unwrap();
-		log::info(&["MISA = ", misa]);
-		log::info(&["  MXL = ", mxl.as_str()]);
+		log!("MISA = {:x}", misa);
+		log!("  MXL = {}", self.mxl().as_str());
 		{
 			use Extension::*;
-			log::info(&["  Extensions:"]);
+			log!("  Extensions:");
 			let e = [
 				A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
 			];
 			for e in array::IntoIter::new(e) {
 				let s = e.as_str();
 				if self.has_extension(e) {
-					log::info(&["    ", s]);
+					log!("    {}", s);
 				}
 			}
 		}

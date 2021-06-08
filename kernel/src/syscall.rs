@@ -120,7 +120,7 @@ mod sys {
 	sys! {
 		/// Waits for one or all I/O events to complete
 		[task] io_wait(flags, time) {
-			crate::log::debug!("io_wait 0b{:b}, {}", flags, time);
+			log!("io_wait 0b{:b}, {}", flags, time);
 			// FIXME actually wait for I/O
 			unsafe { crate::arch::trap_next_task(task); }
 		}
@@ -129,7 +129,7 @@ mod sys {
 	sys! {
 		/// Resize the task's requester buffers to be able to hold the given amount of entries.
 		[task] io_resize_requester(request_queue, request_size, completion_queue, completion_size) {
-			crate::log::debug!(
+			log!(
 				"io_resize_requester 0x{:x}, {}, 0x{:x}, {}", 
 				request_queue,
 				request_size,
@@ -171,7 +171,7 @@ mod sys {
 			const MEGAPAGE: usize = 0x10;
 			const GIGAPAGE: usize = 0x20;
 			const TERAPAGE: usize = 0x30;
-			crate::log::debug!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
+			log!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
 			use crate::arch::RWX;
 			let address = match NonNull::new(address as *mut _) {
 				Some(a) => a,

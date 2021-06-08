@@ -199,11 +199,7 @@ impl Task {
 
 	/// Add a memory mapping to this task.
 	pub fn add_mapping(&self, virtual_address: Area, physical_address: Area, rwx: arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
-		let r = self.inner().shared_state.virtual_memory.add(virtual_address, physical_address, rwx);
-		crate::log::debug_usize("va", virtual_address.start().as_ptr() as usize, 16);
-		crate::log::debug_usize("pa", physical_address.start().as_ptr() as usize, 16);
-		crate::log::debug_usize("va->vms->pa", self.inner().shared_state.virtual_memory.get(virtual_address.start().cast()).unwrap().0.as_ptr() as usize, 16);
-		r
+		self.inner().shared_state.virtual_memory.add(virtual_address, physical_address, rwx)
 	}
 
 	/// Set the program counter of this task to the given address.
@@ -228,7 +224,7 @@ impl Task {
 					let s = task.inner().shared_state.virtual_memory.get(s).unwrap().0.as_ptr();
 					let s = unsafe { core::slice::from_raw_parts(s, cq.length) };
 					let s = unsafe { core::str::from_utf8_unchecked(s) };
-					crate::log::debug!("Printy stuff (len: {}):\n{}", cq.length, s);
+					log!("{}", s);
 					cq.opcode = None;
 				} else {
 					break;
@@ -236,15 +232,7 @@ impl Task {
 				cqi.increment();
 			}
 		}
-		crate::log::debug_usize("tid", task.id() as usize, 10);
-		crate::log::debug_usize("pc", task.inner().register_state.pc as usize, 16);
-		crate::log::debug_usize("vms", unsafe { *core::mem::transmute::<_, &usize>(&task.inner().shared_state) }, 16);
-		crate::log::debug_usize("self <-> vms", unsafe {
-			core::mem::transmute::<_, usize>(&task.inner().shared_state) - core::mem::transmute::<_, usize>(task.inner())
-		}, 10);
 		let pc = task.inner().shared_state.virtual_memory.get(NonNull::new(task.inner().register_state.pc as *mut _).unwrap());
-		crate::log::debug_usize("pc", pc.unwrap().0 .as_ptr() as usize, 16);
-		crate::log::debug_usize("sp", task.inner().stack.as_ptr() as usize, 16);
 		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
 		unsafe { arch::trap_start_task(task) }
 	}

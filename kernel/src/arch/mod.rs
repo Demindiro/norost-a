@@ -91,20 +91,9 @@ pub trait ID {
 	/// Logs vendor-specific information.
 	fn log(&self) {
 		let jedec = self.jedec();
-		let mut buf = [0; 16];
-		let continuation = util::usize_to_string(&mut buf, jedec.continuation, 10, 1).unwrap();
-		let mut buf = [0; 2];
-		let stop = util::usize_to_string(&mut buf, jedec.stop.into(), 16, 2).unwrap();
-		log::info(&["Vendor: ", continuation, " ", stop]);
-
-		const LEN: u8 = 2 * mem::size_of::<usize>() as u8;
-		let mut buf = [0; LEN as usize];
-
-		let arch = util::usize_to_string(&mut buf, self.arch(), 16, LEN.into()).unwrap();
-		log::info(&["Architecture: ", arch]);
-
-		let hart = util::usize_to_string(&mut buf, self.hart(), 16, LEN.into()).unwrap();
-		log::info(&["Current hart: ", hart]);
+		log!("Vendor: {} {}", jedec.continuation, jedec.stop);
+		log!("Architecture: {}", self.arch());
+		log!("Current hart: {}", self.hart());
 	}
 }
 

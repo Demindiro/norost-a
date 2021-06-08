@@ -45,10 +45,7 @@ macro_rules! test {
 	($name:ident() $code:block) => {
 		#[test_case]
 		fn $name() {
-			crate::log::info(&[
-				"  testing ",
-				concat!(module_path!(), "::", stringify!($name)),
-			]);
+			log!(concat!("  testing ", module_path!(), "::", stringify!($name)));
 			{
 				$code
 			}
@@ -60,9 +57,10 @@ mod alloc;
 mod arch;
 mod driver;
 mod elf;
+#[macro_use]
+mod log;
 mod syscall;
 mod io;
-mod log;
 mod memory;
 mod powerstate;
 mod sync;
@@ -80,38 +78,20 @@ const HEAP_MEM_MAX: usize = 0x100_000;
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
-	log::fatal(&["Kernel panicked!"]);
-	let msg = info.payload();
-	if let Some(msg) = info.message() {
-		log::debug!("  Message:  '{}'", msg);
-	}
-	if let Some(s) = msg.downcast_ref::<&str>() {
-		log::fatal(&["  Payload:  ", s]);
-	}
+	log!("Kernel panicked!");
+	log!("  Message:   {:?}", info.payload());
 	if let Some(loc) = info.location() {
-		// If more than 8 characters are needed for line/column I'll kill someone
-		let mut buf = [0; 8];
-		let line = util::usize_to_string(&mut buf, loc.line() as usize, 10, 1).unwrap();
-		let mut buf = [0; 8];
-		let column = util::usize_to_string(&mut buf, loc.column() as usize, 10, 1).unwrap();
-		log::fatal(&["  Source:   ", loc.file(), ":", line, ",", column]);
+		log!("  Source:   {}:{},{}", loc.file(), loc.line(), loc.column());
 	} else {
-		log::fatal(&["  No location info"]);
+		log!("  No location info");
 	}
 	let bt_approx = if arch::is_backtrace_accurate() {
 		""
 	} else {
 		" (approximate)"
 	};
-	log::fatal(&["  Backtrace", bt_approx, ":"]);
-	arch::backtrace(|sp, fun| {
-		const LEN: u8 = 2 * mem::size_of::<*const ()>() as u8;
-		let mut buf = [0; LEN as usize];
-		let sp = util::usize_to_string(&mut buf, sp as usize, 16, 1).unwrap();
-		let mut buf = [0; LEN as usize];
-		let fun = util::usize_to_string(&mut buf, fun as usize, 16, 1).unwrap();
-		log::fatal(&["    ", sp, ": ", fun]);
-	});
+	log!("  Backtrace{}:", bt_approx);
+	arch::backtrace(|sp, fun| log!("    {:p}: {:p}", sp, fun));
 	loop {
 		powerstate::halt();
 	}
@@ -119,19 +99,17 @@ fn panic(info: &panic::PanicInfo) -> ! {
 
 #[cfg(feature = "dump-dtb")]
 fn dump_dtb(dtb: &driver::DeviceTree) {
-	log::debug(&["Device tree:"]);
-	let mut buf = [0; 32];
-	let num = util::usize_to_string(&mut buf, dtb.boot_cpu_id() as usize, 16, 1).unwrap();
-	log::debug(&["  Boot CPU physical ID: ", num]);
-	log::debug(&["  Reserved memory regions:"]);
+	log!("Device tree:");
+	log!("  Boot CPU physical ID: {}", dtb.boot_cpu_id());
+	log!("  Reserved memory regions:");
 	for rmr in dtb.reserved_memory_regions() {
 		let addr = rmr.address.get() as usize;
 		let size = rmr.size.get() as usize;
-		log::debug!("  {:x} <-> {:x} (len: {:x})", addr, addr + size, size);
+		log!("  {:x} <-> {:x} (len: {:x})", addr, addr + size, size);
 	}
-	log::debug(&["  OK THEN"]);
+
 	fn print_node(level: usize, mut node: driver::Node) {
-		log::debug!("{0:>1$}{2} {{", "", level * 2, node.name);
+		log!("{0:>1$}{2} {{", "", level * 2, node.name);
 		while let Some(property) = node.next_property() {
 			if property.value.len() > 0 &&
 				property.value[..property.value.len() - 1]
@@ -144,15 +122,15 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 				let s = unsafe {
 					core::str::from_utf8_unchecked(&property.value[..property.value.len() - 1])
 				};
-				writeln!(crate::log::Debug::new(), "{0:>1$}{2} = {3:?}", "", level * 2 + 2, property.name, s);
+				log!("{0:>1$}{2} = {3:?}", "", level * 2 + 2, property.name, s);
 			} else {
-				writeln!(crate::log::Debug::new(), "{0:>1$}{2} = {3:02x?}", "", level * 2 + 2, property.name, &property.value);
+				log!("{0:>1$}{2} = {3:02x?}", "", level * 2 + 2, property.name, &property.value);
 			}
 		}
 		while let Some(node) = node.next_child_node() {
 			print_node(level + 1, node);
 		}
-		log::debug!("{0:>1$}}}", "", level * 2);
+		log!("{0:>1$}}}", "", level * 2);
 	}
 	let mut interpreter = dtb.interpreter();
 	while let Some(mut node) = interpreter.next_node() {
@@ -163,9 +141,6 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 #[no_mangle]
 #[cfg(not(test))]
 extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_size: usize) {
-
-	crate::log::info(&["I WAS ALIVE ALL ALONG!!!"]);
-	crate::log::info(&["KONOOOOOOOOOOOOOOOOOOOOOOO"]);
 
 	/*
 	// Log architecture info
@@ -188,7 +163,7 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	let mut boot_args = "";
 	let mut stdout = "";
 
-	let log_err_malformed_prop = |name| log::error(&["Value of '", name, "' is malformed"]);
+	let log_err_malformed_prop = |name| log!("Value of '{}' is malformed", name);
 
 	while let Some(prop) = root.next_property() {
 		match prop.name {
@@ -257,8 +232,8 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 								2 => u64::from_be_bytes(val.try_into().unwrap()) as usize,
 								_ => panic!("Unsupported size size"),
 							};
-							log::debug!("{:?}", prop.value);
-							log::debug!("0x{:x} - 0x{:x}", start, start + size - 1);
+							log!("{:?}", prop.value);
+							log!("0x{:x} - 0x{:x}", start, start + size - 1);
 							reserved_memory[rm_i] = (start, start + size - 1);
 							rm_i += 1;
 						}
@@ -352,23 +327,18 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	let mm = unsafe { memory::mem_add_range(address.cast(), mm) };
 
 	// Log some of the properties we just fetched
-	log::info(&["Device model: '", model, "'"]);
-	log::info(&["Boot arguments: '", boot_args, "'"]);
-	log::info(&["Dumping logs on '", stdout, "'"]);
+	log!("Device model: '{}'", model);
+	log!("Boot arguments: '{}'", boot_args);
+	log!("Dumping logs on '{}'", stdout);
 
-	const DIGITS: u8 = 2 * mem::size_of::<usize>() as u8;
 	let start = address.as_ptr() as usize;
 	let end = start + size;
-	let mut buf = [0; DIGITS as usize];
-	let start = util::usize_to_string(&mut buf, start, 16, DIGITS).unwrap();
-	let mut buf = [0; DIGITS as usize];
-	let end = util::usize_to_string(&mut buf, end, 16, DIGITS).unwrap();
-	log::info(&["Useable memory range: ", start, " - ", end]);
+	log!("Useable memory range: {:x} - {:x}", start, end);
 
 	// Initialize trap table now that the most important setup is done.
 	arch::init();
 
-	log::debug!("initfs: {:p}, {}", initfs, initfs_size);
+	log!("initfs: {:p}, {}", initfs, initfs_size);
 
 	// Run init
 	// 128 KiB with 4 KiB pages
@@ -400,13 +370,7 @@ mod test {
 		unsafe { NonNull::new_unchecked(0x8100_0000 as *mut _) };
 
 	pub(super) fn runner(tests: &[&dyn Fn()]) {
-		let mut buf = [0; 32];
-		let num = util::isize_to_string(&mut buf, tests.len() as isize, 10, 1).unwrap();
-		log::info(&[
-			"Running ",
-			num,
-			if tests.len() == 1 { " test" } else { " tests" },
-		]);
+		log!("Running {} test{}", tests.len(), if tests.len() == 1 { "" } else { "s" });
 		arch::init();
 		for f in tests {
 			// Reinitialize the memory manager each time in case of leaks or something else
@@ -419,6 +383,6 @@ mod test {
 			}
 			f();
 		}
-		log::info(&["Done"]);
+		log!("Done");
 	}
 }
