@@ -341,12 +341,10 @@ impl Segment {
 
 impl Drop for Segment {
 	fn drop(&mut self) {
+		// SAFETY: we own the page and nothing else is using the memory (if something was, we
+		// shouldn't be being dropped in the first place).
 		unsafe {
-			// SAFETY: we own the page and nothing else is using the memory (if something was, we
-			// shouldn't be being dropped in the first place).
-			if memory::mem_deallocate(self.physical_area).is_err() {
-				log!(concat!(file!(), ":", line!(), " Failed to deallocate memory page"));
-			}
+			memory::mem_deallocate(self.physical_area);
 		}
 	}
 }

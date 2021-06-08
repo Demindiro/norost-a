@@ -130,7 +130,7 @@ impl Drop for SharedPage {
 			// Free the counter and the page.
 			// SAFETY: there is nothing else accessing the area, else we couldn't have been
 			// dropped.
-			unsafe { mem_deallocate(crate::memory::Area::new(self.page, 0).unwrap()).unwrap() };
+			unsafe { mem_deallocate(crate::memory::Area::new(self.page, 0).unwrap()) };
 			// SAFETY: only we own the counter
 			unsafe { COUNTERS.lock().deallocate(self.counter) };
 		}

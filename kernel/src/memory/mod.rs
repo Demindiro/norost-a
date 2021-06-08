@@ -11,15 +11,22 @@ use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};
 use core::{mem, slice};
 
+mod allocator;
 mod area;
-mod buddy;
 mod shared;
+mod vms;
 
 pub use area::{Area, BadAlignment};
-pub use buddy::{AllocateError, DeallocateError};
 pub use shared::SharedPage;
 
 use crate::sync::Mutex;
+
+use allocator::Allocator;
+
+pub use allocator::PPN;
+
+#[derive(Debug)]
+pub struct AllocateError;
 
 /// The global memory allocator.
 ///
@@ -40,7 +47,7 @@ use crate::sync::Mutex;
 /// "Sv48: Page-Based 48-bit Virtual-Memory System", section 4.5.1, page 37.
 ///
 /// [riscv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
-static mut BUDDY: Option<Mutex<buddy::BuddyAllocator<18>>> = None;
+static mut ALLOCATOR: Option<Mutex<allocator::Allocator>> = None;
 
 /// Add a memory range for management. Currently only one range is supported.
 ///
@@ -57,10 +64,11 @@ static mut BUDDY: Option<Mutex<buddy::BuddyAllocator<18>>> = None;
 #[optimize(size)]
 pub unsafe fn mem_add_range(start: NonNull<Page>, count: NonZeroUsize) {
 	#[cfg(not(test))]
-	if BUDDY.is_some() {
+	if ALLOCATOR.is_some() {
 		panic!("Can't add more than one memory range");
 	}
-	BUDDY = Some(Mutex::new(buddy::BuddyAllocator::new(start, count)));
+	let ppn = [(PPN::from(start), count.get())];
+	ALLOCATOR = Some(Mutex::new(Allocator::new(&ppn[..]).unwrap()));
 }
 
 /// Allocate an area, i.e. a range of pages. This area is aligned such that all bits below
@@ -69,11 +77,14 @@ pub unsafe fn mem_add_range(start: NonNull<Page>, count: NonZeroUsize) {
 pub fn mem_allocate(order: u8) -> Result<Area, AllocateError> {
 	#[cfg(debug_assertions)]
 	unsafe {
-		BUDDY.as_ref().expect("No initialized buddy allocator").lock().allocate(order)
+		ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().alloc(order)
 	}
 	#[cfg(not(debug_assertions))]
 	unsafe {
-		BUDDY.as_ref().unwrap_unchecked().lock().allocate(order)
+		let a = ALLOCATOR.as_ref().unwrap_unchecked().lock().alloc().unwrap();
+		let a = core::mem::transmute::<_, usize>(a) << 2;
+		let a = NonNull::new(a as *mut _).unwrap();
+		Ok(Area::new(a, 0).unwrap())
 	}
 }
 
@@ -83,19 +94,19 @@ pub fn mem_allocate(order: u8) -> Result<Area, AllocateError> {
 ///
 /// This may fail even when some pages are allocated. It is up to the caller to deallocate them.
 #[optimize(speed)]
-pub fn mem_allocate_range<F>(count: usize, mut f: F) -> Result<(), AllocateError>
+pub fn mem_allocate_range<F>(count: usize, mut f: F) -> Result<(), ()>
 where
 	F: FnMut(NonNull<Page>),
 {
 	for _ in 0..count {
 		// TODO add a re-entrant lock to workaround this sillyness.
 		#[cfg(debug_assertions)]
-		let mut a = unsafe { BUDDY.as_ref().expect("No initialized buddy allocator").lock() };
+		let mut a = unsafe { ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock() };
 		#[cfg(not(debug_assertions))]
-		let mut a = unsafe { BUDDY.as_ref().unwrap_unchecked().lock() };
-		let p = a.allocate(0)?.start();
+		let mut a = unsafe { ALLOCATOR.as_ref().unwrap_unchecked().lock() };
+		let p = a.alloc()?;
 		drop(a);
-		f(p);
+		f(NonNull::new(unsafe { core::mem::transmute::<_, usize>(p) << 2 } as *mut _).unwrap());
 	}
 	Ok(())
 }
@@ -103,14 +114,14 @@ where
 /// Dereference an area, i.e. a range of pages. If the reference count reaches zero, the area is
 /// zeroed out and deallocated.
 #[optimize(speed)]
-pub fn mem_deallocate(area: Area) -> Result<(), DeallocateError> {
+pub fn mem_deallocate(area: Area) {
 	// FIXME implement reference counting to ensure it's safe.
 	#[cfg(debug_assertions)]
 	unsafe {
-		BUDDY.as_ref().expect("No initialized buddy allocator").lock().deallocate(area)
+		ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().free(area)
 	}
 	#[cfg(not(debug_assertions))]
 	unsafe {
-		BUDDY.as_ref().unwrap_unchecked().lock().deallocate(area)
+		ALLOCATOR.as_ref().unwrap_unchecked().lock().free(PPN::from(area.start()))
 	}
 }

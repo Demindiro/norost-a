@@ -156,3 +156,19 @@ where
 		sp += 4;
 	}
 }
+
+/// Returns the ID of the current hart.
+pub fn hart_id() -> usize {
+	riscv::sbi::hart_id()
+}
+
+/// Returns the total amount of harts on the system
+#[cold]
+pub fn hart_count() -> usize {
+	riscv::sbi::hart_count()
+}
+
+#[must_use]
+pub fn add_kernel_mapping<F: FnMut() -> crate::memory::PPN>(f: F, count: usize, rwx: RWX) -> core::ptr::NonNull<Page> {
+	riscv::vms::Sv39::add_kernel_mapping(f, count, rwx)
+}

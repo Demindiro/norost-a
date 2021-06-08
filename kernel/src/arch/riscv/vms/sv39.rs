@@ -658,6 +658,39 @@ impl Sv39 {
 		debug_assert_ne!(pa.0, 0);
 		Some((unsafe { NonNull::new_unchecked(pa.0 as *mut _) }, rwx))
 	}
+
+	/// Add a kernel mapping
+	///
+	/// Kernel mappings are global, hence this parameter doesn't take `self` but instead reads
+	/// `satp`
+	pub fn add_kernel_mapping<F: FnMut() -> crate::memory::PPN>(mut f: F, count: usize, rwx: RWX) -> NonNull<Page> {
+		// FIXME HACKS HACKS HACKS AAAAAAA
+		let virtual_address = NonNull::<Page>::new(0xffff_ffff_ffe0_0000 as *mut _).unwrap();
+		let va = VirtualAddress(virtual_address.as_ptr() as u64);
+		// PPN[2]
+		let tbl: TablePage = unsafe {
+			let s: usize;
+			asm!("
+				csrr	t0, satp
+				slli	t0, t0, 12
+			", out("t0") s);
+			core::mem::transmute(s)
+		};
+		// PPN[1]
+		let tbl = tbl[511].as_table().unwrap();
+		// PPN[0]
+		let mut tbl = tbl[511].as_table().unwrap();
+		for i in 0..count as u64 {
+			let p = f();
+			let p = unsafe { core::mem::transmute::<_, u64>(p) };
+			let p = PhysicalAddress(p << 2);
+			assert!(tbl[i].as_either().is_none(), "FUCK ME BBLECIOHRGOIHRG");
+			let mut e = Entry::new_leaf(p, rwx);
+			e.set_usermode(false);
+			tbl[i] = e;
+		}
+		virtual_address
+	}
 }
 
 impl Drop for Sv39 {

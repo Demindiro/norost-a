@@ -22,3 +22,25 @@ macro_rules! log {
 		writeln!($crate::log::Log, $($args)*);
 	}}
 }
+
+// Shamelessly copied from stdlib.
+#[macro_export]
+macro_rules! dbg {
+    () => {
+        $crate::log!("[{}:{}]", $crate::file!(), $crate::line!());
+    };
+    ($val:expr $(,)?) => {
+        // Use of `match` here is intentional because it affects the lifetimes
+        // of temporaries - https://stackoverflow.com/a/48732525/1063961
+        match $val {
+            tmp => {
+                $crate::log!("[{}:{}] {} = {:#?}",
+                    file!(), line!(), stringify!($val), &tmp);
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($crate::dbg!($val)),+,)
+    };
+}

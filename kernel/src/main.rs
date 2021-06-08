@@ -53,12 +53,13 @@ macro_rules! test {
 	};
 }
 
+#[macro_use]
+mod log;
+
 mod alloc;
 mod arch;
 mod driver;
 mod elf;
-#[macro_use]
-mod log;
 mod syscall;
 mod io;
 mod memory;
@@ -79,7 +80,9 @@ const HEAP_MEM_MAX: usize = 0x100_000;
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
 	log!("Kernel panicked!");
-	log!("  Message:   {:?}", info.payload());
+	if let Some(msg) = info.message() {
+	    log!("  Message:  {:?}", msg);
+	}
 	if let Some(loc) = info.location() {
 		log!("  Source:   {}:{},{}", loc.file(), loc.line(), loc.column());
 	} else {
