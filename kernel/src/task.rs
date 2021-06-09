@@ -18,7 +18,7 @@
 //! it.
 
 use crate::arch::{self, Page, PAGE_SIZE};
-use crate::memory::{self, AllocateError, Area};
+use crate::memory::{self, AllocateError, PPN};
 use core::mem;
 use core::num::NonZeroU8;
 use core::sync::atomic;
@@ -170,8 +170,16 @@ impl Task {
 		// FIXME may leak memory on alloc error.
 		let len = arch::PAGE_SIZE << TASK_PAGE_ORDER;
 		let pages = memory::mem_allocate(TASK_PAGE_ORDER)?;
-		let stack = memory::mem_allocate(0)?.start();
-		let task_data = pages.start().cast::<TaskData>();
+		let stack = memory::mem_allocate(0)?;
+		let stack = usize::from(stack);
+		let stack = stack << 12;
+		let stack = stack as *mut _;
+		let stack = NonNull::new(stack).unwrap();
+		let task_data = pages;
+		let task_data = usize::from(task_data);
+		let task_data = task_data << 12;
+		let task_data = task_data as *mut _;
+		let task_data = NonNull::new(task_data).unwrap();
 		let task = Self(task_data);
 		// SAFETY: task is valid
 		unsafe {
@@ -198,8 +206,8 @@ impl Task {
 	}
 
 	/// Add a memory mapping to this task.
-	pub fn add_mapping(&self, virtual_address: Area, physical_address: Area, rwx: arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
-		self.inner().shared_state.virtual_memory.add(virtual_address, physical_address, rwx)
+	pub fn add_mapping(&self, address: NonNull<Page>, page: PPN, rwx: arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
+		self.inner().shared_state.virtual_memory.add(address, page, rwx)
 	}
 
 	/// Set the program counter of this task to the given address.
@@ -214,14 +222,16 @@ impl Task {
 			let cqi = &mut task.inner().client_request_index;
 			let (cq, rwx) = task.inner().shared_state.virtual_memory.get(cq.cast()).unwrap();
 			assert!(rwx.r());
+			let cq = NonNull::new((usize::from(cq) << 12) as *mut Page).unwrap();
 			let mut cq = cq.cast::<[ClientRequestEntry; PAGE_SIZE / mem::size_of::<ClientRequestEntry>()]>();
 			let cq = unsafe { cq.as_mut() };
 			loop {
 				let cq = &mut cq[cqi.get()];
 				if let Some(op) = cq.opcode {
 					// Just assume write for now.
-					let s = unsafe { cq.data.pages.unwrap().cast::<u8>() };
-					let s = task.inner().shared_state.virtual_memory.get(s).unwrap().0.as_ptr();
+					let ss = unsafe { cq.data.pages.unwrap() };
+					let s = task.inner().shared_state.virtual_memory.get(ss).unwrap().0;
+					let s = NonNull::new(((usize::from(s) << 12) + ss.as_ptr().align_offset(4096)) as *mut u8).unwrap().as_ptr();
 					let s = unsafe { core::slice::from_raw_parts(s, cq.length) };
 					let s = unsafe { core::str::from_utf8_unchecked(s) };
 					log!("{}", s);
@@ -254,7 +264,7 @@ impl Task {
 	}
 
 	/// Return the physical address the given virtual address maps to.
-	pub fn translate_virtual_address(&self, address: NonNull<u8>) -> Option<(NonNull<u8>, crate::arch::RWX)> {
+	pub fn translate_virtual_address(&self, address: NonNull<Page>) -> Option<(PPN, crate::arch::RWX)> {
 		self.inner().shared_state.virtual_memory.get(address)
 	}
 

@@ -13,7 +13,7 @@
 use crate::alloc::Box;
 use crate::log;
 use crate::arch;
-use crate::memory::{self, Area};
+use crate::memory;
 use core::alloc::{AllocError, Allocator};
 use core::ptr::NonNull;
 use core::{mem, ptr};
@@ -134,10 +134,8 @@ const _PROGRAM_HEADER_SIZE_CHECK: usize = 0 - (56 - mem::size_of::<ProgramHeader
 
 /// A structure representing a single segment.
 struct Segment {
-	/// A pointer to the memory page used by this segment
-	physical_area: Area,
 	/// The virtual address of the start of this segment.
-	virtual_area: Area,
+	virtual_area: NonNull<arch::Page>,
 	/// The flags of this segment (i.e. whether it's readable, executable, ...).
 	flags: u8,
 }
@@ -178,151 +176,114 @@ pub enum ParseError {
 
 const TYPE_EXEC: u16 = 2;
 
-impl<A> ELF<A>
-where
-	A: Allocator,
-{
-	/// Attempts to parse the given ELF data.
-	pub fn parse(data: &[u8], allocator: A) -> Result<Self, ParseError> {
-		// Parse the file header
+/// Parse the ELF file and return a new task.
+pub fn create_task(data: &[u8]) -> crate::task::Task {
+	// Parse the file header
 
-		if data.len() < 16 {
-			return Err(ParseError::BadMagic);
-		}
-
-		// SAFETY: the data is at least 16 bytes long
-		let identifier = unsafe { &*(data as *const [u8] as *const Identifier) };
-
-		if &identifier.magic != b"\x7fELF" {
-			return Err(ParseError::BadMagic);
-		}
-
-		if data.as_ptr().align_offset(mem::size_of::<usize>()) != 0 {
-			return Err(ParseError::BadAlignment);
-		}
-
-		#[cfg(target_pointer_width = "32")]
-		let class = 1;
-		#[cfg(target_pointer_width = "64")]
-		let class = 2;
-		if identifier.class != class {
-			return Err(ParseError::UnsupportedClass);
-		}
-
-		#[cfg(target_endian = "little")]
-		let endian = 1;
-		#[cfg(target_endian = "big")]
-		let endian = 2;
-		if identifier.data != endian {
-			return Err(ParseError::UnsupportedData);
-		}
-
-		if identifier.version != 1 {
-			return Err(ParseError::UnsupportedVersion);
-		}
-
-		if data.len() < mem::size_of::<FileHeader>() {
-			return Err(ParseError::HeaderTooSmall);
-		}
-		// SAFETY: the data is long enough
-		let header = unsafe { &*(data as *const [u8] as *const FileHeader) };
-
-		if header.typ != TYPE_EXEC {
-			return Err(ParseError::UnsupportedType);
-		}
-
-		if header.machine != arch::ELF_MACHINE {
-			return Err(ParseError::UnsupportedMachine);
-		}
-
-		if header.flags & !arch::ELF_FLAGS > 0 {
-			return Err(ParseError::UnsupportedFlags);
-		}
-
-		// Parse the program headers and create the segments.
-
-		let count = header.program_header_entry_count as usize;
-		let size = header.program_header_entry_size as usize;
-		if size != mem::size_of::<ProgramHeader>() {
-			return Err(ParseError::BadProgramHeaderSize);
-		}
-		if data.len() < count * size + header.program_header_offset {
-			return Err(ParseError::ProgramHeadersLargerThanFile);
-		}
-
-		// Count the amount of loadable segments.
-		let mut loadable_count = 0;
-		for i in 0..count {
-			// SAFETY: the data is large enough and aligned and the header size matches.
-			let header = unsafe {
-				let h = data as *const [u8] as *const u8;
-				let h = h.add(header.program_header_offset);
-				let h = h as *const ProgramHeader;
-				&*h.add(i)
-			};
-			if header.typ == ProgramHeader::TYPE_LOAD {
-				loadable_count += 1;
-			}
-		}
-
-		let mut segments =
-			Box::try_new_uninit_slice_in(loadable_count, allocator).map_err(ParseError::AllocError)?;
-		let mut segment_count = 0;
-		for i in 0..count {
-			// SAFETY: the data is large enough and aligned and the header size matches.
-			let header = unsafe {
-				let h = data as *const [u8] as *const u8;
-				let h = h.add(header.program_header_offset);
-				let h = h as *const ProgramHeader;
-				&*h.add(i)
-			};
-
-			// Skip non-loadable segments
-			if header.typ != ProgramHeader::TYPE_LOAD {
-				continue;
-			}
-
-			let mut order = 0;
-			let mut align = header.alignment / arch::PAGE_SIZE;
-			// naive integer log2
-			while align > 1 {
-				order += 1;
-				align >>= 1;
-			}
-			// FIXME
-			order = 0;
-			let area = memory::mem_allocate(order)
-				.map_err(ParseError::AllocateError)?;
-			// FIXME can panic if the header is bad
-			let data = data[header.offset..][..header.file_size].as_ptr();
-			// SAFETY: FIXME
-			unsafe { ptr::copy_nonoverlapping(data, area.start().cast().as_ptr(), header.file_size) };
-			segments[segment_count].write(Segment {
-				flags: header.flags as u8,
-				physical_area: area,
-				virtual_area: Area::new(NonNull::new(header.virtual_address as *mut _).unwrap(), order).unwrap(),
-			});
-			segment_count += 1;
-		}
-
-		// SAFETY: all segments are initialized.
-		let segments = unsafe { segments.assume_init() };
-
-		Ok(Self {
-			entry: header.entry,
-			segments,
-		})
+	if data.len() < 16 {
+		panic!("Data too short to include magic");
 	}
 
-	/// Creates a new task from the ELF data.
-	pub fn create_task(&self) -> Result<crate::task::Task, crate::memory::AllocateError> {
-		let mut task = crate::task::Task::new()?;
-		for s in self.segments.iter() {
-			task.add_mapping(s.virtual_area, s.physical_area, crate::arch::RWX::RWX).unwrap();
-		}
-		task.set_pc(self.entry as *const _);
-		Ok(task)
+	// SAFETY: the data is at least 16 bytes long
+	let identifier = unsafe { &*(data as *const [u8] as *const Identifier) };
+
+	if &identifier.magic != b"\x7fELF" {
+		panic!("Bad ELF magic");
 	}
+
+	if data.as_ptr().align_offset(mem::size_of::<usize>()) != 0 {
+		panic!("Bad alignment");
+	}
+
+	#[cfg(target_pointer_width = "32")]
+	let class = 1;
+	#[cfg(target_pointer_width = "64")]
+	let class = 2;
+	if identifier.class != class {
+		panic!("Unsupported class");
+	}
+
+	#[cfg(target_endian = "little")]
+	let endian = 1;
+	#[cfg(target_endian = "big")]
+	let endian = 2;
+	if identifier.data != endian {
+		panic!("Unsupported endianness");
+	}
+
+	if identifier.version != 1 {
+		panic!("Unsupported version");
+	}
+
+	if data.len() < mem::size_of::<FileHeader>() {
+		panic!("Header too small");
+	}
+	// SAFETY: the data is long enough
+	let header = unsafe { &*(data as *const [u8] as *const FileHeader) };
+
+	if header.typ != TYPE_EXEC {
+		panic!("Unsupported type");
+	}
+
+	if header.machine != arch::ELF_MACHINE {
+		panic!("Unsupported machine type");
+	}
+
+	if header.flags & !arch::ELF_FLAGS > 0 {
+		panic!("Unsupported flags");
+	}
+
+	// Parse the program headers and create the segments.
+
+	let count = header.program_header_entry_count as usize;
+	let size = header.program_header_entry_size as usize;
+	if size != mem::size_of::<ProgramHeader>() {
+		panic!("Bad program header size");
+	}
+	if data.len() < count * size + header.program_header_offset {
+		panic!("Program headers exceed the size of the file");
+	}
+
+	// Count the amount of loadable segments.
+	let mut loadable_count = 0;
+	for i in 0..count {
+		// SAFETY: the data is large enough and aligned and the header size matches.
+		let header = unsafe {
+			let h = data as *const [u8] as *const u8;
+			let h = h.add(header.program_header_offset);
+			let h = h as *const ProgramHeader;
+			&*h.add(i)
+		};
+		if header.typ == ProgramHeader::TYPE_LOAD {
+			loadable_count += 1;
+		}
+	}
+
+	let mut task = crate::task::Task::new().expect("Failed to allocate task");
+
+	for i in 0..count {
+		// SAFETY: the data is large enough and aligned and the header size matches.
+		let header = unsafe {
+			let h = data as *const [u8] as *const u8;
+			let h = h.add(header.program_header_offset);
+			let h = h as *const ProgramHeader;
+			&*h.add(i)
+		};
+
+		// Skip non-loadable segments
+		if header.typ != ProgramHeader::TYPE_LOAD {
+			continue;
+		}
+
+		assert_eq!(header.offset & arch::PAGE_MASK, 0, "Offset is not aligned");
+		let data = NonNull::from(&data[header.offset..][..header.file_size]).cast();
+		let ppn = arch::VirtualMemorySystem::get_kernel(data).unwrap().0;
+		task.add_mapping(NonNull::new(header.virtual_address as *mut _).unwrap(), ppn, crate::arch::RWX::RWX).unwrap();
+	}
+
+	task.set_pc(header.entry as *const _);
+
+	task
 }
 
 impl ProgramHeader {
@@ -337,16 +298,6 @@ impl Segment {
 	const FLAG_EXEC: u32 = 0x1;
 	const FLAG_WRITE: u32 = 0x2;
 	const FLAG_READ: u32 = 0x4;
-}
-
-impl Drop for Segment {
-	fn drop(&mut self) {
-		// SAFETY: we own the page and nothing else is using the memory (if something was, we
-		// shouldn't be being dropped in the first place).
-		unsafe {
-			memory::mem_deallocate(self.physical_area);
-		}
-	}
 }
 
 #[cfg(test)]

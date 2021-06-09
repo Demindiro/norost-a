@@ -325,20 +325,20 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	// Initialize the memory manager
 	let (address, size) = heap.expect("No memory device (check the DTB!)");
 	// FIXME this is utter shit
-	let (address, size) = (core::ptr::NonNull::new(0x8400_0000 as *mut u8).unwrap(), 256 * arch::PAGE_SIZE);
+	let (address, size) = (0x8400_0000, 256 * arch::PAGE_SIZE);
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
-	let mm = NonZeroUsize::new(size / arch::PAGE_SIZE).expect("Memory range is zero-sized");
-	let mm = unsafe { memory::mem_add_range(address.cast(), mm) };
+	let mut mm = memory::PPNRange::new(address, (size / arch::PAGE_SIZE).try_into().unwrap());
+	let mm = unsafe { memory::mem_add_ranges(&mut [mm]) };
 
 	// Log some of the properties we just fetched
 	log!("Device model: '{}'", model);
 	log!("Boot arguments: '{}'", boot_args);
 	log!("Dumping logs on '{}'", stdout);
 
-	let start = address.as_ptr() as usize;
+	let start = address;
 	let end = start + size;
-	log!("Useable memory range: {:x} - {:x}", start, end);
+	log!("Useable memory range: 0x{:x}-0x{:x}", start, end);
 
 	// Initialize trap table now that the most important setup is done.
 	arch::init();
@@ -346,16 +346,9 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	log!("initfs: {:p}, {}", initfs, initfs_size);
 
 	// Run init
-	// 128 KiB with 4 KiB pages
-	let alloc = memory::mem_allocate(5).expect("Failed to alloc initfs heap");
-	// SAFETY: the memory is valid and not in use by anything else.
-	let alloc = unsafe {
-		alloc::allocators::WaterMark::new(alloc.start().cast(), arch::PAGE_SIZE << alloc.order())
-	};
 	// SAFETY: a valid init pointer and size should have been passed by boot.s.
 	let init = unsafe { core::slice::from_raw_parts(initfs, initfs_size) };
-	let init = elf::ELF::parse(init.as_ref(), &alloc).expect("Invalid ELF file");
-	let init = init.create_task().expect("Failed to create init task");
+	let init = elf::create_task(init.as_ref());
 	init.next();
 }
 

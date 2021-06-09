@@ -23,20 +23,13 @@
 //!
 //! Using a VMS-like tree structure makes it trivial to support hugepages of any size.
 
+use super::{PPN, PPNRange};
 use crate::arch::{self, PAGE_SIZE};
 use core::convert::TryInto;
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::slice;
-
-/// A struct representing a PPN.
-///
-/// A PPN **cannot** be directly used as a physical address. It is formatted such that it doesn't
-/// store the unneeded lower bits, which also allows using 32-bit PPNs on most 64-bit architecures.
-#[repr(transparent)]
-#[derive(Clone, Copy)]
-pub struct PPN(u32);
 
 /// Stacks of PPNs for fast allocation. The stack also act as a ring buffer when moving PPNs
 /// to the tree.
@@ -52,21 +45,6 @@ pub struct Allocator {
 	stacks: Stacks,
 }
 
-impl<U> From<NonNull<U>> for PPN {
-	fn from(ptr: NonNull<U>) -> Self {
-		#[cfg(debug_assertions)]
-		let p = PPN((ptr.as_ptr() as usize >> arch::PAGE_BITS).try_into().expect("PPN too large"));
-		#[cfg(not(debug_assertions))]
-		let p = PPN((ptr.as_ptr() as usize >> arch::PAGE_BITS) as u32);
-		p
-	}
-}
-
-impl core::fmt::Debug for PPN {
-	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-		write!(f, "PPN (page: 0x{:x})", self.0 << 12)
-	}
-}
 
 impl Stacks {
 	/// The amount of PPNs per stack. Must be a power of `2`.
@@ -171,7 +149,7 @@ impl Tree {
 
 impl Allocator {
 	/// Creates a new `Allocator` with the given pages.
-	pub fn new(pages: &[(PPN, u32)]) -> Result<Self, ()> {
+	pub fn new(pages: &mut [PPNRange]) -> Result<Self, ()> {
 		// Get minimum needed pages
 		let hc = arch::hart_count();
 		log!("hc: {}", hc);
@@ -179,19 +157,14 @@ impl Allocator {
 		let count = (count + arch::PAGE_MASK) & !arch::PAGE_MASK;
 		let count = count / arch::PAGE_SIZE;
 		let count = count as u32;
-		let (mut stacks, extra, pages) = 'a: loop {
+		let (mut stacks, mut extra, pages) = 'a: loop {
 			let mut c = 0;
 			for (i, p) in pages.iter().enumerate() {
-				c += p.1;
+				c += p.count();
 				if c > count {
-					let m = c - p.1;
-					let m = count - m;
-					let m = (PPN(pages[i].0.0 + m), pages[i].1 - m);
-					break 'a (
-						&pages[..i + 1],
-						m,
-						&pages[i + 1..],
-					);
+					let m = pages[i].split(c - count).unwrap();
+					let lr = pages.split_at_mut(i + 1);
+					break 'a (lr.0, m, lr.1);
 				}
 			}
 			return Err(());
@@ -199,12 +172,13 @@ impl Allocator {
 		let stacks = {
 			let mut i = 0;
 			super::vms::add_kernel_mapping(move || {
-				let p = PPN(stacks[0].0.0 + i);
-				i += 1;
-				if i == stacks[0].1 {
-					stacks = &stacks[1..];
+				loop {
+					if let Some(p) = stacks[i].pop() {
+						break p;
+					} else {
+						i += 1;
+					}
 				}
-				p
 			}, count as usize, crate::arch::RWX::RW).cast::<u8>()
 		};
 		let stacks = unsafe {
@@ -217,14 +191,12 @@ impl Allocator {
 			stacks,
 		};
 
-		for i in 0..extra.1 {
-			let p = PPN(extra.0.0 + i);
+		while let Some(p) = extra.pop() {
 			s.insert(p);
 		}
 
 		for p in pages {
-			for i in 0..p.1 {
-				let p = PPN(p.0.0 + i);
+			while let Some(p) = p.pop() {
 				s.insert(p);
 			}
 		}

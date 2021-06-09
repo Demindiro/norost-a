@@ -1,6 +1,6 @@
 //! Management of shared pages.
 
-use super::{mem_allocate, mem_deallocate, AllocateError};
+use super::{mem_allocate, mem_deallocate, AllocateError, PPN};
 use crate::arch::{Page, PAGE_SIZE, PAGE_MASK};
 use crate::sync::Mutex;
 use core::mem;
@@ -17,7 +17,7 @@ static COUNTERS: Mutex<ReferenceCounters> = Mutex::new(ReferenceCounters {
 /// Representation of a page that can be safely shared.
 pub struct SharedPage {
 	/// Pointer to the page.
-	page: NonNull<Page>,
+	page: PPN,
 	/// Pointer to a counter. This counter is 16 bits by default as that is likely a reasonable
 	/// number for "regular" systems. It may be desireable to be able to change this to 32/64...
 	/// with a feature flag if you expect to share a mapping by a very high amount of tasks.
@@ -77,7 +77,7 @@ const _SIZE_CHECK: usize = 0 - (PAGE_SIZE - mem::size_of::<ReferenceCountersTabl
 
 impl SharedPage {
 	/// Create a new shared page.
-	pub fn new(page: NonNull<Page>) -> Result<Self, AllocateError> {
+	pub fn new(page: PPN) -> Result<Self, AllocateError> {
 		Ok(Self {
 			page,
 			counter: COUNTERS.lock().allocate()?,
@@ -107,13 +107,13 @@ impl SharedPage {
 	}
 
 	/// Splits the shared page into it's address and counter parts. This will not run `drop`.
-	pub fn into_raw_parts(self) -> (NonNull<Page>, NonNull<AtomicU16>) {
+	pub fn into_raw_parts(self) -> (PPN, NonNull<AtomicU16>) {
 		let s = mem::ManuallyDrop::new(self);
 		(s.page, s.counter)
 	}
 
 	/// Creates a SharedPage from its raw parts.
-	pub unsafe fn from_raw_parts(page: NonNull<Page>, counter: NonNull<AtomicU16>) -> Self {
+	pub unsafe fn from_raw_parts(page: PPN, counter: NonNull<AtomicU16>) -> Self {
 		Self { page, counter }
 	}
 }
@@ -130,7 +130,7 @@ impl Drop for SharedPage {
 			// Free the counter and the page.
 			// SAFETY: there is nothing else accessing the area, else we couldn't have been
 			// dropped.
-			unsafe { mem_deallocate(crate::memory::Area::new(self.page, 0).unwrap()) };
+			unsafe { mem_deallocate(self.page) };
 			// SAFETY: only we own the counter
 			unsafe { COUNTERS.lock().deallocate(self.counter) };
 		}
@@ -142,7 +142,9 @@ impl ReferenceCounters {
 		let mut table = match self.free {
 			Some(tbl) => tbl,
 			None => {
-				let mut tbl = mem_allocate(0)?.start().cast::<ReferenceCountersTable>();
+				let tbl = mem_allocate(0)?;
+				let tbl = usize::from(tbl) << 10;
+				let mut tbl = NonNull::new(tbl as *mut ReferenceCountersTable).unwrap();
 				unsafe {
 					tbl.as_ptr().write(ReferenceCountersTable {
 						prev: NonNull::new(&mut self.free as *mut _),

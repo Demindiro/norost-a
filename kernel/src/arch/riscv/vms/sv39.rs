@@ -10,7 +10,7 @@
 use super::{AddError, RWX};
 use crate::arch;
 use crate::arch::{Page, VirtualMemorySystem};
-use crate::memory::{self, Area, AllocateError};
+use crate::memory::{self, AllocateError, PPN};
 use core::convert::TryFrom;
 use core::ptr::NonNull;
 use core::ops;
@@ -104,11 +104,9 @@ impl Entry {
 
 	/// Create a new entry for a single physical entry.
 	#[must_use]
-	fn new_leaf(physical_address: PhysicalAddress, rwx: RWX) -> Self {
+	fn new_leaf(page: PPN, rwx: RWX) -> Self {
 		let mut s = Self(0);
-		s.0 |= physical_address.ppn_2() << Self::PPN_2_OFFSET;
-		s.0 |= physical_address.ppn_1() << Self::PPN_1_OFFSET;
-		s.0 |= physical_address.ppn_0() << Self::PPN_0_OFFSET;
+		s.0 |= (usize::from(page) as u64) << 10;
 		s.set_rwx(rwx);
 		s.set_valid(true);
 		s.set_usermode(true);
@@ -244,7 +242,14 @@ impl ops::DerefMut for Table {
 impl TablePage {
 	/// Create a new table with empty (zeroed) entries.
 	fn new() -> Result<Self, AllocateError> {
-		Ok(Self(memory::mem_allocate(0)?.start()))
+		// FIXME
+		let a = memory::mem_allocate(0)?;
+		let a = unsafe { core::mem::transmute::<_, u32>(a) };
+		let a = a as usize;
+		let a = a << 12;
+		let a = a as *mut _;
+		let a = NonNull::new(a).unwrap();
+		Ok(Self(a))
 	}
 }
 
@@ -279,7 +284,14 @@ impl CountersTablePage {
 			let tbl = match self.0 {
 				Some(mut c) => c.as_mut().0.as_mut(),
 				None => {
-					let mut c = memory::mem_allocate(0)?.start().cast();
+					// FIXME
+					let a = memory::mem_allocate(0)?;
+					let a = unsafe { core::mem::transmute::<_, u32>(a) };
+					let a = a as usize;
+					let a = a << 12;
+					let a = a as *mut _;
+					let a = NonNull::new(a).unwrap();
+					let mut c = a;
 					self.0 = Some(c);
 					c.as_mut().0.as_mut()
 				}
@@ -287,7 +299,14 @@ impl CountersTablePage {
 			let tbl = match tbl[index.0] {
 				Some(mut c) => c.as_mut(),
 				None => {
-					let mut c = memory::mem_allocate(0)?.start().cast();
+					// FIXME
+					let a = memory::mem_allocate(0)?;
+					let a = unsafe { core::mem::transmute::<_, u32>(a) };
+					let a = a as usize;
+					let a = a << 12;
+					let a = a as *mut _;
+					let a = NonNull::new(a).unwrap();
+					let mut c = a;
 					tbl[index.0] = Some(c);
 					c.as_mut()
 				}
@@ -295,7 +314,14 @@ impl CountersTablePage {
 			let tbl = match tbl[index.1] {
 				Some(mut c) => c.as_mut(),
 				None => {
-					let mut c = memory::mem_allocate(0)?.start().cast();
+					// FIXME
+					let a = memory::mem_allocate(0)?;
+					let a = unsafe { core::mem::transmute::<_, u32>(a) };
+					let a = a as usize;
+					let a = a << 12;
+					let a = a as *mut _;
+					let a = NonNull::new(a).unwrap();
+					let mut c = a;
 					tbl[index.1] = Some(c);
 					c.as_mut()
 				}
@@ -438,8 +464,8 @@ impl Sv39 {
 	pub fn allocate(&mut self, virtual_address: NonNull<Page>, count: usize, rwx: RWX) -> Result<(), AddError> {
 		let mut va = virtual_address;
 		// FIXME deallocate pages on failure.
-		memory::mem_allocate_range(count, |addr| {
-			self.add(Area::new(va, 0).unwrap(), Area::new(addr, 0).unwrap(), rwx).unwrap();
+		memory::mem_allocate_range(count, |ppn| {
+			self.add(va, ppn, rwx);
 			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
 		}).unwrap();
 		Ok(())
@@ -447,148 +473,36 @@ impl Sv39 {
 
 	/// Add a mapping. If no virtual address is given, the first available
 	/// entry with enough space is used.
-	///
-	/// ## Returns
-	///
-	/// `Ok(NonNull<Page>)` if the mapping was not yet in use.
-	/// `Err(AlreadyUsed)` if the mapping was already in use.
-	/// `Err(NoSpace)` if there is no address range that is large enough.
-	/// `Err(OutOfBounds)` if the `order` is too large for the given address.
-	pub fn add(&mut self, virtual_address: Area, physical_address: Area, rwx: RWX) -> Result<(), AddError> {
-		if virtual_address.order() != physical_address.order() {
-			return Err(AddError::NonEqualOrder);
-		}
+	pub fn add(&mut self, virtual_address: NonNull<Page>, ppn: PPN, rwx: RWX) -> Result<(), AddError> {
+		let va = VirtualAddress(virtual_address.as_ptr() as u64);
+		let index = va.ppn_210();
 
-		let order = virtual_address.order();
-		let va = virtual_address.start();
-		let pa = physical_address.start();
-
-		if order >= Self::GIGA_PAGE_ORDER {
-			let count = 1 << (order - Self::GIGA_PAGE_ORDER);
-			let mut index = VirtualAddress(va.as_ptr() as u64).ppn_2();
-			let end = (index + count) & (Self::ENTRIES_PER_TABLE - 1);
-			if end <= index {
-				todo!();
-			}
-			let mut va_curr = va.as_ptr() as u64;
-			let mut pa_curr = pa.as_ptr() as u64;
-
-			// Write entries as we go. If the range turns out to be too small, clear them.
-			while index != end {
-				let va = VirtualAddress(va_curr);
-				let pa = PhysicalAddress(pa_curr);
-				let e = &mut self.addresses[index];
-				if e.is_valid() {
-					// Clear previously written entries
-					todo!()
-				}
-				*e = Entry::new_leaf(pa, rwx);
-				va_curr += Self::GIGA_PAGE_SIZE;
-				pa_curr += Self::GIGA_PAGE_SIZE;
-				index += 1;
-			}
-
-		} else if order >= Self::MEGA_PAGE_ORDER {
-			let count = 1 << (order - Self::MEGA_PAGE_ORDER);
-			let start = VirtualAddress(va.as_ptr() as u64).ppn_21();
-			let mut index = start;
-			let end = (index + count) & (Self::ENTRIES_PER_TABLE * Self::ENTRIES_PER_TABLE - 1);
-			if end <= index {
-				todo!();
-			}
-			let mut va_curr = va.as_ptr() as u64;
-			let mut pa_curr = pa.as_ptr() as u64;
-
-			let clear = #[cold] #[inline(never)] |s: &mut Self, index, err| {
-				for i in start..index {
-					s.addresses[i >> 9]
-						.as_table().unwrap()[i & 0x1ff] = Entry::INVALID;
-				}
-				Err(err)
-			};
-
-			// Write entries as we go. If the range turns out to be too small, clear them.
-			while index != end {
-				let e = &mut self.addresses[index >> 9];
-				let mut tbl = if let Some(tbl) = e.as_table() {
-					tbl
-				} else if !e.is_valid() {
-					*e = Entry::new_table(TablePage::new().expect("TODO"));
-					e.as_table().unwrap()
-				} else {
-					// Clear previously written entries
-					return clear(self, index, AddError::Overlaps);
-				};
-
-				let e = &mut tbl[index & (Self::ENTRIES_PER_TABLE - 1)];
-				let va = VirtualAddress(va_curr);
-				let pa = PhysicalAddress(pa_curr);
-				*e = Entry::new_leaf(pa, rwx);
-				va_curr += Self::MEGA_PAGE_SIZE;
-				pa_curr += Self::MEGA_PAGE_SIZE;
-				index += 1;
-			}
-
+		let e = &mut self.addresses[index >> 18];
+		let mut tbl = if let Some(tbl) = e.as_table() {
+			tbl
+		} else if !e.is_valid() {
+			*e = Entry::new_table(TablePage::new().expect("TODO"));
+			e.as_table().unwrap()
 		} else {
+			return Err(AddError::Overlaps);
+		};
 
-			let count = 1 << order;
-			let start = VirtualAddress(va.as_ptr() as u64).ppn_210();
-			let mut index = start;
-			let end = (index + count) & (Self::ENTRIES_PER_TABLE * Self::ENTRIES_PER_TABLE * Self::ENTRIES_PER_TABLE - 1);
-			if end <= index {
-				todo!();
-			}
-			let mut va_curr = va.as_ptr() as u64;
-			let mut pa_curr = pa.as_ptr() as u64;
+		let e = &mut tbl[(index >> 9) & 0x1ff];
+		let mut tbl = if let Some(tbl) = e.as_table() {
+			tbl
+		} else if !e.is_valid() {
+			*e = Entry::new_table(TablePage::new().expect("TODO"));
+			e.as_table().unwrap()
+		} else {
+			return Err(AddError::Overlaps);
+		};
 
-			let clear = #[cold] #[inline(never)] |s: &mut Self, index, err| {
-				for i in start..index {
-					s.addresses[i >> 18]
-						.as_table().unwrap()[(i >> 9) & 0x1ff]
-						.as_table().unwrap()[i & 0x1ff] = Entry::INVALID;
-				}
-				Err(err)
-			};
-
-			// Write entries as we go. If the range turns out to be too small, clear them.
-			while index != end {
-
-				let e = &mut self.addresses[index >> 18];
-				let mut tbl = if let Some(tbl) = e.as_table() {
-					tbl
-				} else if !e.is_valid() {
-					*e = Entry::new_table(TablePage::new().expect("TODO"));
-					e.as_table().unwrap()
-				} else {
-					// Clear previously written entries
-					return clear(self, index, AddError::Overlaps);
-				};
-
-				let e = &mut tbl[(index >> 9) & 0x1ff];
-				let mut tbl = if let Some(tbl) = e.as_table() {
-					tbl
-				} else if !e.is_valid() {
-					*e = Entry::new_table(TablePage::new().expect("TODO"));
-					e.as_table().unwrap()
-				} else {
-					// Clear previously written entries
-					return clear(self, index, AddError::Overlaps);
-				};
-
-				let e = &mut tbl[index & 0x1ff];
-				if e.is_valid() {
-					// Clear previously written entries
-					return clear(self, index, AddError::Overlaps);
-				}
-
-				let va = VirtualAddress(va_curr);
-				let pa = PhysicalAddress(pa_curr);
-				*e = Entry::new_leaf(pa, rwx);
-				va_curr += Self::PAGE_SIZE;
-				pa_curr += Self::PAGE_SIZE;
-				index += 1;
-			}
+		let e = &mut tbl[index & 0x1ff];
+		if e.is_valid() {
+			return Err(AddError::Overlaps);
 		}
+
+		*e = Entry::new_leaf(ppn, rwx);
 
 		Ok(())
 	}
@@ -597,10 +511,10 @@ impl Sv39 {
 	pub fn allocate_shared(&mut self, address: NonNull<Page>, count: usize, rwx: RWX) -> Result<(), ()> {
 		let mut va = address;
 		// FIXME deallocate pages on failure.
-		memory::mem_allocate_range(count, |page| {
-			let page = crate::memory::SharedPage::new(page).unwrap();
-			let (page, counter) = page.into_raw_parts();
-			self.add(Area::new(va, 0).unwrap(), Area::new(page, 0).unwrap(), rwx).unwrap();
+		memory::mem_allocate_range(count, |ppn| {
+			let ppn = crate::memory::SharedPage::new(ppn).unwrap();
+			let (ppn, counter) = ppn.into_raw_parts();
+			self.add(va, ppn, rwx).unwrap();
 			let index = (va.as_ptr() as usize >> 12) as u64;
 			self.counters.set(index, counter);
 			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
@@ -625,14 +539,14 @@ impl Sv39 {
 		todo!()
 	}
 
-	/// Map a virtual address to a physical address.
+	/// Map a virtual page to a physical PPN.
 	/// 
 	/// ## Returns
 	///
 	/// `Ǹone` if the virtual address is not mapped.
 	/// `Some((ppn_u, address))` if the address is mapped. `ppn_u` represents the upper
 	/// 17 bits of the physical address.
-	pub fn get(&self, virtual_address: NonNull<u8>) -> Option<(NonNull<u8>, RWX)> {
+	pub fn get(&self, virtual_address: NonNull<Page>) -> Option<(PPN, RWX)> {
 		let va = VirtualAddress(virtual_address.as_ptr() as u64);
 		
 		let entry = &self.addresses[va.ppn_2()];
@@ -653,10 +567,9 @@ impl Sv39 {
 			}
 			Either::Address((pa, rwx)) => (pa.ppn_2(), va.ppn_1(), va.ppn_0(), rwx),
 		};
-
-		let pa = PhysicalAddress::new(ppn_2, ppn_1, ppn_0, va.offset());
-		debug_assert_ne!(pa.0, 0);
-		Some((unsafe { NonNull::new_unchecked(pa.0 as *mut _) }, rwx))
+		let (ppn_2, ppn_1, ppn_0) = (ppn_2 as usize, ppn_1 as usize, ppn_0 as usize);
+		let pa = PPN::new(((ppn_2 << 18) | (ppn_1 << 9) | ppn_0) << 12);
+		Some((pa, rwx))
 	}
 
 	/// Add a kernel mapping
@@ -681,23 +594,38 @@ impl Sv39 {
 		// PPN[0]
 		let mut tbl = tbl[511].as_table().unwrap();
 		for i in 0..count as u64 {
-			let p = f();
-			dbg!(&p);
-			let p = unsafe { core::mem::transmute::<_, u32>(p) as u64 };
-			let p = PhysicalAddress(p << 12);
-			log!("{:x}", p.0);
 			assert!(tbl[i].as_either().is_none(), "FUCK ME BBLECIOHRGOIHRG");
-			let mut e = Entry::new_leaf(p, rwx);
+			let mut e = Entry::new_leaf(f(), rwx);
 			e.set_usermode(false);
 			tbl[i] = e;
 		}
 		log!("{:p}", virtual_address);
 		virtual_address
 	}
+
+	/// Maps a kernel virtual address to a physical address.
+	pub fn get_kernel(va: NonNull<Page>) -> Option<(PPN, RWX)> {
+		let tbl: TablePage = unsafe {
+			let s: usize;
+			asm!("
+				csrr	t0, satp
+				slli	t0, t0, 12
+			", out("t0") s);
+			core::mem::transmute(s)
+		};
+		let s = Self {
+			addresses: tbl,
+			counters: CountersTablePage(None),
+		};
+		let p = s.get(va);
+		core::mem::forget(s);
+		p
+	}
 }
 
 impl Drop for Sv39 {
 	fn drop(&mut self) {
+		/*
 		// PPN[2]
 		for e in self.addresses.iter() {
 			if let Some(tbl) = e.as_table() {
@@ -705,7 +633,7 @@ impl Drop for Sv39 {
 				for e in tbl.iter() {
 					if let Some(tbl) = e.as_table() {
 						// PPN[0]
-						let a = Area::new(tbl.0, 0).unwrap();
+						let a = tbl.0
 						// SAFETY: We own a unique reference to a valid page.
 						unsafe {
 							memory::mem_deallocate(a);
@@ -724,6 +652,8 @@ impl Drop for Sv39 {
 		unsafe {
 			memory::mem_deallocate(a);
 		}
+		*/
+		todo!()
 	}
 }
 
