@@ -19,7 +19,7 @@ impl fmt::Write for Log {
 macro_rules! log {
 	($($args:tt)*) => {{
 		use core::fmt::Write;
-		writeln!($crate::log::Log, $($args)*);
+		writeln!($crate::log::Log, $($args)*).unwrap();
 	}}
 }
 

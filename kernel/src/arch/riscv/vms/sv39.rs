@@ -682,13 +682,16 @@ impl Sv39 {
 		let mut tbl = tbl[511].as_table().unwrap();
 		for i in 0..count as u64 {
 			let p = f();
-			let p = unsafe { core::mem::transmute::<_, u64>(p) };
-			let p = PhysicalAddress(p << 2);
+			dbg!(&p);
+			let p = unsafe { core::mem::transmute::<_, u32>(p) as u64 };
+			let p = PhysicalAddress(p << 12);
+			log!("{:x}", p.0);
 			assert!(tbl[i].as_either().is_none(), "FUCK ME BBLECIOHRGOIHRG");
 			let mut e = Entry::new_leaf(p, rwx);
 			e.set_usermode(false);
 			tbl[i] = e;
 		}
+		log!("{:p}", virtual_address);
 		virtual_address
 	}
 }

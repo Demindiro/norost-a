@@ -11,6 +11,8 @@ use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};
 use core::{mem, slice};
 
+pub mod reserved;
+
 mod allocator;
 mod area;
 mod shared;
@@ -67,7 +69,8 @@ pub unsafe fn mem_add_range(start: NonNull<Page>, count: NonZeroUsize) {
 	if ALLOCATOR.is_some() {
 		panic!("Can't add more than one memory range");
 	}
-	let ppn = [(PPN::from(start), count.get())];
+	use core::convert::TryInto;
+	let ppn = [(PPN::from(start), count.get().try_into().unwrap())];
 	ALLOCATOR = Some(Mutex::new(Allocator::new(&ppn[..]).unwrap()));
 }
 
@@ -77,12 +80,15 @@ pub unsafe fn mem_add_range(start: NonNull<Page>, count: NonZeroUsize) {
 pub fn mem_allocate(order: u8) -> Result<Area, AllocateError> {
 	#[cfg(debug_assertions)]
 	unsafe {
-		ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().alloc(order)
+		let a = ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().alloc().unwrap();
+		let a = (core::mem::transmute::<_, u32>(a) as usize) << 12;
+		let a = NonNull::new(a as *mut _).unwrap();
+		Ok(Area::new(a, 0).unwrap())
 	}
 	#[cfg(not(debug_assertions))]
 	unsafe {
 		let a = ALLOCATOR.as_ref().unwrap_unchecked().lock().alloc().unwrap();
-		let a = core::mem::transmute::<_, usize>(a) << 2;
+		let a = (core::mem::transmute::<_, u32>(a) as usize) << 12;
 		let a = NonNull::new(a as *mut _).unwrap();
 		Ok(Area::new(a, 0).unwrap())
 	}
@@ -106,7 +112,7 @@ where
 		let mut a = unsafe { ALLOCATOR.as_ref().unwrap_unchecked().lock() };
 		let p = a.alloc()?;
 		drop(a);
-		f(NonNull::new(unsafe { core::mem::transmute::<_, usize>(p) << 2 } as *mut _).unwrap());
+		f(NonNull::new(unsafe { (core::mem::transmute::<_, u32>(p) as usize) << 12 } as *mut _).unwrap());
 	}
 	Ok(())
 }
@@ -118,7 +124,7 @@ pub fn mem_deallocate(area: Area) {
 	// FIXME implement reference counting to ensure it's safe.
 	#[cfg(debug_assertions)]
 	unsafe {
-		ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().free(area)
+		ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().free(PPN::from(area.start()))
 	}
 	#[cfg(not(debug_assertions))]
 	unsafe {

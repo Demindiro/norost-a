@@ -320,6 +320,8 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 		}
 	}
 
+	memory::reserved::dump_vms_map();
+
 	// Initialize the memory manager
 	let (address, size) = heap.expect("No memory device (check the DTB!)");
 	// FIXME this is utter shit

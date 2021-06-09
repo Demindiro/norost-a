@@ -24,110 +24,47 @@
 //! Using a VMS-like tree structure makes it trivial to support hugepages of any size.
 
 use crate::arch::{self, PAGE_SIZE};
+use core::convert::TryInto;
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::slice;
 
-/// A single entry that is either a pointer to the next table or a PPN.
-#[repr(transparent)]
-struct Entry(usize);
-
-/// A single table in the tree.
-struct Table([Entry; Self::MAX]);
-
-/// The lowest level of tables, which can only contain PPNs.
-struct LowestTable([PPN; Table::MAX]);
-
-/// The root of the tree.
-struct Tree {
-	root: &'static mut Table,
-}
-
 /// A struct representing a PPN.
 ///
-/// A PPN **cannot** be directly used as a physical address. It is formatted such that it can
-/// be put straight into a VMA table.
+/// A PPN **cannot** be directly used as a physical address. It is formatted such that it doesn't
+/// store the unneeded lower bits, which also allows using 32-bit PPNs on most 64-bit architecures.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct PPN(usize);
+pub struct PPN(u32);
 
 /// Stacks of PPNs for fast allocation. The stack also act as a ring buffer when moving PPNs
 /// to the tree.
-struct Stacks {
+pub(super) struct Stacks {
 	/// The stacks
 	stacks: &'static mut [[PPN; Self::STACK_SIZE as usize]],
 	/// The top and base of each stack
 	top_base: *mut (u16, u16),
 }
 
-/// An allocator including a tree and a stack.
+/// An allocator including a bitmap and a stack.
 pub struct Allocator {
-	//tree: &'static mut Tree,
 	stacks: Stacks,
-}
-
-impl Entry {
-	/// The mask for the allocation counter.
-	const COUNTER_MASK: usize = ((Table::MAX << 1) - 1);
-
-	/// Returns this entry as a PPN if it is one.
-	fn as_ppn<'a>(&'a mut self) -> Option<PPN> {
-		if self.free_count() == Table::MAX {
-			Some(PPN(self.0 & !Self::COUNTER_MASK))
-		} else {
-			None
-		}
-	}
-
-	/// Returns this entry as a table if it is one. May return `None` if the
-	/// table is full, in which case no table is allocated.
-	fn as_table<'a>(&'a mut self) -> Option<&'a mut Table> {
-		if self.free_count() != Table::MAX {
-			unsafe { ((self.0 & !Self::COUNTER_MASK) as *mut Table).as_mut() }
-		} else {
-			None
-		}
-	}
-
-	/// Returns this entry as a lowest level table if it is one. May return `None`
-	/// if the table is full, in which case no table is allocated.
-	fn as_lowest_table<'a>(&'a mut self) -> Option<&'a mut LowestTable> {
-		if self.free_count() != Table::MAX {
-			unsafe { ((self.0 & !Self::COUNTER_MASK) as *mut LowestTable).as_mut() }
-		} else {
-			None
-		}
-	}
-
-	/// Returns the amount of free pages this PTE has.
-	fn free_count(&self) -> usize {
-		// 0..=512 can be represented with 10 bits, which we have.
-		// 0..=1024 needs 11 bits, which we technically don't have.
-		// However, since a leaf at the lowest level can't point to other levels, we actually have
-		// up to 19 bits to use. A page is always aligned such that the lowest 12 bits are always
-		// 0, we effectively have 12 bits for our use. This means that simply masking will always
-		// give us a correct result.
-		self.0 & Self::COUNTER_MASK
-	}
-}
-
-impl Table {
-	/// The maximum amount of PTEs per table. Always a power of 2.
-	const MAX: usize = PAGE_SIZE / mem::size_of::<usize>();
-
-	// /// Takes a PPN out.
 }
 
 impl<U> From<NonNull<U>> for PPN {
 	fn from(ptr: NonNull<U>) -> Self {
-		PPN(ptr.as_ptr() as usize >> 2)
+		#[cfg(debug_assertions)]
+		let p = PPN((ptr.as_ptr() as usize >> arch::PAGE_BITS).try_into().expect("PPN too large"));
+		#[cfg(not(debug_assertions))]
+		let p = PPN((ptr.as_ptr() as usize >> arch::PAGE_BITS) as u32);
+		p
 	}
 }
 
 impl core::fmt::Debug for PPN {
 	fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-		write!(f, "PPN (page: 0x{:x})", self.0 << 2)
+		write!(f, "PPN (page: 0x{:x})", self.0 << 12)
 	}
 }
 
@@ -139,7 +76,7 @@ impl Stacks {
 	const MEM_STACK_SIZE: usize = Self::STACK_SIZE as usize * mem::size_of::<PPN>();
 	
 	/// The amount of bytes used by a single stack, including top and bottom.
-	const MEM_TOTAL_SIZE: usize = Self::MEM_STACK_SIZE + mem::size_of::<(u16, u16)>();
+	pub(super) const MEM_TOTAL_SIZE: usize = Self::MEM_STACK_SIZE + mem::size_of::<(u16, u16)>();
 
 	/// Pushes a PPN on the given stack. Returns `true` if successful, `false` if the
 	/// stack is full.
@@ -234,13 +171,14 @@ impl Tree {
 
 impl Allocator {
 	/// Creates a new `Allocator` with the given pages.
-	pub fn new(pages: &[(PPN, usize)]) -> Result<Self, ()> {
+	pub fn new(pages: &[(PPN, u32)]) -> Result<Self, ()> {
 		// Get minimum needed pages
 		let hc = arch::hart_count();
 		log!("hc: {}", hc);
 		let count = hc * Stacks::MEM_TOTAL_SIZE;
 		let count = (count + arch::PAGE_MASK) & !arch::PAGE_MASK;
 		let count = count / arch::PAGE_SIZE;
+		let count = count as u32;
 		let (mut stacks, extra, pages) = 'a: loop {
 			let mut c = 0;
 			for (i, p) in pages.iter().enumerate() {
@@ -248,7 +186,7 @@ impl Allocator {
 				if c > count {
 					let m = c - p.1;
 					let m = count - m;
-					let m = (PPN(pages[i].0.0 + (m << 10)), pages[i].1 - m);
+					let m = (PPN(pages[i].0.0 + m), pages[i].1 - m);
 					break 'a (
 						&pages[..i + 1],
 						m,
@@ -261,13 +199,13 @@ impl Allocator {
 		let stacks = {
 			let mut i = 0;
 			super::vms::add_kernel_mapping(move || {
-				let p = PPN(stacks[0].0.0 + (i << 10));
+				let p = PPN(stacks[0].0.0 + i);
 				i += 1;
 				if i == stacks[0].1 {
 					stacks = &stacks[1..];
 				}
 				p
-			}, count, crate::arch::RWX::RW).cast::<u8>()
+			}, count as usize, crate::arch::RWX::RW).cast::<u8>()
 		};
 		let stacks = unsafe {
 			Stacks {
@@ -280,13 +218,13 @@ impl Allocator {
 		};
 
 		for i in 0..extra.1 {
-			let p = PPN(extra.0.0 + (i << 10));
+			let p = PPN(extra.0.0 + i);
 			s.insert(p);
 		}
 
 		for p in pages {
 			for i in 0..p.1 {
-				let p = PPN(p.0.0 + (i << 10));
+				let p = PPN(p.0.0 + i);
 				s.insert(p);
 			}
 		}

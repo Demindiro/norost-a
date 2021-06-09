@@ -29,11 +29,11 @@ QEMU_DEBUG?=qemu-system-riscv64 \
 		-s \
 		-machine virt \
 		-nographic \
-		-m 32M \
+		-m 256M \
 		-smp 1 \
-		-bios $(QEMU_BIOS) \
-		-drive file=$(DRIVE),format=raw \
-		-kernel $(KERNEL_DEBUG)
+		-bios $(FIRMWARE) \
+		-kernel ../target/kernel.bin
+		#-drive file=$(DRIVE),format=raw
 
 CARGO_OPT?=
 CARGO?=cargo rustc \
@@ -130,13 +130,13 @@ build-riscv64:
 
 build-debug-riscv64:
 	$(CARGO_DEBUG)
-	genisoimage -o $(ISO) $(KERNEL_DEBUG)
+	#genisoimage -o $(ISO) $(KERNEL_DEBUG)
 
 run-riscv64: build-riscv64 mkboot
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU) $(QEMU_OPT)
 
-run-debug-riscv64: build-debug-riscv64 $(DRIVE)
+run-debug-riscv64: build-debug-riscv64 mkboot-debug
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU_DEBUG) $(QEMU_OPT)
 
@@ -192,8 +192,17 @@ mkboot: build
 	$(CC) -Wl,-Tsrc/boot/riscv.ld src/boot/riscv.s -o ../target/kernel -nostartfiles -nostdlib
 	riscv64-unknown-linux-gnu-objcopy -O binary ../target/kernel ../target/kernel.bin
 
+mkboot-debug: build-debug
+	rm ../target/riscv64gc-unknown-none-elf/release/kernel
+	mv ../target/riscv64gc-unknown-none-elf/debug/kernel ../target/riscv64gc-unknown-none-elf/release/kernel
+	$(CC) -Wl,-Tsrc/boot/riscv.ld src/boot/riscv.s -o ../target/kernel -nostartfiles -nostdlib
+	riscv64-unknown-linux-gnu-objcopy -O binary ../target/kernel ../target/kernel.bin
+
 objdump-boot: mkboot
 	riscv64-unknown-linux-gnu-objdump -C $(OBJDUMP_OPT) ../target/kernel
 
 readelf-boot: mkboot
 	riscv64-unknown-linux-gnu-readelf -C $(READELF_OPT) ../target/kernel
+
+list-target-features:
+	rustc --target=riscv64gc-unknown-none-elf --print target-features

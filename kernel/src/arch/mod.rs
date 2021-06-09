@@ -33,6 +33,9 @@ pub const ELF_FLAGS: u32 = riscv::elf::RVC | riscv::elf::FLOAT_ABI_DOUBLE;
 /// A bitmask that covers the lower zeroed bits of an aligned page.
 pub const PAGE_MASK: usize = PAGE_SIZE - 1;
 
+/// The amount of bits that are zero due to page alignment.
+pub const PAGE_BITS: usize = 12;
+
 use crate::{log, task, util};
 use core::{mem, ptr};
 
