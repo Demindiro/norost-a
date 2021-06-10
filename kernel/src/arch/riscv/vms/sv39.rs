@@ -11,12 +11,21 @@ use super::{AddError, RWX};
 use crate::arch;
 use crate::arch::{Page, VirtualMemorySystem};
 use crate::memory::{self, AllocateError, PPN};
+use crate::memory::reserved::{GLOBAL, LOCAL, VMM_PPN0, VMM_PPN1, VMM_PPN2};
 use core::convert::TryFrom;
+use core::mem;
 use core::ptr::NonNull;
 use core::ops;
 
-// TODO move this to crate::memory
-type Counter = NonNull<core::sync::atomic::AtomicU16>;
+/// The start index of the global kernel table.
+const GLOBAL_KERNEL_TABLE_START_INDEX: usize = unsafe {
+	(GLOBAL.start.as_ptr() as usize >> 30) & 0x1ff
+};
+
+/// The start index of the local kernel table.
+const LOCAL_KERNEL_TABLE_START_INDEX: usize = unsafe {
+	(LOCAL.start.as_ptr() as usize >> 30) & 0x1ff
+};
 
 /// Page table entry
 ///
@@ -51,23 +60,8 @@ enum Either {
 #[repr(align(4096))]
 struct Table([Entry; 512]);
 
-/// Counter table (level 2).
-struct CountersTable([
-	Option<NonNull<[
-		Option<NonNull<[
-			Option<Counter>;
-			512
-		]>>;
-		512
-	]>>;
-	512
-]);
-
 /// Page-allocated page table.
 struct TablePage(NonNull<Page>);
-
-/// Page-allocated counter table.
-struct CountersTablePage(Option<NonNull<CountersTable>>);
 
 struct VirtualAddress(u64);
 
@@ -78,8 +72,6 @@ struct PhysicalAddress(u64);
 pub struct Sv39 {
 	/// The address mappings.
 	addresses: TablePage,
-	/// The counters for any shared mappings.
-	counters: CountersTablePage,
 }
 
 impl Entry {
@@ -92,6 +84,8 @@ impl Entry {
 
 	const USERMODE_MASK: u64 = 0b1_0000;
 
+	const SHARED_MASK: u64 = 0x1_00;
+
 	const PPN_2_OFFSET: u8 = 28;
 	const PPN_1_OFFSET: u8 = 19;
 	const PPN_0_OFFSET: u8 = 10;
@@ -100,13 +94,16 @@ impl Entry {
 	const PPN_1_MASK: u64 = 0x1ff << Self::PPN_1_OFFSET;
 	const PPN_0_MASK: u64 = 0x1ff << Self::PPN_0_OFFSET;
 
-	const INVALID: Self = Self(0);
+	/// Create a new entry for an invalid entry.
+	fn new_invalid() -> Self {
+		Self(0)
+	}
 
 	/// Create a new entry for a single physical entry.
 	#[must_use]
-	fn new_leaf(page: PPN, rwx: RWX) -> Self {
-		let mut s = Self(0);
-		s.0 |= (usize::from(page) as u64) << 10;
+	fn new_leaf(ppn: PPN, rwx: RWX) -> Self {
+		let ppn = ppn.into_raw();
+		let mut s = Self((ppn as u64) << 10);
 		s.set_rwx(rwx);
 		s.set_valid(true);
 		s.set_usermode(true);
@@ -120,7 +117,6 @@ impl Entry {
 		let s = table.0.as_ptr() as u64;
 		let mut s = Self(s >> 2);
 		s.set_valid(true);
-		s.set_usermode(true);
 		s
 	}
 
@@ -154,6 +150,12 @@ impl Entry {
 		self.0 |= u64::from(allow) * Self::USERMODE_MASK;
 	}
 
+	/// Set whether this page is shared.
+	fn set_shared(&mut self, shared: bool) {
+		self.0 &= !Self::SHARED_MASK;
+		self.0 |= u64::from(shared) * Self::SHARED_MASK;
+	}
+
 	/// Return as a pointer to a page table.
 	#[must_use]
 	fn as_table(&self) -> Option<TablePage> {
@@ -174,9 +176,9 @@ impl Entry {
 	fn as_address(&self) -> Option<(PhysicalAddress, RWX)> {
 		if self.is_valid() {
 			self.rwx().map(|rwx| (
-				PhysicalAddress::new(self.ppn_2(), self.ppn_1(), self.ppn_0(), 0),
-				rwx
-			))
+					PhysicalAddress::new(self.ppn_2(), self.ppn_1(), self.ppn_0(), 0),
+					rwx
+					))
 		} else {
 			None
 		}
@@ -268,80 +270,6 @@ impl ops::DerefMut for TablePage {
 		// SAFETY: We own a unique reference to a valid page. The entries
 		// in the page are all valid.
 		unsafe { self.0.cast().as_mut() }
-	}
-}
-
-impl CountersTablePage {
-	/// Create a new table with empty (zeroed) entries.
-	fn new() -> Result<Self, AllocateError> {
-		Ok(Self(None))
-	}
-
-	fn set<'a>(&'a mut self, index: u64, counter: Counter) -> Result<(), AllocateError> {
-		let index = index as usize;
-		let index = (index >> 18, (index >> 9) & 0x1ff, index & 0x1ff);
-		unsafe {
-			let tbl = match self.0 {
-				Some(mut c) => c.as_mut().0.as_mut(),
-				None => {
-					// FIXME
-					let a = memory::mem_allocate(0)?;
-					let a = unsafe { core::mem::transmute::<_, u32>(a) };
-					let a = a as usize;
-					let a = a << 12;
-					let a = a as *mut _;
-					let a = NonNull::new(a).unwrap();
-					let mut c = a;
-					self.0 = Some(c);
-					c.as_mut().0.as_mut()
-				}
-			};
-			let tbl = match tbl[index.0] {
-				Some(mut c) => c.as_mut(),
-				None => {
-					// FIXME
-					let a = memory::mem_allocate(0)?;
-					let a = unsafe { core::mem::transmute::<_, u32>(a) };
-					let a = a as usize;
-					let a = a << 12;
-					let a = a as *mut _;
-					let a = NonNull::new(a).unwrap();
-					let mut c = a;
-					tbl[index.0] = Some(c);
-					c.as_mut()
-				}
-			};
-			let tbl = match tbl[index.1] {
-				Some(mut c) => c.as_mut(),
-				None => {
-					// FIXME
-					let a = memory::mem_allocate(0)?;
-					let a = unsafe { core::mem::transmute::<_, u32>(a) };
-					let a = a as usize;
-					let a = a << 12;
-					let a = a as *mut _;
-					let a = NonNull::new(a).unwrap();
-					let mut c = a;
-					tbl[index.1] = Some(c);
-					c.as_mut()
-				}
-			};
-			assert!(tbl[index.2].is_none());
-			tbl[index.2] = Some(counter);
-		}
-		Ok(())
-	}
-
-	fn get<'a>(&'a self, index: u64) -> Option<Counter> {
-		let index = index as usize;
-		let index = (index >> 18, (index >> 9) & 0x1ff, index & 0x1ff);
-		unsafe {
-			self.0
-				.map(|c| c.as_ref().0.as_ref())
-				.and_then(|c| c.as_ref()[index.0].as_ref())
-				.and_then(|c| c.as_ref()[index.1].as_ref())
-				.and_then(|c| c.as_ref()[index.2])
-		}
 	}
 }
 
@@ -455,7 +383,6 @@ impl Sv39 {
 		}
 		Ok(Self {
 			addresses: tp,
-			counters: CountersTablePage::new().unwrap(),
 		})
 	}
 
@@ -465,7 +392,7 @@ impl Sv39 {
 		let mut va = virtual_address;
 		// FIXME deallocate pages on failure.
 		memory::mem_allocate_range(count, |ppn| {
-			self.add(va, ppn, rwx);
+			Self::add(va, ppn, rwx, true);
 			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
 		}).unwrap();
 		Ok(())
@@ -473,18 +400,32 @@ impl Sv39 {
 
 	/// Add a mapping. If no virtual address is given, the first available
 	/// entry with enough space is used.
-	pub fn add(&mut self, virtual_address: NonNull<Page>, ppn: PPN, rwx: RWX) -> Result<(), AddError> {
+	pub fn add(virtual_address: NonNull<Page>, ppn: PPN, rwx: RWX, user: bool) -> Result<(), AddError> {
+
+		let mut s: Self = unsafe {
+			let s: usize;
+			asm!("
+				csrr	t0, satp
+				slli	t0, t0, 12
+			", out("t0") s);
+			core::mem::transmute(s)
+		};
+
 		let va = VirtualAddress(virtual_address.as_ptr() as u64);
 		let index = va.ppn_210();
 
-		let e = &mut self.addresses[index >> 18];
+		let e = &mut s.addresses[index >> 18];
 		let mut tbl = if let Some(tbl) = e.as_table() {
 			tbl
 		} else if !e.is_valid() {
 			*e = Entry::new_table(TablePage::new().expect("TODO"));
 			e.as_table().unwrap()
 		} else {
-			return Err(AddError::Overlaps);
+			// FIXME we should be unmapping the identity maps elsewhere...
+			//return Err(AddError::Overlaps);
+			*e = Entry::new_table(TablePage::new().expect("TODO"));
+			unsafe { asm!("sfence.vma"); }
+			e.as_table().unwrap()
 		};
 
 		let e = &mut tbl[(index >> 9) & 0x1ff];
@@ -503,6 +444,7 @@ impl Sv39 {
 		}
 
 		*e = Entry::new_leaf(ppn, rwx);
+		e.set_usermode(user);
 
 		Ok(())
 	}
@@ -513,20 +455,12 @@ impl Sv39 {
 		// FIXME deallocate pages on failure.
 		memory::mem_allocate_range(count, |ppn| {
 			let ppn = crate::memory::SharedPage::new(ppn).unwrap();
-			let (ppn, counter) = ppn.into_raw_parts();
-			self.add(va, ppn, rwx).unwrap();
+			let ppn = ppn.into_raw();
+			Self::add(va, ppn, rwx, true).unwrap();
 			let index = (va.as_ptr() as usize >> 12) as u64;
-			self.counters.set(index, counter);
 			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
 		}).unwrap();
 		Ok(())
-	}
-
-	/// TODO
-	#[must_use]
-	pub fn is_shared(&self, address: NonNull<u8>) -> bool {
-		let index = address.as_ptr() as usize >> 12;
-		self.counters.get(index as u64).is_some()
 	}
 
 	/// Remove a mapping and deallocate the associated memory.
@@ -539,37 +473,75 @@ impl Sv39 {
 		todo!()
 	}
 
-	/// Map a virtual page to a physical PPN.
+	/// Change the address of a physical page.
+	///
+	/// The flags can optionally be changed (left to right: RWX, usermode)
 	/// 
 	/// ## Returns
 	///
-	/// `Ǹone` if the virtual address is not mapped.
-	/// `Some((ppn_u, address))` if the address is mapped. `ppn_u` represents the upper
-	/// 17 bits of the physical address.
-	pub fn get(&self, virtual_address: NonNull<Page>) -> Option<(PPN, RWX)> {
-		let va = VirtualAddress(virtual_address.as_ptr() as u64);
-		
-		let entry = &self.addresses[va.ppn_2()];
-		let (ppn_2, ppn_1, ppn_0, rwx) = match entry.as_either()? {
-			Either::Table(tbl) => {
-				let entry = &tbl[va.ppn_1()];
-				match entry.as_either()? {
-					Either::Table(tbl) => {
-						let entry = &tbl[va.ppn_0()];
-						entry
-							.as_address()
-							.map(|(pa, rwx)| (pa.ppn_2(), pa.ppn_1(), pa.ppn_0(), rwx))?
-					}
-					Either::Address((pa, rwx)) => {
-						(pa.ppn_2(), pa.ppn_1(), va.ppn_0(), rwx)
-					}
-				}
-			}
-			Either::Address((pa, rwx)) => (pa.ppn_2(), va.ppn_1(), va.ppn_0(), rwx),
+	/// * `Ok(())` if the address has been moved successfully.
+	/// * `Err(())` if the source address doesn't map to a page.
+	/// * `Err(())` if the destination address is already occupied.
+	// FIXME is copy, should be move
+	pub fn copy_address(from: NonNull<Page>, to: NonNull<Page>, flags: Option<(RWX, bool)>) -> Result<(), ()> {
+		let mut addresses: TablePage = unsafe {
+			let s: usize;
+			asm!("
+				csrr	t0, satp
+				slli	t0, t0, 12
+			", out("t0") s);
+			core::mem::transmute(s)
 		};
-		let (ppn_2, ppn_1, ppn_0) = (ppn_2 as usize, ppn_1 as usize, ppn_0 as usize);
-		let pa = PPN::new(((ppn_2 << 18) | (ppn_1 << 9) | ppn_0) << 12);
-		Some((pa, rwx))
+
+		let from = VirtualAddress(from.as_ptr() as u64);
+		let to = VirtualAddress(to.as_ptr() as u64);
+
+		// Get the source entry and zero it out.
+		let mut tbl = &mut addresses;
+		let mut tbl = tbl[from.ppn_2()].as_table().ok_or(())?;
+		let mut tbl = tbl[from.ppn_1()].as_table().ok_or(())?;
+		let mut entry = Entry::new_invalid();
+		// FIXME
+		//mem::swap(&mut tbl[from.ppn_0()], &mut entry);
+		entry = unsafe { mem::transmute_copy(&tbl[from.ppn_0()]) };
+		if !entry.is_valid() {
+			return Err(());
+		}
+		let mut tbl2 = tbl;
+
+		// Move the source entry.
+		let mut tbl = &mut addresses;
+
+		// FIXME
+		if tbl[to.ppn_2()].is_valid() && tbl[to.ppn_2()].as_table().is_none() {
+			tbl[to.ppn_2()] = Entry::new_table(TablePage::new().unwrap());
+		}
+
+		if let Some(mut tbl) = tbl[to.ppn_2()].as_table() {
+			if !tbl[to.ppn_1()].is_valid() {
+				tbl[to.ppn_1()] = Entry::new_table(TablePage::new().unwrap());
+			}
+			if let Some(mut tbl) = tbl[to.ppn_1()].as_table() {
+				let e = &mut tbl[to.ppn_0()];
+				if !e.is_valid() {
+					*e = entry;
+					if let Some((rwx, u)) = flags {
+						e.set_rwx(rwx);
+						e.set_usermode(u);
+					}
+					Ok(())
+				} else {
+					mem::swap(&mut tbl2[from.ppn_0()], &mut entry);
+					Err(())
+				}
+			} else {
+				mem::swap(&mut tbl2[from.ppn_0()], &mut entry);
+				Err(())
+			}
+		} else {
+			mem::swap(&mut tbl2[from.ppn_0()], &mut entry);
+			Err(())
+		}
 	}
 
 	/// Add a kernel mapping
@@ -599,27 +571,18 @@ impl Sv39 {
 			e.set_usermode(false);
 			tbl[i] = e;
 		}
-		log!("{:p}", virtual_address);
 		virtual_address
 	}
 
-	/// Maps a kernel virtual address to a physical address.
-	pub fn get_kernel(va: NonNull<Page>) -> Option<(PPN, RWX)> {
-		let tbl: TablePage = unsafe {
+	pub fn current() -> Self {
+		unsafe {
 			let s: usize;
 			asm!("
-				csrr	t0, satp
-				slli	t0, t0, 12
-			", out("t0") s);
+				csrr	{0}, satp
+				slli	{0}, {0}, 12
+			", out(reg) s);
 			core::mem::transmute(s)
-		};
-		let s = Self {
-			addresses: tbl,
-			counters: CountersTablePage(None),
-		};
-		let p = s.get(va);
-		core::mem::forget(s);
-		p
+		}
 	}
 }
 
@@ -653,7 +616,9 @@ impl Drop for Sv39 {
 			memory::mem_deallocate(a);
 		}
 		*/
-		todo!()
+
+		// FIXME
+		//todo!()
 	}
 }
 

@@ -126,6 +126,7 @@ macro_rules! range {
 	};
 	// PUB
 	{
+		limit = $limit:expr,
 		[GLOBAL]
 		$($g_name:ident => $g_size:expr,)*
 		[LOCAL]
@@ -146,6 +147,8 @@ macro_rules! range {
 			log!("  Local:");
 			range![@dump LOCAL $($l_name,)*];
 		}
+
+		const _BORDER_CHECK: usize = unsafe { (LOCAL.start.as_ptr() as usize) } - $limit;
 	};
 }
 
@@ -162,12 +165,15 @@ range! {
 // Configuration for riscv64 with Sv39 VMS
 #[cfg(target_arch = "riscv64")]
 range! {
+	limit = 0xffff_ff80_0000_0000,
 	[GLOBAL]
 	KERNEL => 1 << 16,
 	PMM_BITMAP => 1 << (44 - 12 - 3),
 	PMM_STACK => super::allocator::Stacks::MEM_TOTAL_SIZE * MAX_HARTS,
+	SHARED_COUNTERS => 1 << (44 - 12 + 2),
+	SHARED_ALLOC => 1 << (44 - 12 - 12 + 1),
 	[LOCAL]
-	VMS_PPN0 => (512 * 512) << 12,
-	VMS_PPN1 => 512 << 12,
-	VMS_PPN2 => 1 << 12,
+	VMM_PPN0 => (512 * 512) << 12,
+	VMM_PPN1 => 512 << 12,
+	VMM_PPN2 => 1 << 12,
 }

@@ -1,22 +1,29 @@
 use crate::arch;
 use core::convert::TryInto;
 use core::fmt;
+use core::mem;
+
+pub(super) type PPNBox = u32;
 
 /// A struct representing a PPN.
 ///
 /// A PPN **cannot** be directly used as a physical address. It is formatted such that it doesn't
 /// store the unneeded lower bits, which also allows using 32-bit PPNs on most 64-bit architecures.
-#[derive(Clone, Copy)]
-pub struct PPN(u32);
+pub struct PPN(PPNBox);
 
 /// A struct representing a range of pages as PPNs.
 pub struct PPNRange {
-	start: PPN,
+	start: PPNBox,
 	count: u32,
 }
 
 impl PPN {
-	pub fn new(ptr: usize) -> Self {
+	/// Creates a new PPN from a physical pointer
+	///
+	/// ## Safety:
+	///
+	/// The pointer is aligned and within addressable range (`1 << 44` at most!).
+	pub unsafe fn from_ptr(ptr: usize) -> Self {
 		#[cfg(debug_assertions)]
 		let p = {
 			assert_eq!(ptr & arch::PAGE_MASK, 0, "Page pointer is not aligned");
@@ -26,11 +33,14 @@ impl PPN {
 		let p = Self((ptr >> arch::PAGE_BITS) as u32);
 		p
 	}
-}
 
-impl From<PPN> for usize {
-	fn from(ppn: PPN) -> Self {
-		ppn.0.try_into().unwrap()
+	pub fn into_raw(self) -> u32 {
+		let s = mem::ManuallyDrop::new(self);
+		s.0
+	}
+
+	pub unsafe fn from_raw(ppn: u32) -> Self {
+		Self(ppn)
 	}
 }
 
@@ -41,21 +51,28 @@ impl fmt::Debug for PPN {
 }
 
 impl PPNRange {
-	pub fn new(start: usize, count: u32) -> Self {
-		let p = PPN::new(start);
+	/// Creates a new PPN from a physical pointer and a count.
+	///
+	/// ## Safety:
+	///
+	/// The pointer is aligned and within addressable range (`1 << 44` at most!).
+	pub unsafe fn from_ptr(start: usize, count: u32) -> Self {
 		#[cfg(debug_assertions)]
-		assert!(p.0.checked_add(count).is_some(), "start + count overflow");
-		Self {
-			start: p,
-			count,
-		}
+		let start = {
+			let start: u32 = (start >> arch::PAGE_BITS).try_into().expect("PPN too large");
+			assert!(start.checked_add(count).is_some(), "start + count overflow");
+			start
+		};
+		#[cfg(not(debug_assertions))]
+		let start = (start >> arch::PAGE_BITS) as u32;
+		Self { start, count }
 	}
 
 	/// Return the top PPN and decrement the count.
 	pub fn pop(&mut self) -> Option<PPN> {
 		self.count.checked_sub(1).map(|c| {
 			self.count = c;
-			PPN(self.start.0 + c)
+			PPN(self.start + c)
 		})
 	}
 
@@ -64,7 +81,7 @@ impl PPNRange {
 		self.count.checked_sub(count).map(|c| {
 			self.count = c;
 			Self {
-				start: PPN(self.start.0 + c),
+				start: self.start + c,
 				count,
 			}
 		})
@@ -79,7 +96,7 @@ impl PPNRange {
 impl fmt::Debug for PPNRange {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.count > 0 {
-			let (s, e) = (self.start.0 << 12, ((self.start.0 + self.count) << 12) - 1);
+			let (s, e) = (self.start << 12, ((self.start + self.count) << 12) - 1);
 			write!(f, "PPNRange (0x{:x}-0x{:x})", s, e)
 		} else {
 			write!(f, "PPNRange (empty)")

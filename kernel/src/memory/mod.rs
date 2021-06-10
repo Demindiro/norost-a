@@ -23,6 +23,7 @@ pub use shared::SharedPage;
 use crate::sync::Mutex;
 
 use allocator::Allocator;
+use ppn::PPNBox;
 
 pub use ppn::{PPN, PPNRange};
 

@@ -328,7 +328,7 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	let (address, size) = (0x8400_0000, 256 * arch::PAGE_SIZE);
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
-	let mut mm = memory::PPNRange::new(address, (size / arch::PAGE_SIZE).try_into().unwrap());
+	let mut mm = unsafe { memory::PPNRange::from_ptr(address, (size / arch::PAGE_SIZE).try_into().unwrap()) };
 	let mm = unsafe { memory::mem_add_ranges(&mut [mm]) };
 
 	// Log some of the properties we just fetched

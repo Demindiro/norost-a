@@ -17,7 +17,7 @@
 //! highest level. This does sacrifice some security but there is not much that can be done about
 //! it.
 
-use crate::arch::{self, Page, PAGE_SIZE};
+use crate::arch::{self, Page, PAGE_SIZE, RWX};
 use crate::memory::{self, AllocateError, PPN};
 use core::mem;
 use core::num::NonZeroU8;
@@ -164,33 +164,30 @@ impl RingIndex {
 	}
 }
 
+const STACK_ADDRESS: NonNull<Page> = unsafe { NonNull::new_unchecked(0xffff_fff0_0000_0000 as *mut _) };
+const TASK_DATA_ADDRESS: NonNull<Page> = unsafe { NonNull::new_unchecked(0xffff_ffe0_0000_0000 as *mut _) };
+
 impl Task {
 	/// Create a new empty task.
 	pub fn new() -> Result<Self, AllocateError> {
 		// FIXME may leak memory on alloc error.
-		let len = arch::PAGE_SIZE << TASK_PAGE_ORDER;
-		let pages = memory::mem_allocate(TASK_PAGE_ORDER)?;
+		let task_data = memory::mem_allocate(0)?;
 		let stack = memory::mem_allocate(0)?;
-		let stack = usize::from(stack);
-		let stack = stack << 12;
-		let stack = stack as *mut _;
-		let stack = NonNull::new(stack).unwrap();
-		let task_data = pages;
-		let task_data = usize::from(task_data);
-		let task_data = task_data << 12;
-		let task_data = task_data as *mut _;
-		let task_data = NonNull::new(task_data).unwrap();
+		let mut vms = arch::VirtualMemorySystem::current();
+		arch::VirtualMemorySystem::add(STACK_ADDRESS, stack, RWX::RW, false).unwrap();
+		arch::VirtualMemorySystem::add(TASK_DATA_ADDRESS, task_data, RWX::RW, false).unwrap();
+		let task_data = TASK_DATA_ADDRESS.cast();
 		let task = Self(task_data);
 		// SAFETY: task is valid
 		unsafe {
 			task_data.as_ptr().write(TaskData {
 				register_state: Default::default(),
-				stack,
+				stack: NonNull::new(STACK_ADDRESS.as_ptr().add(1)).unwrap(),
 				next_task: task.clone(),
 				prev_task: task.clone(),
 				id: TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed),
 				shared_state: SharedState {
-					virtual_memory: arch::VirtualMemorySystem::new()?,
+					virtual_memory: vms,
 				},
 				client_request_queue: None,
 				client_completion_queue: None,
@@ -207,7 +204,7 @@ impl Task {
 
 	/// Add a memory mapping to this task.
 	pub fn add_mapping(&self, address: NonNull<Page>, page: PPN, rwx: arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
-		self.inner().shared_state.virtual_memory.add(address, page, rwx)
+		arch::VirtualMemorySystem::add(address, page, rwx, true)
 	}
 
 	/// Set the program counter of this task to the given address.
@@ -219,20 +216,16 @@ impl Task {
 	pub fn next(self) -> ! {
 		let task = self.inner().next_task.clone();
 		if let Some(cq) = task.inner().client_request_queue {
-			let cqi = &mut task.inner().client_request_index;
-			let (cq, rwx) = task.inner().shared_state.virtual_memory.get(cq.cast()).unwrap();
-			assert!(rwx.r());
-			let cq = NonNull::new((usize::from(cq) << 12) as *mut Page).unwrap();
+			arch::set_supervisor_userpage_access(true);
 			let mut cq = cq.cast::<[ClientRequestEntry; PAGE_SIZE / mem::size_of::<ClientRequestEntry>()]>();
 			let cq = unsafe { cq.as_mut() };
+			let cqi = &mut task.inner().client_request_index;
 			loop {
 				let cq = &mut cq[cqi.get()];
 				if let Some(op) = cq.opcode {
 					// Just assume write for now.
-					let ss = unsafe { cq.data.pages.unwrap() };
-					let s = task.inner().shared_state.virtual_memory.get(ss).unwrap().0;
-					let s = NonNull::new(((usize::from(s) << 12) + ss.as_ptr().align_offset(4096)) as *mut u8).unwrap().as_ptr();
-					let s = unsafe { core::slice::from_raw_parts(s, cq.length) };
+					let s = unsafe { cq.data.pages.unwrap().cast() };
+					let s = unsafe { core::slice::from_raw_parts(s.as_ptr(), cq.length) };
 					let s = unsafe { core::str::from_utf8_unchecked(s) };
 					log!("{}", s);
 					cq.opcode = None;
@@ -241,8 +234,8 @@ impl Task {
 				}
 				cqi.increment();
 			}
+			arch::set_supervisor_userpage_access(false);
 		}
-		let pc = task.inner().shared_state.virtual_memory.get(NonNull::new(task.inner().register_state.pc as *mut _).unwrap());
 		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
 		unsafe { arch::trap_start_task(task) }
 	}
@@ -261,11 +254,6 @@ impl Task {
 			prev.inner().next_task = task.clone();
 			next.inner().prev_task = task;
 		}
-	}
-
-	/// Return the physical address the given virtual address maps to.
-	pub fn translate_virtual_address(&self, address: NonNull<Page>) -> Option<(PPN, crate::arch::RWX)> {
-		self.inner().shared_state.virtual_memory.get(address)
 	}
 
 	/// Allocate private memory at the given virtual address.

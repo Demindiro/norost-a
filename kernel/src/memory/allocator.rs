@@ -23,7 +23,7 @@
 //!
 //! Using a VMS-like tree structure makes it trivial to support hugepages of any size.
 
-use super::{PPN, PPNRange};
+use super::{PPN, PPNRange, PPNBox};
 use crate::arch::{self, PAGE_SIZE};
 use core::convert::TryInto;
 use core::mem;
@@ -35,7 +35,7 @@ use core::slice;
 /// to the tree.
 pub(super) struct Stacks {
 	/// The stacks
-	stacks: &'static mut [[PPN; Self::STACK_SIZE as usize]],
+	stacks: &'static mut [[PPNBox; Self::STACK_SIZE as usize]],
 	/// The top and base of each stack
 	top_base: *mut (u16, u16),
 }
@@ -69,7 +69,7 @@ impl Stacks {
 			return false;
 		}
 		let index = top_base.0 & (Self::STACK_SIZE - 1);
-		stack[index as usize] = ppn;
+		stack[index as usize] = ppn.into_raw();
 		top_base.0 = top_base.0.wrapping_add(1);
 		true
 	}
@@ -88,7 +88,7 @@ impl Stacks {
 		top_base.0 = top_base.0.wrapping_sub(1);
 		let index = top_base.0 & (Self::STACK_SIZE - 1);
 		let ppn = stack[index as usize];
-		Some(ppn)
+		unsafe { Some(PPN::from_raw(ppn)) }
 	}
 
 	/// Pops a PPN from the bottom of the stack. Returns `None` if there are no entries left.
@@ -108,7 +108,7 @@ impl Stacks {
 		let index = top_base.1 & (Self::STACK_SIZE - 1);
 		let ppn = stack[index as usize];
 		top_base.1 = top_base.1.wrapping_add(1);
-		Some(ppn)
+		unsafe { Some(PPN::from_raw(ppn)) }
 	}
 }
 

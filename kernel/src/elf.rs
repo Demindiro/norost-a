@@ -275,10 +275,26 @@ pub fn create_task(data: &[u8]) -> crate::task::Task {
 			continue;
 		}
 
+		use arch::RWX;
+
+		// Set flags
+		let rwx = match header.flags & 7 {
+			f if f == FLAG_EXEC | FLAG_WRITE | FLAG_READ => RWX::RWX,
+			f if f == FLAG_EXEC | FLAG_READ => RWX::RX,
+			f if f == FLAG_EXEC | FLAG_WRITE => panic!("Write-execute pages are unsupported"),
+			f if f == FLAG_EXEC => RWX::X,
+			f if f == FLAG_WRITE | FLAG_READ => RWX::RW,
+			f if f == FLAG_WRITE => panic!("Write-only pages are unsupported"),
+			f if f == FLAG_READ => RWX::R,
+			f if f == 0 => panic!("Flagless pages are unsupported"),
+			_ => unreachable!(),
+		};
+
 		assert_eq!(header.offset & arch::PAGE_MASK, 0, "Offset is not aligned");
-		let data = NonNull::from(&data[header.offset..][..header.file_size]).cast();
-		let ppn = arch::VirtualMemorySystem::get_kernel(data).unwrap().0;
-		task.add_mapping(NonNull::new(header.virtual_address as *mut _).unwrap(), ppn, crate::arch::RWX::RWX).unwrap();
+		dbg!(header.offset);
+		let from = NonNull::from(&data[header.offset..][..header.file_size]).cast();
+		let to = NonNull::new(header.virtual_address as *mut _).unwrap();
+		arch::VirtualMemorySystem::copy_address(from, to, Some((rwx, true))).unwrap();
 	}
 
 	task.set_pc(header.entry as *const _);
@@ -286,11 +302,11 @@ pub fn create_task(data: &[u8]) -> crate::task::Task {
 	task
 }
 
-impl ProgramHeader {
-	const FLAG_EXEC: u32 = 0x1;
-	const FLAG_WRITE: u32 = 0x2;
-	const FLAG_READ: u32 = 0x4;
+const FLAG_EXEC: u32 = 0x1;
+const FLAG_WRITE: u32 = 0x2;
+const FLAG_READ: u32 = 0x4;
 
+impl ProgramHeader {
 	const TYPE_LOAD: u32 = 1;
 }
 

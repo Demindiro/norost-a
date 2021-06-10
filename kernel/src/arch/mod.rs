@@ -175,3 +175,13 @@ pub fn hart_count() -> usize {
 pub fn add_kernel_mapping<F: FnMut() -> crate::memory::PPN>(f: F, count: usize, rwx: RWX) -> core::ptr::NonNull<Page> {
 	riscv::vms::Sv39::add_kernel_mapping(f, count, rwx)
 }
+
+#[inline]
+pub fn set_supervisor_userpage_access(enable: bool) {
+	let sum_bit = 1 << 18;
+	let mut sstatus: usize;
+	unsafe { asm!("csrr {0}, sstatus", out(reg) sstatus) };
+	sstatus &= !sum_bit;
+	sstatus |= sum_bit * (enable as usize);
+	unsafe { asm!("csrw sstatus, {0}", in(reg) sstatus) };
+}

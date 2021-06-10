@@ -1,87 +1,53 @@
 //! Management of shared pages.
 
 use super::{mem_allocate, mem_deallocate, AllocateError, PPN};
-use crate::arch::{Page, PAGE_SIZE, PAGE_MASK};
+use super::reserved::{SHARED_COUNTERS, SHARED_ALLOC};
+use crate::arch::{Page, PAGE_SIZE, PAGE_MASK, PAGE_BITS};
 use crate::sync::Mutex;
 use core::mem;
 use core::num::NonZeroU16;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicI16, AtomicU32, Ordering};
 
-/// Global list of reference counters.
-static COUNTERS: Mutex<ReferenceCounters> = Mutex::new(ReferenceCounters {
-	free: None,
-	full: None,
-});
+const COUNTERS: NonNull<AtomicU32> = SHARED_COUNTERS.start.cast();
+const ALLOC: NonNull<AtomicI16> = SHARED_ALLOC.start.cast();
 
-/// Representation of a page that can be safely shared.
-pub struct SharedPage {
-	/// Pointer to the page.
-	page: PPN,
-	/// Pointer to a counter. This counter is 16 bits by default as that is likely a reasonable
-	/// number for "regular" systems. It may be desireable to be able to change this to 32/64...
-	/// with a feature flag if you expect to share a mapping by a very high amount of tasks.
-	counter: NonNull<AtomicU16>,
-}
+/// Representation of a physical page that can be safely shared.
+pub struct SharedPage(u32);
 
 /// Structure returned if the reference count would overflow.
 #[derive(Debug)]
 pub struct ReferenceCountOverflow;
 
-/// Structure used to manage reference counter tables.
-///
-/// It is a linked list of pages which have a header and a list of counters.
-///
-/// The header of each page has:
-///
-/// * A pointer to the next page (if any)
-/// * A pointer to the previous page (if any)
-/// * A `NonZeroU16` offset to the next free counter.
-///
-/// The "root" has two pointers: a pointer to a list of pages with free counters and a pointer
-/// to a list of full tables. This keeps allocation and deallocation `O(1)`.
-struct ReferenceCounters {
-	/// The start of pages with free slots.
-	free: Option<NonNull<ReferenceCountersTable>>,
-	/// The start of pages that are full.
-	full: Option<NonNull<ReferenceCountersTable>>,
-}
-
-/// Structure that represents either a counter or an offset.
-union CounterOrOffset {
-	counter: AtomicU16,
-	offset: Option<NonZeroU16>,
-}
-
-/// Structure used to hold reference counters.
-#[repr(C)]
-struct ReferenceCountersTable {
-	/// Pointer to the `next` field of the previous table **or** the `free` or `full` field of the
-	/// `ReferenceCounters`.
-	prev: Option<NonNull<Option<NonNull<ReferenceCountersTable>>>>,
-	/// Pointer to the next table.
-	next: Option<NonNull<ReferenceCountersTable>>,
-	/// Offset of the next free counter.
-	free: Option<NonZeroU16>,
-	/// The counters.
-	counters: [
-		CounterOrOffset;
-		(PAGE_SIZE - (
-			2 * mem::size_of::<Option<NonNull<ReferenceCountersTable>>>() +
-			mem::size_of::<Option<NonZeroU16>>()
-		)) / mem::size_of::<AtomicU16>()
-	],
-}
-
-const _SIZE_CHECK: usize = 0 - (PAGE_SIZE - mem::size_of::<ReferenceCountersTable>());
-
 impl SharedPage {
 	/// Create a new shared page.
-	pub fn new(page: PPN) -> Result<Self, AllocateError> {
-		Ok(Self {
-			page,
-			counter: COUNTERS.lock().allocate()?,
-		})
+	pub fn new(ppn: PPN) -> Result<Self, AllocateError> {
+		let ppn = ppn.into_raw();
+		// Ensure the underlying page is allocated.
+		let counter = unsafe { &mut *ALLOC.as_ptr().add(ppn as usize >> PAGE_BITS) };
+		loop {
+			// Try to get an allocation lock.
+			match counter.compare_exchange_weak(0, -1, Ordering::Relaxed, Ordering::Relaxed) {
+				// We got the lock and need to allocate
+				Ok(_) => {
+					todo!()
+				}
+				// Another hart is already allocating, so try again.
+				// Retrying is necessary in case the hart drops the page immediately after,
+				// requiring an allocation regardless.
+				Err(-1) => (),
+				// The page is already allocated, so try to increase.
+				// Trying is necessary in case the page just got dropped.
+				Err(c) => if counter.compare_exchange_weak(c, c + 1, Ordering::Relaxed, Ordering::Relaxed).is_err() {
+					break;
+				}
+			}
+		}
+		// Set counter to 0 from -1 or any garbage value.
+		let counter = unsafe { &mut *COUNTERS.as_ptr().add(ppn as usize) };
+		counter.store(0, Ordering::Relaxed);
+
+		Ok(Self(ppn))
 	}
 
 	/// Attempt to increase the reference count of this page. It may fail if the counter would
@@ -89,16 +55,13 @@ impl SharedPage {
 	pub fn try_clone(&self) -> Result<Self, ReferenceCountOverflow> {
 		// SAFETY: The pointer is valid: it was valid at the time of allocation and
 		// it cannot have been freed yet (otherwise this function couldn't be called).
-		let c = unsafe { self.counter.as_ref() };
+		let counter = unsafe { &mut *COUNTERS.as_ptr().add(self.0 as usize) };
 		// Use CAS so that we can check for overflow.
 		loop {
-			let curr = c.load(Ordering::Relaxed);
+			let curr = counter.load(Ordering::Relaxed);
 			if let Some(new) = curr.checked_add(1) {
-				if c.compare_exchange_weak(curr, new, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-					break Ok(Self {
-						page: self.page,
-						counter: self.counter,
-					});
+				if counter.compare_exchange_weak(curr, new, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+					break Ok(Self(self.0));
 				}
 			} else {
 				break Err(ReferenceCountOverflow);
@@ -106,15 +69,22 @@ impl SharedPage {
 		}
 	}
 
-	/// Splits the shared page into it's address and counter parts. This will not run `drop`.
-	pub fn into_raw_parts(self) -> (PPN, NonNull<AtomicU16>) {
+	/// Return the PPN of this page. This does not decrement the reference count.
+	pub fn into_raw(self) -> PPN {
 		let s = mem::ManuallyDrop::new(self);
-		(s.page, s.counter)
+		// SAFETY: The PPN is valid as only we own it and thus can't have
+		// been freed by something else.
+		unsafe { PPN::from_raw(s.0) }
 	}
 
-	/// Creates a SharedPage from its raw parts.
-	pub unsafe fn from_raw_parts(page: PPN, counter: NonNull<AtomicU16>) -> Self {
-		Self { page, counter }
+	/// Create a `SharedPPN` from the PPN.
+	///
+	/// ## Safety
+	///
+	/// The PPN did originally come from a `SharedPPN`
+	pub unsafe fn from_raw(ppn: PPN) -> Self {
+		let ppn = ppn.into_raw();
+		Self(ppn)
 	}
 }
 
@@ -122,98 +92,15 @@ impl Drop for SharedPage {
 	fn drop(&mut self) {
 		// SAFETY: The pointer is valid: it was valid at the time of allocation and
 		// it cannot have been freed yet (otherwise this function couldn't be called).
-		let c = unsafe { self.counter.as_ref() };
+		let counter = unsafe { &mut *COUNTERS.as_ptr().add(self.0 as usize) };
 		// Underflow cannot happen unless we're the only owner, so fetch_sub can safely be used.
 		// Note that fetch_sub returns the value from _before_ the substraction.
-		let prev = c.fetch_sub(1, Ordering::Relaxed);
-		if prev == 0 {
-			// Free the counter and the page.
-			// SAFETY: there is nothing else accessing the area, else we couldn't have been
-			// dropped.
-			unsafe { mem_deallocate(self.page) };
-			// SAFETY: only we own the counter
-			unsafe { COUNTERS.lock().deallocate(self.counter) };
+		if counter.fetch_sub(1, Ordering::Relaxed) == 0 {
+			// Free the page.
+			let _ = unsafe { PPN::from_raw(self.0) };
+			// Free the counter
+			todo!();
 		}
-	}
-}
-
-impl ReferenceCounters {
-	fn allocate(&mut self) -> Result<NonNull<AtomicU16>, AllocateError> {
-		let mut table = match self.free {
-			Some(tbl) => tbl,
-			None => {
-				let tbl = mem_allocate(0)?;
-				let tbl = usize::from(tbl) << 10;
-				let mut tbl = NonNull::new(tbl as *mut ReferenceCountersTable).unwrap();
-				unsafe {
-					tbl.as_ptr().write(ReferenceCountersTable {
-						prev: NonNull::new(&mut self.free as *mut _),
-						next: None,
-						free: None,
-						counters: mem::MaybeUninit::uninit().assume_init(),
-					});
-					let tbl = tbl.as_mut();
-					tbl.free = Some(tbl.offset(NonNull::from(&tbl.counters[0])));
-					for i in 0..tbl.counters.len() - 1 {
-						tbl.counters[i].offset = Some(tbl.offset(NonNull::from(&tbl.counters[i + 1])));
-					}
-					tbl.counters.last_mut().unwrap().offset = None;
-				}
-				self.free = Some(tbl);
-				tbl
-			}
-		};
-		unsafe {
-			let tbl = table.as_mut();
-			let counter = tbl.allocate();
-			if tbl.is_full() {
-				self.free = tbl.next;
-				self.full.as_mut().map(|t| t.as_mut().prev = tbl.prev);
-				tbl.next = self.full;
-				self.full = Some(table);
-			}
-			Ok(counter)
-		}
-	}
-
-	unsafe fn deallocate(&mut self, counter: NonNull<AtomicU16>) {
-		// SAFETY: The counter points to somewhere inside a page-aligned table,
-		// so masking the lower bits will give us a pointer to the table itself.
-		let table = (counter.as_ptr() as usize & !PAGE_MASK) as *mut ReferenceCountersTable;
-		(&mut *table).deallocate(counter);
-	}
-}
-
-impl ReferenceCountersTable {
-	unsafe fn allocate(&mut self) -> NonNull<AtomicU16> {
-		#[cfg(debug_assertions)]
-		let offset = self.free.unwrap();
-		#[cfg(not(debug_assertions))]
-		let offset = self.free.unwrap_unchecked();
-		let counter = ((self as *mut _ as usize) + usize::from(offset.get())) as *mut _;
-		let mut counter = NonNull::<CounterOrOffset>::new_unchecked(counter);
-		self.free = counter.as_ref().offset;
-		counter.as_mut().offset = None;
-		counter.cast()
-	}
-
-	unsafe fn deallocate(&mut self, counter: NonNull<AtomicU16>) {
-		counter.cast::<Option<NonZeroU16>>().as_ptr().write(self.free);
-		self.free = Some(self.offset(counter.cast()));
-	}
-
-	#[must_use]
-	fn is_full(&self) -> bool {
-		self.free.is_none()
-	}
-
-	#[must_use]
-	unsafe fn offset(&self, counter: NonNull<CounterOrOffset>) -> NonZeroU16 {
-		let o = (counter.as_ptr() as usize - self as *const _ as usize) as u16;
-		#[cfg(debug_assertions)]
-		{ NonZeroU16::new(o).unwrap() }
-		#[cfg(not(debug_assertions))]
-		NonZeroU16::new_unchecked(o)
 	}
 }
 
@@ -222,10 +109,6 @@ mod test {
 	use super::*;
 
 	fn reset() {
-		*COUNTERS.lock() = ReferenceCounters {
-			free: None,
-			full: None,
-		}
 	}
 
 	test!(alloc_drop() {
