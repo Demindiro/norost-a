@@ -84,6 +84,14 @@
 .section .data
 global_mapping:
 	.quad	0
+early_panic_msg:
+	.asciz	"Early panic!"
+scause_msg:
+	.asciz	"scause  0x"
+sepc_msg:
+	.asciz	"sepc    0x"
+stval_msg:
+	.asciz	"stval   0x"
 
 .section .text
 
@@ -155,13 +163,16 @@ sync_trap_table:
 	ret
 	.balign 4	# 15
 	ret
-	
 
 ## Default handler for traps
 trap_handler:
 	# Save all integer registers. While we could just save the caller-saved registers, doing so
 	# would risk an information leak and makes context switching a lot harder than it need be.
-	csrrw	x31, SSCRATCH, x31
+	csrrw	x31, sscratch, x31
+
+	# Panic if sscratch is zero, which means we failed sometime after early boot
+	beqz	x31, trap_early_handler
+
 	sd		x1, 1 * REGBYTES (x31)
 	sd		x2, 2 * REGBYTES (x31)
 	sd		x3, 3 * REGBYTES (x31)
@@ -326,6 +337,89 @@ trap_init:
 	csrw	STVEC, t0
 	ret
 
+## Early boot trap handler. It avoids any memory accesses outside the kernel
+## image and enters a halt loop immediately. It also prints the scause, sepc
+## and stval registers.
+.align	2
+trap_early_handler:
+
+	# Print panic message
+	la		s0, early_panic_msg
+	call	trap_print_msg
+	call	trap_print_lf
+
+	# Print scause
+	la		s0, scause_msg
+	call	trap_print_msg
+	csrr	s0, scause
+	call	trap_print_num
+
+	# Print sepc
+	la		s0, sepc_msg
+	call	trap_print_msg
+	csrr	s0, sepc
+	call	trap_print_num
+
+	# Print stval
+	la		s0, stval_msg
+	call	trap_print_msg
+	csrr	s0, stval
+	call	trap_print_num
+
+	# Halt forever
+0:
+	wfi
+	j		0b
+
+	# String message printing routine
+	# s0: message
+trap_print_msg:
+	lb		a0, 0(s0)
+0:
+	li		a7, 1
+	li		a6, 0
+	ecall
+	addi	s0, s0, 1
+	lb		a0, 0(s0)
+	bnez	a0, 0b
+	ret
+
+	# Hexadecimal number printing routine
+	# Always 16 digits.
+	# Also prints newline
+	# s0: number
+trap_print_num:
+	li		s1, 60
+	li		s2, 10
+0:
+	srl		a0, s0, s1
+	andi	a0, a0, 0xf
+	blt		a0, s2, 1f
+	addi	a0, a0, 'a' - 10 - '0'
+1:
+	addi	a0, a0, '0'
+	li		a7, 1
+	li		a6, 0
+	ecall
+	addi	s1, s1, -4
+	bgez	s1, 0b
+
+	# Newline printing routine
+trap_print_lf:
+3:
+	li		a7, 1
+	li		a6, 0
+	li		a0, 0xa
+	ecall
+	ret
+
+
+## Setup trap handler for early init. The early trap handler
+## will halt immediately for ease of debugging.
+trap_early_init:
+	la		t0, trap_early_handler
+	csrw	STVEC, t0
+	ret
 
 ## Save the program counter and fp registers, then jump into the executor task switching routine.
 ##
@@ -358,17 +452,13 @@ trap_start_task:
 	csrw	SSTATUS, t0
 	# Set up the VMS.
 	ld		t0, REGSTATE_SIZE + 1 * REGBYTES (a0)
-	li		t1, 1
-	srli	t0, t0, 12
-	slli	t1, t1, 63
-	or		t0, t0, t1
 	csrw	SATP, t0
+	sfence.vma
 	# Setup the scratch register.
 	csrw	SSCRATCH, a0
 	# Restore the program counter
 	ld		t0, 0 * REGBYTES (a0)
 	csrw	SEPC, t0
-	sfence.vma
 	# Restore all float registers
 	load_float_registers	a0
 	# Restore all integer registers

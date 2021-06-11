@@ -10,6 +10,7 @@ mod sv39;
 
 pub use sv39::Sv39;
 
+use crate::memory::AllocateError;
 use core::convert::TryFrom;
 
 /// Valid RWX flag combinations
@@ -87,4 +88,5 @@ pub enum AddError {
 	Overlaps,
 	/// The areas don't have the same order (i.e. size).
 	NonEqualOrder,
+	AllocateError(AllocateError),
 }

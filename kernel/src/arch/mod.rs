@@ -49,6 +49,9 @@ extern "C" {
 
 	/// Begins running the given task.
 	pub fn trap_start_task(task: crate::task::Task) -> !;
+
+	/// Sets up an early trap handler that panics immediately if called.
+	pub fn trap_early_init();
 }
 
 /// Initialize arch-specific structures, such as the interrupt table
@@ -169,11 +172,6 @@ pub fn hart_id() -> usize {
 #[cold]
 pub fn hart_count() -> usize {
 	riscv::sbi::hart_count()
-}
-
-#[must_use]
-pub fn add_kernel_mapping<F: FnMut() -> crate::memory::PPN>(f: F, count: usize, rwx: RWX) -> core::ptr::NonNull<Page> {
-	riscv::vms::Sv39::add_kernel_mapping(f, count, rwx)
 }
 
 #[inline]

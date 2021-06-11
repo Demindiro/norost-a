@@ -4,6 +4,7 @@ use super::{mem_allocate, mem_deallocate, AllocateError, PPN};
 use super::reserved::{SHARED_COUNTERS, SHARED_ALLOC};
 use crate::arch::{Page, PAGE_SIZE, PAGE_MASK, PAGE_BITS};
 use crate::sync::Mutex;
+use core::fmt;
 use core::mem;
 use core::num::NonZeroU16;
 use core::ptr::NonNull;
@@ -13,13 +14,13 @@ const COUNTERS: NonNull<AtomicU32> = SHARED_COUNTERS.start.cast();
 const ALLOC: NonNull<AtomicI16> = SHARED_ALLOC.start.cast();
 
 /// Representation of a physical page that can be safely shared.
-pub struct SharedPage(u32);
+pub struct SharedPPN(u32);
 
 /// Structure returned if the reference count would overflow.
 #[derive(Debug)]
 pub struct ReferenceCountOverflow;
 
-impl SharedPage {
+impl SharedPPN {
 	/// Create a new shared page.
 	pub fn new(ppn: PPN) -> Result<Self, AllocateError> {
 		let ppn = ppn.into_raw();
@@ -88,7 +89,7 @@ impl SharedPage {
 	}
 }
 
-impl Drop for SharedPage {
+impl Drop for SharedPPN {
 	fn drop(&mut self) {
 		// SAFETY: The pointer is valid: it was valid at the time of allocation and
 		// it cannot have been freed yet (otherwise this function couldn't be called).
@@ -104,6 +105,18 @@ impl Drop for SharedPage {
 	}
 }
 
+impl fmt::Debug for SharedPPN {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		// SAFETY: The pointer is valid: it was valid at the time of allocation and
+		// it cannot have been freed yet (otherwise this function couldn't be called).
+		let counter = unsafe { &mut *COUNTERS.as_ptr().add(self.0 as usize) };
+		// Underflow cannot happen unless we're the only owner, so fetch_sub can safely be used.
+		// Note that fetch_sub returns the value from _before_ the substraction.
+		let counter = counter.load(Ordering::Relaxed);
+		write!(f, "SharedPPN (page: 0x{:x}, count: {})", self.0, counter)
+	}
+}
+
 #[cfg(test)]
 mod test {
 	use super::*;
@@ -115,7 +128,7 @@ mod test {
 		reset();
 		let page = mem_allocate(0).unwrap().start();
 		unsafe {
-			SharedPage::new(page).unwrap();
+			SharedPPN::new(page).unwrap();
 		}
 	});
 
@@ -123,7 +136,7 @@ mod test {
 		reset();
 		let page = mem_allocate(0).unwrap().start();
 		let page = unsafe {
-			SharedPage::new(page).unwrap()
+			SharedPPN::new(page).unwrap()
 		};
 		let page = page.try_clone().unwrap();
 	});
@@ -131,8 +144,8 @@ mod test {
 	test!(alloc_into_raw_parts() {
 		reset();
 		let page = mem_allocate(0).unwrap().start();
-		let page = unsafe { SharedPage::new(page).unwrap() };
+		let page = unsafe { SharedPPN::new(page).unwrap() };
 		let (page, counter) = page.into_raw_parts();
-		let page = unsafe { SharedPage::from_raw_parts(page, counter) };
+		let page = unsafe { SharedPPN::from_raw_parts(page, counter) };
 	});
 }

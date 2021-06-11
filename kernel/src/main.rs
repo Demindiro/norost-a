@@ -145,6 +145,9 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 #[cfg(not(test))]
 extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_size: usize) {
 
+	// Initialize trap table immediately so we can catch errors as early as possible.
+	arch::init();
+
 	/*
 	// Log architecture info
 	use arch::*;
@@ -319,6 +322,8 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 			}
 		}
 	}
+	mem::drop(root);
+	mem::drop(interpreter);
 
 	memory::reserved::dump_vms_map();
 
@@ -340,10 +345,9 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	let end = start + size;
 	log!("Useable memory range: 0x{:x}-0x{:x}", start, end);
 
-	// Initialize trap table now that the most important setup is done.
-	arch::init();
-
 	log!("initfs: {:p}, {}", initfs, initfs_size);
+
+	arch::VirtualMemorySystem::clear_identity_maps();
 
 	// Run init
 	// SAFETY: a valid init pointer and size should have been passed by boot.s.

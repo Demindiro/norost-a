@@ -42,6 +42,15 @@ impl PPN {
 	pub unsafe fn from_raw(ppn: u32) -> Self {
 		Self(ppn)
 	}
+
+	/// Only use this function if the page is identity mapped!
+	pub unsafe fn as_ptr(&self) -> *mut arch::Page {
+		((self.0 as usize) << 12) as *mut _
+	}
+
+	pub fn as_usize(&self) -> usize {
+		(self.0 as usize) << 12
+	}
 }
 
 impl fmt::Debug for PPN {

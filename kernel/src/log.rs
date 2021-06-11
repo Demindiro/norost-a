@@ -27,7 +27,7 @@ macro_rules! log {
 #[macro_export]
 macro_rules! dbg {
     () => {
-        $crate::log!("[{}:{}]", $crate::file!(), $crate::line!());
+        $crate::log!("[{}:{}]", file!(), line!());
     };
     ($val:expr $(,)?) => {
         // Use of `match` here is intentional because it affects the lifetimes

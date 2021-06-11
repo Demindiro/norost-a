@@ -16,9 +16,8 @@ pub mod reserved;
 mod allocator;
 mod ppn;
 mod shared;
-mod vms;
 
-pub use shared::SharedPage;
+pub use shared::SharedPPN;
 
 use crate::sync::Mutex;
 
@@ -84,6 +83,10 @@ pub fn mem_allocate(order: u8) -> Result<PPN, AllocateError> {
 	unsafe {
 		Ok(ALLOCATOR.as_ref().unwrap_unchecked().lock().alloc().unwrap())
 	}
+}
+
+pub fn allocate() -> Result<PPN, AllocateError> {
+	mem_allocate(0)
 }
 
 /// Allocate a number of pages. The pages are not necessarily contiguous. To avoid needing to

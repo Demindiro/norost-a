@@ -164,18 +164,18 @@ impl RingIndex {
 	}
 }
 
-const STACK_ADDRESS: NonNull<Page> = unsafe { NonNull::new_unchecked(0xffff_fff0_0000_0000 as *mut _) };
-const TASK_DATA_ADDRESS: NonNull<Page> = unsafe { NonNull::new_unchecked(0xffff_ffe0_0000_0000 as *mut _) };
+const STACK_ADDRESS: NonNull<Page> = crate::memory::reserved::HART_STACKS.start.cast();
+const TASK_DATA_ADDRESS: NonNull<Page> = crate::memory::reserved::TASK_DATA.start.cast();
 
 impl Task {
 	/// Create a new empty task.
 	pub fn new() -> Result<Self, AllocateError> {
 		// FIXME may leak memory on alloc error.
-		let task_data = memory::mem_allocate(0)?;
-		let stack = memory::mem_allocate(0)?;
+		let task_data = memory::allocate()?;
+		let stack = memory::allocate()?;
 		let mut vms = arch::VirtualMemorySystem::current();
-		arch::VirtualMemorySystem::add(STACK_ADDRESS, stack, RWX::RW, false).unwrap();
-		arch::VirtualMemorySystem::add(TASK_DATA_ADDRESS, task_data, RWX::RW, false).unwrap();
+		arch::VirtualMemorySystem::add(STACK_ADDRESS, stack, RWX::RW, false, false).unwrap();
+		arch::VirtualMemorySystem::add(TASK_DATA_ADDRESS, task_data, RWX::RW, false, false).unwrap();
 		let task_data = TASK_DATA_ADDRESS.cast();
 		let task = Self(task_data);
 		// SAFETY: task is valid
@@ -204,7 +204,7 @@ impl Task {
 
 	/// Add a memory mapping to this task.
 	pub fn add_mapping(&self, address: NonNull<Page>, page: PPN, rwx: arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
-		arch::VirtualMemorySystem::add(address, page, rwx, true)
+		arch::VirtualMemorySystem::add(address, page, rwx, true, false)
 	}
 
 	/// Set the program counter of this task to the given address.
@@ -268,7 +268,8 @@ impl Task {
 
 	/// Deallocate memory
 	pub fn deallocate_memory(&self, address: NonNull<crate::arch::Page>, count: usize) -> Result<(), ()> {
-		self.inner().shared_state.virtual_memory.deallocate(address, count)
+		todo!()
+		//self.inner().shared_state.virtual_memory.deallocate(address, count)
 	}
 
 	/// Return the ID of this task

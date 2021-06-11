@@ -291,10 +291,9 @@ pub fn create_task(data: &[u8]) -> crate::task::Task {
 		};
 
 		assert_eq!(header.offset & arch::PAGE_MASK, 0, "Offset is not aligned");
-		dbg!(header.offset);
 		let from = NonNull::from(&data[header.offset..][..header.file_size]).cast();
 		let to = NonNull::new(header.virtual_address as *mut _).unwrap();
-		arch::VirtualMemorySystem::copy_address(from, to, Some((rwx, true))).unwrap();
+		arch::VirtualMemorySystem::alias_address(from, to, rwx, true, false).unwrap();
 	}
 
 	task.set_pc(header.entry as *const _);

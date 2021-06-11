@@ -24,6 +24,7 @@
 //! Using a VMS-like tree structure makes it trivial to support hugepages of any size.
 
 use super::{PPN, PPNRange, PPNBox};
+use super::reserved::PMM_STACK;
 use crate::arch::{self, PAGE_SIZE};
 use core::convert::TryInto;
 use core::mem;
@@ -150,36 +151,24 @@ impl Tree {
 impl Allocator {
 	/// Creates a new `Allocator` with the given pages.
 	pub fn new(pages: &mut [PPNRange]) -> Result<Self, ()> {
+		// TODO zero out memory before handing it to the VMS.
 		// Get minimum needed pages
 		let hc = arch::hart_count();
-		log!("hc: {}", hc);
 		let count = hc * Stacks::MEM_TOTAL_SIZE;
 		let count = (count + arch::PAGE_MASK) & !arch::PAGE_MASK;
 		let count = count / arch::PAGE_SIZE;
-		let count = count as u32;
-		let (mut stacks, mut extra, pages) = 'a: loop {
-			let mut c = 0;
-			for (i, p) in pages.iter().enumerate() {
-				c += p.count();
-				if c > count {
-					let m = pages[i].split(c - count).unwrap();
-					let lr = pages.split_at_mut(i + 1);
-					break 'a (lr.0, m, lr.1);
-				}
-			}
-			return Err(());
-		};
 		let stacks = {
 			let mut i = 0;
-			super::vms::add_kernel_mapping(move || {
+			arch::VirtualMemorySystem::allocate_pages(|| {
 				loop {
-					if let Some(p) = stacks[i].pop() {
+					if let Some(p) = pages[i].pop() {
 						break p;
 					} else {
 						i += 1;
 					}
 				}
-			}, count as usize, crate::arch::RWX::RW).cast::<u8>()
+			}, PMM_STACK.start.cast(), count as usize);
+			PMM_STACK.start
 		};
 		let stacks = unsafe {
 			Stacks {
@@ -190,10 +179,6 @@ impl Allocator {
 		let mut s = Self {
 			stacks,
 		};
-
-		while let Some(p) = extra.pop() {
-			s.insert(p);
-		}
 
 		for p in pages {
 			while let Some(p) = p.pop() {

@@ -52,6 +52,7 @@ pub struct Range {
 /// The total range begins at $start and finishes at $end. In-between ranges
 /// are denoted by a size. $kernel denotes the size of the kernel and is
 /// substracted from $end.
+#[allow(unused)]
 macro_rules! range {
 	// LOCAL
 	{
@@ -172,8 +173,10 @@ range! {
 	PMM_STACK => super::allocator::Stacks::MEM_TOTAL_SIZE * MAX_HARTS,
 	SHARED_COUNTERS => 1 << (44 - 12 + 2),
 	SHARED_ALLOC => 1 << (44 - 12 - 12 + 1),
+	HART_STACKS => (1 << 12) * MAX_HARTS * 2, // Reserve extra space for guard pages.
 	[LOCAL]
-	VMM_PPN0 => (512 * 512) << 12,
-	VMM_PPN1 => 512 << 12,
-	VMM_PPN2 => 1 << 12,
+	HIGHMEM_A => 1 << 30,
+	HIGHMEM_B => 1 << 30,
+	VMM_ROOT => 1 << 12,
+	TASK_DATA => 1 << 12,
 }

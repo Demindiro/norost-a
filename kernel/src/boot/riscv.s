@@ -154,7 +154,7 @@ _start:
 
 
 	# Add pointer to PPN1 in PPN2 & PPN0 in PPN1.
-	li		t3, (511 * 8)		# Offset pointing to last PTE
+	li		t3, (511 * 8)		# Offset pointing to PTE
 	add		t2, s2, t3			# Add offset to point to last PTE
 	add		t1, s1, t3
 	ld		t4, 0(t2)			# Ensure PTEs are zero
@@ -168,10 +168,9 @@ _start:
 	sd		t4, 0(t2)			# Set PTEs
 	sd		t3, 0(t1)
 
-	## Identity map all pages up to the last gigapage.
+	## Identity map the lower half of memory.
 	mv		t2, s2				# Pointer to index 0
-	add		t3, s2, s7			# Pointer to index 510 (inclusive)
-	addi	t3, t3, -16
+	addi	t3, s2, 255 * 8		# Pointer to index 255 (inclusive)
 	li		t0, 0xcf			# Start PTE & Set valid, RWX and
 								# dirty/accessed bits
 	slli	t1, s7, 28 - 12		# PTE/PPN increment (s7 is PAGE_SIZE and
