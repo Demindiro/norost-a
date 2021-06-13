@@ -1,5 +1,4 @@
 use crate::arch;
-use core::convert::TryInto;
 use core::fmt;
 use core::mem;
 
@@ -83,22 +82,6 @@ impl PPNRange {
 			self.count = c;
 			PPN(self.start + c)
 		})
-	}
-
-	/// Split off the top of this PPN.
-	pub fn split(&mut self, count: u32) -> Option<Self> {
-		self.count.checked_sub(count).map(|c| {
-			self.count = c;
-			Self {
-				start: self.start + c,
-				count,
-			}
-		})
-	}
-
-	/// The amount of pages this range spans.
-	pub fn count(&self) -> u32 {
-		self.count
 	}
 }
 

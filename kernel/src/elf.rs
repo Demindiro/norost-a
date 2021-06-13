@@ -10,24 +10,9 @@
 //!
 //! [elf64]: https://uclibc.org/docs/elf-64-gen.pdf
 
-use crate::alloc::Box;
-use crate::log;
 use crate::arch;
-use crate::memory;
-use core::alloc::{AllocError, Allocator};
 use core::ptr::NonNull;
-use core::{mem, ptr};
-
-/// Structure representing an ELF file.
-pub struct ELF<A>
-where
-	A: Allocator,
-{
-	/// The entry point in the program.
-	entry: usize,
-	/// The program's segments.
-	segments: Box<[Segment], A>,
-}
+use core::mem;
 
 #[cfg_attr(
 	target_pointer_width = "32",
@@ -132,48 +117,6 @@ const _PROGRAM_HEADER_SIZE_CHECK: usize = 0 - (32 - mem::size_of::<ProgramHeader
 #[cfg(target_pointer_width = "64")]
 const _PROGRAM_HEADER_SIZE_CHECK: usize = 0 - (56 - mem::size_of::<ProgramHeader>());
 
-/// A structure representing a single segment.
-struct Segment {
-	/// The virtual address of the start of this segment.
-	virtual_area: NonNull<arch::Page>,
-	/// The flags of this segment (i.e. whether it's readable, executable, ...).
-	flags: u8,
-}
-
-/// Error that may be returned when trying to parse an ELF file.
-#[derive(Debug)]
-pub enum ParseError {
-	/// The magic is invalid, i.e. it doesn't start with the string `"\x7fELF"` or it is less than
-	/// 16 bytes.
-	BadMagic,
-	/// The class is unsupported. A 64 bit kernel will only support ELF64 while a 32 bit kernel
-	/// will only support ELF32 to keep the kernel small. Generally you shouldn't use a 32 bit init
-	/// with a 64 bit kernel anyways (and vice versa won't even run).
-	UnsupportedClass,
-	/// The data format (i.e. endianness) is unsupported. Again, this is arch-specific.
-	UnsupportedData,
-	/// The version is unsupported. The only ELF version in existence right now is version 1.
-	UnsupportedVersion,
-	/// The data isn't properly aligned. Must be on a 4 byte boundary for ELF32 and 8 for ELF64.
-	BadAlignment,
-	/// The header is too small.
-	HeaderTooSmall,
-	/// The ELF's object type isn't supported (i.e. it isn't an executable).
-	UnsupportedType,
-	/// The architecture is not supported.
-	UnsupportedMachine,
-	/// Some of the flags aren't supported by this architecture.
-	UnsupportedFlags,
-	/// The program headers don't have the right size.
-	BadProgramHeaderSize,
-	/// The program headers occupy more space than there is in the file.
-	ProgramHeadersLargerThanFile,
-	/// An error occured while trying to allocate heap memory.
-	AllocError(AllocError),
-	/// An error occured while trying to allocate memory pages.
-	AllocateError(memory::AllocateError),
-}
-
 const TYPE_EXEC: u16 = 2;
 
 /// Parse the ELF file and return a new task.
@@ -244,22 +187,7 @@ pub fn create_task(data: &[u8]) -> crate::task::Task {
 		panic!("Program headers exceed the size of the file");
 	}
 
-	// Count the amount of loadable segments.
-	let mut loadable_count = 0;
-	for i in 0..count {
-		// SAFETY: the data is large enough and aligned and the header size matches.
-		let header = unsafe {
-			let h = data as *const [u8] as *const u8;
-			let h = h.add(header.program_header_offset);
-			let h = h as *const ProgramHeader;
-			&*h.add(i)
-		};
-		if header.typ == ProgramHeader::TYPE_LOAD {
-			loadable_count += 1;
-		}
-	}
-
-	let mut task = crate::task::Task::new().expect("Failed to allocate task");
+	let task = crate::task::Task::new().expect("Failed to allocate task");
 
 	for i in 0..count {
 		// SAFETY: the data is large enough and aligned and the header size matches.
@@ -307,12 +235,6 @@ const FLAG_READ: u32 = 0x4;
 
 impl ProgramHeader {
 	const TYPE_LOAD: u32 = 1;
-}
-
-impl Segment {
-	const FLAG_EXEC: u32 = 0x1;
-	const FLAG_WRITE: u32 = 0x2;
-	const FLAG_READ: u32 = 0x4;
 }
 
 #[cfg(test)]

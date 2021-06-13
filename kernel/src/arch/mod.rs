@@ -1,7 +1,5 @@
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub mod riscv;
-#[cfg(target_arch = "riscv64")]
-use riscv::rv64 as riscv64;
 
 /// The size of a single memory page.
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
@@ -36,8 +34,7 @@ pub const PAGE_MASK: usize = PAGE_SIZE - 1;
 /// The amount of bits that are zero due to page alignment.
 pub const PAGE_BITS: usize = 12;
 
-use crate::{log, task, util};
-use core::{mem, ptr};
+use core::ptr;
 
 extern "C" {
 	/// Saves the registers of the given task and begins running the next task.
@@ -45,13 +42,14 @@ extern "C" {
 	/// ## Safety
 	///
 	/// `pc` in the `registers` must be valid.
+	// Task _is_ FFI-safe you stupid fucking compiler.
+	#[allow(improper_ctypes)]
 	pub fn trap_next_task(task: crate::task::Task) -> !;
 
 	/// Begins running the given task.
+	// Task _is_ FFI-safe you stupid fucking compiler.
+	#[allow(improper_ctypes)]
 	pub fn trap_start_task(task: crate::task::Task) -> !;
-
-	/// Sets up an early trap handler that panics immediately if called.
-	pub fn trap_early_init();
 }
 
 /// Initialize arch-specific structures, such as the interrupt table
@@ -62,58 +60,7 @@ pub fn init() {
 	compile_error!("No arch init function defined");
 }
 
-/// A structure that encodes the JEDEC in a somewhat sensible way
-pub struct JEDEC {
-	/// The amount of continuation codes.
-	continuation: usize,
-	/// The stop (i.e. termination) code.
-	stop: u8,
-}
-
-/// A wrapper that allows inspecting the capabilities of the current CPU
-pub trait Capabilities {
-	/// Creates a new wrapper around whatever structures that need to be accessed to
-	/// get the CPU's capabilities.
-	fn new() -> Self;
-
-	/// Logs the capabilities of the current CPU
-	fn log(&self);
-}
-
-/// A wrapper to get CPU-specific information, such as the vendor
-pub trait ID {
-	/// Creates a wrapper around the structures needed for accessing CPU-specific information.
-	fn new() -> Self;
-
-	/// Gets the JEDEC ID of this CPU.
-	fn jedec(&self) -> JEDEC;
-
-	/// Gets the architecture ID.
-	fn arch(&self) -> usize;
-
-	/// Gets the current hardware thread (i.e. hart)
-	fn hart(&self) -> usize;
-
-	/// Logs vendor-specific information.
-	fn log(&self) {
-		let jedec = self.jedec();
-		log!("Vendor: {} {}", jedec.continuation, jedec.stop);
-		log!("Architecture: {}", self.arch());
-		log!("Current hart: {}", self.hart());
-	}
-}
-
 const _PAGE_ALIGN_CHECK: usize = 0 - (PAGE_SIZE - core::alloc::Layout::new::<Page>().align());
-
-pub fn capabilities() -> impl Capabilities {
-	#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
-	riscv64::MISA::new()
-}
-
-pub fn id() -> impl ID {
-	#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
-	riscv64::ID::new()
-}
 
 /// Returns `true` if an accurate backtrace can be returned, otherwise `false`.
 pub fn is_backtrace_accurate() -> bool {
@@ -161,17 +108,6 @@ where
 		}
 		sp += 4;
 	}
-}
-
-/// Returns the ID of the current hart.
-pub fn hart_id() -> usize {
-	riscv::sbi::hart_id()
-}
-
-/// Returns the total amount of harts on the system
-#[cold]
-pub fn hart_count() -> usize {
-	riscv::sbi::hart_count()
 }
 
 #[inline]

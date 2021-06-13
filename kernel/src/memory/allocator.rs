@@ -25,11 +25,8 @@
 
 use super::{PPN, PPNRange, PPNBox};
 use super::reserved::PMM_STACK;
-use crate::arch::{self, PAGE_SIZE};
-use core::convert::TryInto;
+use crate::arch;
 use core::mem;
-use core::num::NonZeroUsize;
-use core::ptr::NonNull;
 use core::slice;
 
 /// Stacks of PPNs for fast allocation. The stack also act as a ring buffer when moving PPNs
@@ -97,6 +94,7 @@ impl Stacks {
 	/// Note that PPNs at the bottom are older than higher PPNs and are less likely to be in
 	/// cache. This makes them better candidates for insertion in the tree.
 	#[must_use]
+	#[allow(dead_code)]
 	fn pop_base(&mut self, stack_index: usize) -> Option<PPN> {
 		let stack = &mut self.stacks[stack_index];
 		// SAFETY: the pointers point to arrays at least as large as stacks, and if the index
@@ -153,7 +151,7 @@ impl Allocator {
 	pub fn new(pages: &mut [PPNRange]) -> Result<Self, ()> {
 		// TODO zero out memory before handing it to the VMS.
 		// Get minimum needed pages
-		let hc = arch::hart_count();
+		let hc = 1; // TODO
 		let count = hc * Stacks::MEM_TOTAL_SIZE;
 		let count = (count + arch::PAGE_MASK) & !arch::PAGE_MASK;
 		let count = count / arch::PAGE_SIZE;

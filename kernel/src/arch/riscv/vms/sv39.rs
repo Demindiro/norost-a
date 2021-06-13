@@ -9,23 +9,17 @@
 
 use super::{AddError, RWX};
 use crate::arch;
-use crate::arch::{Page, VirtualMemorySystem};
+use crate::arch::Page;
 use crate::memory::{self, AllocateError, PPN, SharedPPN};
-use crate::memory::reserved::{self, GLOBAL, LOCAL, VMM_ROOT};
+use crate::memory::reserved::{self, GLOBAL, VMM_ROOT};
 use core::convert::TryFrom;
 use core::mem;
-use core::num::NonZeroUsize;
-use core::ptr::NonNull;
 use core::ops;
+use core::ptr::NonNull;
 
 /// The start index of the global kernel table.
 const GLOBAL_KERNEL_TABLE_START_INDEX: usize = unsafe {
 	(GLOBAL.start.as_ptr() as usize >> 30) & 0x1ff
-};
-
-/// The start index of the local kernel table.
-const LOCAL_KERNEL_TABLE_START_INDEX: usize = unsafe {
-	(LOCAL.start.as_ptr() as usize >> 30) & 0x1ff
 };
 
 /// The root table (level 2).
@@ -62,11 +56,6 @@ struct Entry(u64);
 #[repr(transparent)]
 struct Leaf(u64);
 
-enum Either {
-	Table(TablePage),
-	Address((PhysicalAddress, RWX)),
-}
-
 /// Page table.
 ///
 /// Each table contains 512 entries.
@@ -78,47 +67,22 @@ struct TablePage(NonNull<Page>);
 
 struct VirtualAddress(u64);
 
-struct PhysicalAddress(u64);
-
 /// The root table of a Sv39 VMS.
 #[repr(C)]
 pub struct Sv39(u64);
 
 impl Entry {
-	const PAGE_MASK: u64 = arch::PAGE_MASK as u64;
-
 	const VALID_MASK: u64 = 0b1;
 
 	const RWX_MASK: u64 = 0b1110;
-	const _RWX_MASK_CHECK: u64 = 0 - (Self::RWX_MASK - RWX::MASK_64);
 
 	const USERMODE_MASK: u64 = 0b1_0000;
 
-	const SHARED_MASK: u64 = 0x1_00;
-
-	const PPN_2_OFFSET: u8 = 28;
-	const PPN_1_OFFSET: u8 = 19;
-	const PPN_0_OFFSET: u8 = 10;
-
-	const PPN_2_MASK: u64 = 0x3ff_ffff << Self::PPN_2_OFFSET;
-	const PPN_1_MASK: u64 = 0x1ff << Self::PPN_1_OFFSET;
-	const PPN_0_MASK: u64 = 0x1ff << Self::PPN_0_OFFSET;
+	const GLOBAL_BIT: u8 = 0b10_0000;
 
 	/// Create a new entry for an invalid entry.
 	fn new_invalid() -> Self {
 		Self(0)
-	}
-
-	/// Create a new entry for a single physical entry.
-	#[must_use]
-	fn new_leaf(ppn: PPN, rwx: RWX) -> Self {
-		let ppn = ppn.into_raw();
-		let mut s = Self((ppn as u64) << 10);
-		s.set_rwx(rwx);
-		s.set_valid(true);
-		s.set_usermode(true);
-		s.0 |= 0b1100_0000;
-		s
 	}
 
 	/// Create a new entry for a single physical entry.
@@ -128,7 +92,7 @@ impl Entry {
 		s.set_rwx(rwx);
 		s.set_valid(true);
 		s.set_usermode(usermode);
-		// TODO s.set_global(global);
+		s.set_global(global);
 		s.0 |= 0b1100_0000;
 		s
 	}
@@ -172,39 +136,14 @@ impl Entry {
 		self.0 |= u64::from(allow) * Self::USERMODE_MASK;
 	}
 
-	/// Set whether this page is shared.
-	fn set_shared(&mut self, shared: bool) {
-		self.0 &= !Self::SHARED_MASK;
-		self.0 |= u64::from(shared) * Self::SHARED_MASK;
+	fn set_global(&mut self, global: bool) {
+		self.0 &= !(1 << Self::GLOBAL_BIT);
+		self.0 |= u64::from(global) << Self::GLOBAL_BIT;
 	}
 
 	#[must_use]
 	fn is_table(&self) -> bool {
 		self.rwx().is_none()
-	}
-
-	/// Return the original PPN.
-	#[must_use]
-	fn ppn(&self) -> u32 {
-		(self.0 >> 10) as u32
-	}
-
-	/// Return the PPN[2] shifted to the right.
-	#[must_use]
-	fn ppn_2(&self) -> u64 {
-		(self.0 & Self::PPN_2_MASK) >> Self::PPN_2_OFFSET
-	}
-
-	/// Return the PPN[1] shifted to the right.
-	#[must_use]
-	fn ppn_1(&self) -> u64 {
-		(self.0 & Self::PPN_1_MASK) >> Self::PPN_1_OFFSET
-	}
-
-	/// Return the PPN[0] shifted to the right.
-	#[must_use]
-	fn ppn_0(&self) -> u64 {
-		(self.0 & Self::PPN_0_MASK) >> Self::PPN_0_OFFSET
 	}
 }
 
@@ -212,22 +151,6 @@ impl Entry {
 pub enum PrivateOrShared {
 	Private(PPN),
 	Shared(SharedPPN),
-}
-
-impl PrivateOrShared {
-	fn into_private(self) -> Result<PPN, Self> {
-		match self {
-			Self::Private(ppn) => Ok(ppn),
-			s => Err(s),
-		}
-	}
-
-	fn into_shared(self) -> Result<SharedPPN, Self> {
-		match self {
-			Self::Shared(ppn) => Ok(ppn),
-			s => Err(s),
-		}
-	}
 }
 
 impl Leaf {
@@ -337,20 +260,6 @@ impl ops::DerefMut for Table {
 	}
 }
 
-impl TablePage {
-	/// Create a new table with empty (zeroed) entries.
-	fn new() -> Result<Self, AllocateError> {
-		// FIXME
-		let a = memory::mem_allocate(0)?;
-		let a = unsafe { core::mem::transmute::<_, u32>(a) };
-		let a = a as usize;
-		let a = a << 12;
-		let a = a as *mut _;
-		let a = NonNull::new(a).unwrap();
-		Ok(Self(a))
-	}
-}
-
 impl ops::Deref for TablePage {
 	type Target = Table;
 
@@ -394,59 +303,10 @@ impl VirtualAddress {
 	}
 }
 
-impl PhysicalAddress {
-	const OFFSET_MASK: u64 = 0x3ff;
-
-	const PPN_2_OFFSET: u64 = 30;
-	const PPN_1_OFFSET: u64 = 21;
-	const PPN_0_OFFSET: u64 = 12;
-
-	const PPN_2_MASK: u64 = 0x3ff_ffff << Self::PPN_2_OFFSET;
-	const PPN_1_MASK: u64 = 0x1ff << Self::PPN_1_OFFSET;
-	const PPN_0_MASK: u64 = 0x1ff << Self::PPN_0_OFFSET;
-
-	/// Creates a new physical address from the PPNs and the offset.
-	fn new(ppn_2: u64, ppn_1: u64, ppn_0: u64, offset: u64) -> Self {
-		let r = (ppn_2 << Self::PPN_2_OFFSET) | (ppn_1 << Self::PPN_1_OFFSET) | (ppn_0 << Self::PPN_0_OFFSET) | offset;
-		Self(r)
-	}
-
-	/// Return the PPN[2] shifted to the right.
-	fn ppn_2(&self) -> u64 {
-		(self.0 & Self::PPN_2_MASK) >> Self::PPN_2_OFFSET
-	}
-
-	/// Return the PPN[1] shifted to the right.
-	fn ppn_1(&self) -> u64 {
-		(self.0 & Self::PPN_1_MASK) >> Self::PPN_1_OFFSET
-	}
-
-	/// Return the PPN[0] shifted to the right.
-	fn ppn_0(&self) -> u64 {
-		(self.0 & Self::PPN_0_MASK) >> Self::PPN_0_OFFSET
-	}
-
-	/// Return the offset
-	fn offset(&self) -> u64 {
-		self.0 & Self::OFFSET_MASK
-	}
-}
-
 impl Sv39 {
-	const MEGA_PAGE_ORDER: u8 = 9;
-	const GIGA_PAGE_ORDER: u8 = 18;
-
-	const PAGE_SIZE: u64 = 4096;
-	const MEGA_PAGE_SIZE: u64 = Self::PAGE_SIZE << Self::MEGA_PAGE_ORDER;
-	const GIGA_PAGE_SIZE: u64 = Self::PAGE_SIZE << Self::GIGA_PAGE_ORDER;
-
-	const PAGE_MASK: u64 = Self::PAGE_SIZE - 1;
-	const MEGA_PAGE_MASK: u64 = Self::MEGA_PAGE_SIZE - 1;
-	const GIGA_PAGE_MASK: u64 = Self::GIGA_PAGE_SIZE - 1;
-
-	const ENTRIES_PER_TABLE: u64 = 512;
 
 	/// Create a new Sv39 mapping.
+	#[allow(dead_code)]
 	pub fn new() -> Result<Self, AllocateError> {
 		// Allocate 3 pages to map to ROOT.
 		let ppn_2 = memory::allocate()?;
@@ -459,7 +319,7 @@ impl Sv39 {
 
 		// Map global kernel PTEs.
 		unsafe {
-			let curr = unsafe { ROOT.cast::<[u64; 512]>().as_mut() };
+			let curr = ROOT.cast::<[u64; 512]>().as_mut();
 			Self::map_highmem_a(Some(&ppn_1));
 			let new = Self::translate_highmem_a(&ppn_1).cast::<[u64; 512]>().as_mut();
 			for i in GLOBAL_KERNEL_TABLE_START_INDEX..512 {
@@ -477,7 +337,7 @@ impl Sv39 {
 			Self::map_highmem_a(Some(&ppn_0));
 			Self::flush_highmem_a();
 			Self::translate_highmem_a(&ppn_0).cast::<[Leaf; 512]>().as_mut()[va.ppn_0()]
-				.set(ppn_2_alias, RWX::RW, false, false);
+				.set(ppn_2_alias, RWX::RW, false, false).unwrap();
 
 			// Add a PTE pointing to VPN[0] in VPN[1]
 			Self::map_highmem_a(Some(&ppn_1));
@@ -507,7 +367,7 @@ impl Sv39 {
 		let mut va = virtual_address;
 		// FIXME deallocate pages on failure.
 		memory::mem_allocate_range(count, |ppn| {
-			Self::add(va, ppn, rwx, true, false);
+			Self::add(va, ppn, rwx, true, false).unwrap();
 			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
 		}).unwrap();
 		Ok(())
@@ -593,6 +453,7 @@ impl Sv39 {
 
 	/// Add a SharedPPN. If no virtual address is given, the first available
 	/// entry with enough space is used.
+	#[allow(dead_code)]
 	pub fn add_shared(address: NonNull<Page>, ppn: SharedPPN, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
 		let mut pte = Self::get_pte_alloc(address)?;
 		unsafe {
@@ -606,22 +467,9 @@ impl Sv39 {
 	///
 	/// * `Ok(PPN)` if the mapping existed and was removed successfully.
 	/// * `Err(())` if the mapping doesn't exist.
+	#[allow(dead_code)]
 	pub fn remove(address: NonNull<Page>) -> Result<PrivateOrShared, ()> {
 		unsafe { Self::get_pte(address)?.as_mut().clear() }
-	}
-
-	/// Allocate and add a shared mapping.
-	pub fn allocate_shared(&mut self, address: NonNull<Page>, count: usize, rwx: RWX) -> Result<(), ()> {
-		let mut va = address;
-		// FIXME deallocate pages on failure.
-		memory::mem_allocate_range(count, |ppn| {
-			let ppn = crate::memory::SharedPPN::new(ppn).unwrap();
-			let ppn = ppn.into_raw();
-			Self::add(va, ppn, rwx, true, false).unwrap();
-			let index = (va.as_ptr() as usize >> 12) as u64;
-			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
-		}).unwrap();
-		Ok(())
 	}
 
 	/// Alias an address to another address.
@@ -760,7 +608,7 @@ impl Sv39 {
 	/// There may not be any lingering mappings either for security and performance.
 	unsafe fn map_highmem_a(ppn: Option<&PPN>) {
 		let va = VirtualAddress(HIGHMEM_A.as_ptr() as u64);
-		let root = unsafe { Self::root().as_mut() };
+		let root = &mut *ROOT.as_ptr();
 		root[va.ppn_2()] = if let Some(ppn) = ppn {
 			let ppn = ppn.as_usize() & !((1 << 30) - 1);
 			Entry::new_leaf2(ppn, RWX::RW, false, false)
@@ -777,7 +625,7 @@ impl Sv39 {
 	/// There may not be any lingering mappings either for security and performance.
 	unsafe fn map_highmem_b(ppn: Option<&PPN>) {
 		let va = VirtualAddress(HIGHMEM_B.as_ptr() as u64);
-		let root = unsafe { Self::root().as_mut() };
+		let root = &mut *ROOT.as_ptr();
 		root[va.ppn_2()] = if let Some(ppn) = ppn {
 			let ppn = ppn.as_usize() & !((1 << 30) - 1);
 			Entry::new_leaf2(ppn, RWX::RW, false, false)
@@ -819,49 +667,6 @@ impl Sv39 {
 	fn flush(address: Option<NonNull<Page>>) {
 		let address = address.map(|p| p.as_ptr() as *const _).unwrap_or(core::ptr::null());
 		unsafe { asm!("sfence.vma {0}, zero", in(reg) address); }
-	}
-
-	/// Return a reference to the root without the fucking 20 line
-	/// "taking a mutable reference to a `const` item" bullshit warning /salt
-	fn root() -> NonNull<[Entry; 512]> {
-		// Sheer fucking magic I guess?
-		ROOT
-	}
-}
-
-impl Drop for Sv39 {
-	fn drop(&mut self) {
-		/*
-		// PPN[2]
-		for e in self.addresses.iter() {
-		if let Some(tbl) = e.as_table() {
-		// PPN[1]
-		for e in tbl.iter() {
-		if let Some(tbl) = e.as_table() {
-		// PPN[0]
-		let a = tbl.0
-		// SAFETY: We own a unique reference to a valid page.
-		unsafe {
-		memory::mem_deallocate(a);
-		}
-		}
-		}
-		let a = Area::new(tbl.0, 0).unwrap();
-		// SAFETY: We own a unique reference to a valid page.
-		unsafe {
-		memory::mem_deallocate(a);
-		}
-		}
-		}
-		let a = Area::new(self.addresses.0, 0).unwrap();
-		// SAFETY: We own a unique reference to a valid page.
-		unsafe {
-		memory::mem_deallocate(a);
-		}
-		*/
-
-		// FIXME
-		//todo!()
 	}
 }
 

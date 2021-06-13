@@ -21,15 +21,6 @@ impl<T> Mutex<T> {
 		}
 	}
 
-	pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-		if self.lock.get() {
-			None
-		} else {
-			self.lock.set(true);
-			Some(MutexGuard { mutex: self })
-		}
-	}
-
 	pub fn lock(&self) -> MutexGuard<'_, T> {
 		while self.lock.get() {}
 		self.lock.set(true);

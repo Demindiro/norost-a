@@ -24,9 +24,6 @@ pub enum RWX {
 }
 
 impl RWX {
-	const MASK_32: u32 = 0b1110;
-	const MASK_64: u64 = 0b1110;
-
 	pub fn r(self) -> bool {
 		self == Self::R || self == Self::RW || self == Self::RX || self == Self::RWX
 	}
@@ -86,7 +83,5 @@ impl TryFrom<u32> for RWX {
 pub enum AddError {
 	/// The mapping overlaps with an existing mapping
 	Overlaps,
-	/// The areas don't have the same order (i.e. size).
-	NonEqualOrder,
 	AllocateError(AllocateError),
 }

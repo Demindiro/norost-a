@@ -29,8 +29,6 @@ pub struct DeviceTree {
 pub enum ParseDTBError {
 	/// The magic doesn't match (i.e. it isn't `0xdOOdfeed`)
 	BadMagic(u32),
-	/// The version is unsupported (i.e. it isn't either `16` or `17`)
-	IncompatibleVersion(u32),
 }
 
 /// A representation of the header field of the DTB format.
@@ -66,11 +64,6 @@ pub struct ReservedMemoryRegion {
 	pub size: BigEndianU64,
 }
 
-/// A structure representing the "structure block" of the DTB.
-struct StructureBlock {
-	_data: [u8; 0],
-}
-
 /// A structure representing the "strings block" of the DTB.
 struct StringsBlock {
 	_data: [u8; 0],
@@ -82,15 +75,6 @@ pub struct Interpreter {
 	pc: *const BigEndianU32,
 	/// The address of the [`StringsBlock`]
 	strings: &'static StringsBlock,
-	/// Flag indicating whether the interpreter has not yet started, is running or has ended.
-	state: InterpreterState,
-}
-
-/// Enum indicating whether the interpreter is fresh, has started or has ended.
-enum InterpreterState {
-	NotStarted,
-	Running,
-	Ended,
 }
 
 /// A structure representing a single node in the DTB
@@ -141,12 +125,10 @@ impl DeviceTree {
 		Ok(Self { header })
 	}
 
-	/// The physical ID of the boot CPU.
-	pub fn boot_cpu_id(&self) -> u32 {
-		self.header.boot_cpu_id_physical.get()
-	}
-
 	/// A iterator over all reserved memory regions.
+	// TODO there is also a "reserved-memory" node that we currently use. It seems the
+	// information in that node is not reflected in the memory reservations block. Can we
+	// remove this function or not?
 	pub fn reserved_memory_regions(&self) -> impl Iterator<Item = ReservedMemoryRegion> {
 		struct Iter {
 			rmr: *const ReservedMemoryRegion,
@@ -192,8 +174,7 @@ impl DeviceTree {
 				.add(self.header.offset_strings_block.get() as usize)
 				.cast()
 		};
-		let state = InterpreterState::NotStarted;
-		Interpreter { pc, strings, state }
+		Interpreter { pc, strings }
 	}
 }
 
@@ -278,7 +259,6 @@ impl Interpreter {
 				Self::TOKEN_PROP => panic!("Unexpected TOKEN_PROP"),
 				Self::TOKEN_NOP => (),
 				Self::TOKEN_END => {
-					self.state = InterpreterState::Ended;
 					break None;
 				}
 				_ => panic!("Invalid token in DTB"),
@@ -318,7 +298,6 @@ impl Interpreter {
 				}
 				Self::TOKEN_NOP => (),
 				Self::TOKEN_END => {
-					self.state = InterpreterState::Ended;
 					break None;
 				}
 				_tk => panic!("Invalid token in DTB"),

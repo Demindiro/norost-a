@@ -6,10 +6,6 @@
 //! Regular pages (i.e. non-MMIO/DMA pages) are reference counted with a binary tree.
 
 pub use crate::arch::{Page, PAGE_SIZE};
-use core::cell::UnsafeCell;
-use core::num::NonZeroUsize;
-use core::ptr::{self, NonNull};
-use core::{mem, slice};
 
 pub mod reserved;
 
@@ -71,10 +67,9 @@ pub unsafe fn mem_add_ranges(ranges: &mut [PPNRange]) {
 	ALLOCATOR = Some(Mutex::new(Allocator::new(ranges).unwrap()));
 }
 
-/// Allocate an area, i.e. a range of pages. This area is aligned such that all bits below
-/// `PAGE_SIZE << order`` are zero.
+/// Allocate a single page.
 #[optimize(speed)]
-pub fn mem_allocate(order: u8) -> Result<PPN, AllocateError> {
+pub fn allocate() -> Result<PPN, AllocateError> {
 	#[cfg(debug_assertions)]
 	unsafe {
 		Ok(ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().alloc().unwrap())
@@ -83,10 +78,6 @@ pub fn mem_allocate(order: u8) -> Result<PPN, AllocateError> {
 	unsafe {
 		Ok(ALLOCATOR.as_ref().unwrap_unchecked().lock().alloc().unwrap())
 	}
-}
-
-pub fn allocate() -> Result<PPN, AllocateError> {
-	mem_allocate(0)
 }
 
 /// Allocate a number of pages. The pages are not necessarily contiguous. To avoid needing to
@@ -112,16 +103,16 @@ where
 	Ok(())
 }
 
-/// Dereference an area, i.e. a range of pages. If the reference count reaches zero, the area is
-/// zeroed out and deallocated.
+/// Deallocate a page
+///
+/// ## Safety
+///
+/// The page is no longer in use and hasn't been freed yet.
 #[optimize(speed)]
-pub fn mem_deallocate(page: PPN) {
+#[allow(dead_code)]
+pub unsafe fn deallocate(page: PPN) {
 	#[cfg(debug_assertions)]
-	unsafe {
-		ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().free(page)
-	}
+	ALLOCATOR.as_ref().expect("No initialized PMM").lock().free(page);
 	#[cfg(not(debug_assertions))]
-	unsafe {
-		ALLOCATOR.as_ref().unwrap_unchecked().lock().free(page)
-	}
+	ALLOCATOR.as_ref().unwrap_unchecked().lock().free(page);
 }

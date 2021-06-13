@@ -1,12 +1,10 @@
 //! Management of shared pages.
 
-use super::{mem_allocate, mem_deallocate, AllocateError, PPN};
+use super::{AllocateError, PPN};
 use super::reserved::{SHARED_COUNTERS, SHARED_ALLOC};
-use crate::arch::{Page, PAGE_SIZE, PAGE_MASK, PAGE_BITS};
-use crate::sync::Mutex;
+use crate::arch::PAGE_BITS;
 use core::fmt;
 use core::mem;
-use core::num::NonZeroU16;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicI16, AtomicU32, Ordering};
 
@@ -53,6 +51,7 @@ impl SharedPPN {
 
 	/// Attempt to increase the reference count of this page. It may fail if the counter would
 	/// overflow.
+	#[allow(dead_code)]
 	pub fn try_clone(&self) -> Result<Self, ReferenceCountOverflow> {
 		// SAFETY: The pointer is valid: it was valid at the time of allocation and
 		// it cannot have been freed yet (otherwise this function couldn't be called).

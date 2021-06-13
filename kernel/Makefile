@@ -125,12 +125,9 @@ expand-%:
 build-riscv64:
 	$(CARGO)
 	fallocate -l 10MB $(IMG)
-	#mformat -i $(IMG) ::
-	#mcopy -i $(IMG) $(KERNEL) ::
 
 build-debug-riscv64:
 	$(CARGO_DEBUG)
-	#genisoimage -o $(ISO) $(KERNEL_DEBUG)
 
 run-riscv64: build-riscv64 mkboot
 	@echo Enter Ctrl-A + X to quit

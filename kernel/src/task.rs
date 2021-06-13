@@ -18,20 +18,11 @@
 //! it.
 
 use crate::arch::{self, Page, PAGE_SIZE, RWX};
-use crate::memory::{self, AllocateError, PPN};
+use crate::memory::{self, AllocateError};
 use core::mem;
 use core::num::NonZeroU8;
 use core::sync::atomic;
 use core::ptr::NonNull;
-
-/// The fixed amount of page mappings. Some are mapped inside the `Task` structure itself to
-/// improve the space usage of small tasks.
-///
-/// This is set to 16
-const FIXED_PAGE_MAP_SIZE: usize = 16;
-
-/// The order (i.e. size) of each `Task` structure.
-const TASK_PAGE_ORDER: u8 = 1;
 
 /// A global counter for assigning Task IDs.
 // TODO handle wrap around + try to keep TIDs low
@@ -39,7 +30,7 @@ static TASK_ID_COUNTER: atomic::AtomicU32 = atomic::AtomicU32::new(0);
 
 /// A wrapper around a task pointer.
 #[derive(Clone)]
-#[repr(transparent)]
+#[repr(C)]
 pub struct Task(NonNull<TaskData>);
 
 /// State that can be shared between multiple tasks.
@@ -99,7 +90,9 @@ pub struct TaskData {
 
 union ClientRequestEntryData {
 	pages: Option<NonNull<Page>>,
+	#[allow(dead_code)]
 	name: *const u8,
+	#[allow(dead_code)]
 	uuid: *const u8,
 }
 
@@ -118,13 +111,16 @@ struct ClientRequestEntry {
 }
 
 union ClientCompletionEntryData {
+	#[allow(dead_code)]
 	pages: Option<NonNull<Page>>,
+	#[allow(dead_code)]
 	file_handle: usize,
 }
 
 /// A client completion entry.
 #[repr(align(32))]
 #[repr(C)]
+#[allow(dead_code)]
 struct ClientCompletionEntry {
 	data: ClientCompletionEntryData,
 	length: usize,
@@ -134,8 +130,6 @@ struct ClientCompletionEntry {
 
 const _SIZE_CHECK_CRE: usize = 0 - (64 - mem::size_of::<ClientRequestEntry>());
 const _SIZE_CHECK_CCE: usize = 0 - (32 - mem::size_of::<ClientCompletionEntry>());
-
-struct NoTasks;
 
 impl Default for RingIndex {
 	fn default() -> Self {
@@ -173,7 +167,7 @@ impl Task {
 		// FIXME may leak memory on alloc error.
 		let task_data = memory::allocate()?;
 		let stack = memory::allocate()?;
-		let mut vms = arch::VirtualMemorySystem::current();
+		let vms = arch::VirtualMemorySystem::current();
 		arch::VirtualMemorySystem::add(STACK_ADDRESS, stack, RWX::RW, false, false).unwrap();
 		arch::VirtualMemorySystem::add(TASK_DATA_ADDRESS, task_data, RWX::RW, false, false).unwrap();
 		let task_data = TASK_DATA_ADDRESS.cast();
@@ -202,11 +196,6 @@ impl Task {
 		Ok(task)
 	}
 
-	/// Add a memory mapping to this task.
-	pub fn add_mapping(&self, address: NonNull<Page>, page: PPN, rwx: arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
-		arch::VirtualMemorySystem::add(address, page, rwx, true, false)
-	}
-
 	/// Set the program counter of this task to the given address.
 	pub fn set_pc(&self, address: *const ()) {
 		self.inner().register_state.set_pc(address);
@@ -222,7 +211,7 @@ impl Task {
 			let cqi = &mut task.inner().client_request_index;
 			loop {
 				let cq = &mut cq[cqi.get()];
-				if let Some(op) = cq.opcode {
+				if let Some(_op) = cq.opcode {
 					// Just assume write for now.
 					let s = unsafe { cq.data.pages.unwrap().cast() };
 					let s = unsafe { core::slice::from_raw_parts(s.as_ptr(), cq.length) };
@@ -241,19 +230,18 @@ impl Task {
 	}
 
 	/// Insert a new task right after the current one. This removes it from any other task lists.
-	pub fn insert(&self, mut task: Task) {
-		unsafe {
-			// Remove from current list
-			task.inner().prev_task.inner().next_task = task.inner().next_task.clone();
-			task.inner().next_task.inner().prev_task = task.inner().prev_task.clone();
-			// Insert in new list
-			let prev = self.inner().prev_task.clone();
-			let next = self.inner().next_task.clone();
-			task.inner().prev_task = prev.clone();
-			task.inner().next_task = next.clone();
-			prev.inner().next_task = task.clone();
-			next.inner().prev_task = task;
-		}
+	#[allow(dead_code)]
+	pub fn insert(&self, task: Task) {
+		// Remove from current list
+		task.inner().prev_task.inner().next_task = task.inner().next_task.clone();
+		task.inner().next_task.inner().prev_task = task.inner().prev_task.clone();
+		// Insert in new list
+		let prev = self.inner().prev_task.clone();
+		let next = self.inner().next_task.clone();
+		task.inner().prev_task = prev.clone();
+		task.inner().next_task = next.clone();
+		prev.inner().next_task = task.clone();
+		next.inner().prev_task = task;
 	}
 
 	/// Allocate private memory at the given virtual address.
@@ -261,20 +249,11 @@ impl Task {
 		self.inner().shared_state.virtual_memory.allocate(address, count, rwx)
 	}
 
-	/// Allocate shared memory at the given virtual address.
-	pub fn allocate_shared_memory(&self, address: NonNull<crate::arch::Page>, count: usize, rwx: crate::arch::RWX) -> Result<(), ()> {
-		self.inner().shared_state.virtual_memory.allocate_shared(address, count, rwx)
-	}
-
 	/// Deallocate memory
 	pub fn deallocate_memory(&self, address: NonNull<crate::arch::Page>, count: usize) -> Result<(), ()> {
+		let _ = (address, count);
 		todo!()
 		//self.inner().shared_state.virtual_memory.deallocate(address, count)
-	}
-
-	/// Return the ID of this task
-	pub fn id(&self) -> u32 {
-		self.inner().id
 	}
 
 	/// Set the task client request and completion buffer pointers and sizes.

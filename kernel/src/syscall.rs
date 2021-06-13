@@ -2,9 +2,7 @@
 //!
 //! This module contains generic code. Arch-specific code is located in [`arch`](crate::arch)
 
-use crate::{arch, task};
-use core::convert::TryFrom;
-use core::num::NonZeroU8;
+use crate::task;
 use core::ptr::NonNull;
 
 /// The type of a syscall, specifically the amount and type of arguments it takes.
@@ -156,7 +154,7 @@ mod sys {
 
 	sys! {
 		/// Resize the task's requester buffers to be able to hold the given amount of entries.
-		[_] io_resize_responder(a0) {
+		[_] io_resize_responder() {
 			todo!();
 		}
 	}
@@ -167,9 +165,11 @@ mod sys {
 			const PROTECT_R: usize = 0x1;
 			const PROTECT_W: usize = 0x2;
 			const PROTECT_X: usize = 0x4;
-			const SHAREABLE: usize = 0x8;
+			#[allow(dead_code)]
 			const MEGAPAGE: usize = 0x10;
+			#[allow(dead_code)]
 			const GIGAPAGE: usize = 0x20;
+			#[allow(dead_code)]
 			const TERAPAGE: usize = 0x30;
 			log!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
 			use crate::arch::RWX;
@@ -185,11 +185,7 @@ mod sys {
 				f if f == PROTECT_R | PROTECT_W | PROTECT_X => RWX::RWX,
 				_ => return Return(Status::MemoryInvalidProtectionFlags, 0),
 			};
-			if flags & SHAREABLE > 0 {
-				task.allocate_shared_memory(address, count, rwx).unwrap();
-			} else {
-				task.allocate_memory(address, count, rwx).unwrap();
-			}
+			task.allocate_memory(address, count, rwx).unwrap();
 			Return(Status::Ok, address.as_ptr() as usize)
 		}
 	}
@@ -207,13 +203,13 @@ mod sys {
 	}
 
 	sys! {
-		[task] mem_get_flags() {
+		[_] mem_get_flags() {
 			todo!()
 		}
 	}
 
 	sys! {
-		[task] mem_set_flags() {
+		[_] mem_set_flags() {
 			todo!()
 		}
 	}

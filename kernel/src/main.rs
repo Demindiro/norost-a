@@ -4,15 +4,12 @@
 #![feature(alloc_layout_extra)]
 #![feature(asm)]
 #![feature(bindings_after_at)]
-#![feature(const_generics)]
-#![feature(const_evaluatable_checked)]
 #![feature(const_option)]
 #![feature(const_panic)]
 #![feature(const_raw_ptr_to_usize_cast)]
 #![feature(custom_test_frameworks)]
 #![feature(destructuring_assignment)]
 #![feature(dropck_eyepatch)]
-#![feature(inline_const)]
 #![feature(global_asm)]
 #![feature(lang_items)]
 #![feature(linkage)]
@@ -56,26 +53,18 @@ macro_rules! test {
 #[macro_use]
 mod log;
 
-mod alloc;
 mod arch;
 mod driver;
 mod elf;
 mod syscall;
-mod io;
 mod memory;
 mod powerstate;
 mod sync;
 mod task;
 mod util;
 
-use core::cell::UnsafeCell;
 use core::convert::TryInto;
-use core::fmt::Write;
-use core::num::NonZeroUsize;
-use core::{mem, ops, panic, ptr};
-
-/// The default amount of kernel heap memory for the default allocator.
-const HEAP_MEM_MAX: usize = 0x100_000;
+use core::{mem, panic, ptr};
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
@@ -143,7 +132,7 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 
 #[no_mangle]
 #[cfg(not(test))]
-extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_size: usize) {
+extern "C" fn main(_hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_size: usize) {
 
 	// Initialize trap table immediately so we can catch errors as early as possible.
 	arch::init();
@@ -198,6 +187,9 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 
 	let mut heap = None;
 	let mut reserved_memory = [(0, 0); 16];
+
+	// TODO see comment at reserved_memory_regions function.
+	dtb.reserved_memory_regions().for_each(|_| ());
 
 	while let Some(mut node) = root.next_child_node() {
 		if node.name.starts_with("reserved-memory")  {
@@ -328,13 +320,13 @@ extern "C" fn main(hart_id: usize, dtb: *const u8, initfs: *const u8, initfs_siz
 	memory::reserved::dump_vms_map();
 
 	// Initialize the memory manager
-	let (address, size) = heap.expect("No memory device (check the DTB!)");
+	//let (address, size) = heap.expect("No memory device (check the DTB!)");
 	// FIXME this is utter shit
 	let (address, size) = (0x8400_0000, 256 * arch::PAGE_SIZE);
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
-	let mut mm = unsafe { memory::PPNRange::from_ptr(address, (size / arch::PAGE_SIZE).try_into().unwrap()) };
-	let mm = unsafe { memory::mem_add_ranges(&mut [mm]) };
+	let mm = unsafe { memory::PPNRange::from_ptr(address, (size / arch::PAGE_SIZE).try_into().unwrap()) };
+	unsafe { memory::mem_add_ranges(&mut [mm]) };
 
 	// Log some of the properties we just fetched
 	log!("Device model: '{}'", model);
