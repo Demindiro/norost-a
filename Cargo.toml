@@ -1,0 +1,33 @@
+[package]
+name = "simple_endian"
+version = "0.2.0"
+authors = ["Rex Lunae <rexlunae@gmail.com>"]
+edition = "2018"
+license = "MIT"
+description = "A create for defining endianness within your data structures, to make handling portable data structures simpler."
+repository = "https://github.com/rexlunae/simple-endian-rs"
+keywords = ["endian", "byteorder", "big-endian", "little-endian"]
+documentation = "https://docs.rs/simple_endian/"
+homepage = "https://github.com/rexlunae/simple-endian-rs"
+readme = "README.md"
+
+[dependencies]
+
+[dev-dependencies]
+memmap = "0.7"
+
+[features]
+default = ["bitwise", "comparisons", "format", "math_ops",
+    "neg_ops", "shift_ops", "both_endian", "float_impls", "integer_impls", "byte_impls"]
+bitwise = ["integer_impls"]
+comparisons = []
+format = []
+math_ops= []
+neg_ops = []
+shift_ops = []
+big_endian = []
+little_endian = []
+both_endian = ["big_endian", "little_endian"]
+float_impls = ["integer_impls"]
+integer_impls = []
+byte_impls = []
