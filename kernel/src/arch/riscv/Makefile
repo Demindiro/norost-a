@@ -20,7 +20,9 @@ QEMU=qemu-system-riscv64 \
 		-m 256M \
 		-smp 1 \
 		-bios $(FIRMWARE) \
-		-kernel $(PWD)/../target/kernel.bin
+		-kernel $(PWD)/../target/kernel.bin \
+		-drive file=$(VIRTIO_DISK),format=raw,if=none,id=disk0 \
+		-device virtio-blk-pci,drive=disk0
 
 CARGO=cargo rustc \
 	--release \
@@ -36,8 +38,8 @@ CARGO=cargo rustc \
 default: build
 
 dump-dtb:
-	$(QEMU) --machine dumpdtb=$(OUTPUT)/machine.dtb
-	dtc -I dtb -O dts -o $(OUTPUT)/machine.dts $(OUTPUT)/machine.dtb
+	$(QEMU) --machine dumpdtb=/tmp/machine.dtb
+	dtc -I dtb -O dts -o /tmp/machine.dts /tmp/machine.dtb
 
 build:
 	$(CARGO)
@@ -58,13 +60,13 @@ test:
 	$(QEMU) $(QEMU_OPT)
 
 objdump:
-	$(OBJDUMP) -C $(OBJDUMP_OPT) $(OUTPUT)
+	$(OBJDUMP) -C $(OBJDUMP_OPT) ../target/$(RUST_TARGET)/release/kernel
 
 nm:
 	$(NM) -C $(NM_OPT) $(KERNEL)
 
 readelf:
-	$(READELF) -C $(READELF_OPT) $(OUTPUT)
+	$(READELF) -C $(READELF_OPT) ../target/$(RUST_TARGET)/release/kernel
 
 strip:
 	$(STRIP) -x $(KERNEL)

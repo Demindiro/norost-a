@@ -168,7 +168,7 @@ range! {
 range! {
 	limit = 0xffff_ff80_0000_0000,
 	[GLOBAL]
-	KERNEL => 1 << 16,
+	KERNEL => 1 << 17,
 	PMM_BITMAP => 1 << (44 - 12 - 3),
 	PMM_STACK => super::allocator::Stacks::MEM_TOTAL_SIZE * MAX_HARTS,
 	SHARED_COUNTERS => 1 << (44 - 12 + 2),
