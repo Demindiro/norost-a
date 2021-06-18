@@ -2,8 +2,11 @@
 
 members = [
 	"kernel",
+	"lib/rust/kernel",
+	"lib/rust/pci",
+	"lib/rust/virtio",
+	"services/init/hello_world_virtio",
 ]
-
 
 [profile.dev]
 opt-level = 3

@@ -73,7 +73,7 @@
 .equ		DCSR,			0x7b0
 .equ		DPC,			0x7b1
 
-.equ		SYSCALL_MAX,			8
+.equ		SYSCALL_MAX,			16
 .equ		SYSCALL_ERR_NOCALL, 	1
 
 .globl trap_handler

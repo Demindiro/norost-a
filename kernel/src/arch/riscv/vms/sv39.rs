@@ -10,7 +10,7 @@
 use super::{AddError, RWX};
 use crate::arch;
 use crate::arch::Page;
-use crate::memory::{self, AllocateError, PPN, SharedPPN};
+use crate::memory::{self, AllocateError, PPN, PPNRange, SharedPPN};
 use crate::memory::reserved::{self, GLOBAL, VMM_ROOT};
 use core::convert::TryFrom;
 use core::mem;
@@ -441,14 +441,87 @@ impl Sv39 {
 		Ok(NonNull::from(pte))
 	}
 
-	/// Add a mapping. If no virtual address is given, the first available
-	/// entry with enough space is used.
+	/// Uses HIGHMEM_B
+	fn get_pte_alloc_mega(address: NonNull<Page>) -> Result<NonNull<Leaf>, AddError> {
+		let va = VirtualAddress(address.as_ptr() as u64);
+
+		// PPN[2]
+		let pte = &mut unsafe { &mut *ROOT.as_ptr() }[va.ppn_2()];
+		if !pte.is_valid() {
+			let ppn = memory::allocate().map_err(AddError::AllocateError)?;
+			*pte = Entry::new_table(ppn);
+		} else if !pte.is_table() {
+			return Err(AddError::Overlaps);
+		}
+
+		// PPN[1]
+		let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
+		unsafe { Self::map_highmem_b(Some(&ppn)) };
+		Self::flush_highmem_b();
+		let tbl = unsafe { Self::translate_highmem_b(&ppn).cast::<[Leaf; 512]>() };
+		let tbl = &mut unsafe { &mut *tbl.as_ptr() };
+		let pte = &mut tbl[va.ppn_1()];
+		Ok(NonNull::from(pte))
+	}
+
+	/// Uses HIGHMEM_B
+	fn get_pte_alloc_giga(address: NonNull<Page>) -> Result<NonNull<Leaf>, AddError> {
+		let va = VirtualAddress(address.as_ptr() as u64);
+
+		// PPN[2]
+		let tbl = &mut unsafe { &mut *ROOT.cast::<[Leaf; 512]>().as_ptr() };
+		let pte = &mut tbl[va.ppn_2()];
+		Ok(NonNull::from(pte))
+	}
+
+	/// Add a single page mapping.
 	pub fn add(address: NonNull<Page>, ppn: PPN, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
 		let mut pte = Self::get_pte_alloc(address)?;
 		unsafe {
-			let e = pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps);
-			e
+			pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)
 		}
+	}
+
+	/// Map a range of pages. If the range of pages as well as the address are well aligned mega-
+	/// and/or gigapages will be used.
+	pub fn add_range(mut address: NonNull<Page>, mut ppn_range: PPNRange, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
+		let addr = address.as_ptr() as usize;
+		if addr & ((1 << 30) - 1) == 0
+			&& ppn_range.as_usize() & ((1 << 30) - 1) == 0
+			&& ppn_range.len() & ((1 << 18) - 1) == 0
+		{
+			while let Some(ppn) = ppn_range.pop_base() {
+				let len = ppn_range.forget_base((1 << 18) - 1);
+				assert_eq!(len + 1, 1 << 18);
+				let mut pte = Self::get_pte_alloc_giga(address)?;
+				unsafe {
+					pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)?;
+					address = NonNull::new_unchecked(address.as_ptr().add(1));
+				}
+			}
+		} else if addr & ((1 << 21) - 1) == 0
+			&& ppn_range.as_usize() & ((1 << 21) - 1) == 0
+			&& ppn_range.len() & ((1 << 9) - 1) == 0
+		{
+			while let Some(ppn) = ppn_range.pop_base() {
+				let len = ppn_range.forget_base((1 << 9) - 1);
+				assert_eq!(len + 1, 1 << 9);
+				let mut pte = Self::get_pte_alloc_mega(address)?;
+				unsafe {
+					pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)?;
+					address = NonNull::new_unchecked(address.as_ptr().add(1));
+				}
+			}
+		} else {
+			while let Some(ppn) = ppn_range.pop() {
+				let mut pte = Self::get_pte_alloc(address)?;
+				unsafe {
+					pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)?;
+					address = NonNull::new_unchecked(address.as_ptr().add(1));
+				}
+			}
+		}
+		Ok(())
 	}
 
 	/// Add a SharedPPN. If no virtual address is given, the first available
@@ -500,6 +573,46 @@ impl Sv39 {
 		} else {
 			Err(())
 		}
+	}
+
+	/// Write the physical *addresses* from the start of the virtual address into the given slice.
+	pub fn physical_addresses(address: NonNull<Page>, store: &mut [usize]) -> Result<(), ()> {
+		for (i, s) in store.iter_mut().enumerate() {
+			let va = VirtualAddress(address.as_ptr().wrapping_add(i) as u64);
+
+			// VPN[2]
+			let pte = &unsafe { ROOT.as_ref() }[va.ppn_2()];
+			if !pte.is_valid() {
+				return Err(());
+			} else if !pte.is_table() {
+				*s = (((pte.0 & !0x3ff) << 2) | (va.0 & ((1 << 30) - 1))) as usize;
+				continue;
+			}
+
+			// VPN[1]
+			let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
+			unsafe { Self::map_highmem_a(Some(&ppn)) };
+			Self::flush_highmem_a();
+			let tbl = unsafe { Self::translate_highmem_a(&ppn).cast::<[Entry; 512]>() };
+			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
+			let pte = &mut tbl[va.ppn_1()];
+			if !pte.is_valid() {
+				return Err(());
+			} else if !pte.is_table() {
+				*s = (((pte.0 & !0x3ff) << 2) | (va.0 & ((1 << 21) - 1))) as usize;
+				continue;
+			}
+
+			// VPN[0]
+			let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
+			unsafe { Self::map_highmem_a(Some(&ppn)) };
+			Self::flush_highmem_a();
+			let tbl = unsafe { Self::translate_highmem_a(&ppn).cast::<[Leaf; 512]>() };
+			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
+			let pte = &mut tbl[va.ppn_0()];
+			*s = ((pte.0 & !0x3ff) << 2) as usize;
+		}
+		Ok(())
 	}
 
 	/// Begin mapping a range of pages with PPNs passed from a function. Some of the PPNs may be

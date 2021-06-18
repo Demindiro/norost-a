@@ -83,6 +83,43 @@ impl PPNRange {
 			PPN(self.start + c)
 		})
 	}
+
+	/// Return the bottom PPN and decrement the count.
+	pub fn pop_base(&mut self) -> Option<PPN> {
+		self.count.checked_sub(1).map(|c| {
+			self.count = c;
+			let ppn = PPN(self.start);
+			self.start += 1;
+			ppn
+		})
+	}
+
+	/// Return the start address of this range as a usize
+	pub fn as_usize(&self) -> usize {
+		(self.start as usize) << 12
+	}
+
+	/// Forget about the last N PPNs and return the amount of PPNs that actually got removed.
+	#[must_use]
+	#[track_caller]
+	#[inline]
+	pub fn forget_base(&mut self, count: usize) -> usize {
+		use core::convert::TryInto;
+		let count = count.try_into().unwrap();
+		if let Some(c) = self.count.checked_sub(count) {
+			self.count = c;
+			self.start += count;
+			count
+		} else {
+			core::mem::replace(&mut self.count, 0)
+		}.try_into().unwrap()
+	}
+
+	/// Return the amount of pages this range spans.
+	#[must_use]
+	pub fn len(&self) -> usize {
+		self.count as usize
+	}
 }
 
 impl fmt::Debug for PPNRange {

@@ -1,1 +1,1 @@
-../services/init/hello_world/build/init
+../target/riscv64gc-unknown-none-elf/release/hello_world_virtio

@@ -176,6 +176,11 @@ impl DeviceTree {
 		};
 		Interpreter { pc, strings }
 	}
+
+	/// Return the total size of the FDT
+	pub fn total_size(&self) -> usize {
+		self.header.total_size.get() as usize
+	}
 }
 
 impl StringsBlock {

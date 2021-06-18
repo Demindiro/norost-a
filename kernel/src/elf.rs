@@ -218,10 +218,18 @@ pub fn create_task(data: &[u8]) -> crate::task::Task {
 			_ => unreachable!(),
 		};
 
-		assert_eq!(header.offset & arch::PAGE_MASK, 0, "Offset is not aligned");
-		let from = NonNull::from(&data[header.offset..][..header.file_size]).cast();
-		let to = NonNull::new(header.virtual_address as *mut _).unwrap();
-		arch::VirtualMemorySystem::alias_address(from, to, rwx, true, false).unwrap();
+		assert_eq!(
+			header.offset & arch::PAGE_MASK,
+			header.virtual_address & arch::PAGE_MASK,
+			"Offset is not aligned"
+		);
+		let mut from = NonNull::from(&data[header.offset & !arch::PAGE_MASK..]).cast();
+		let mut to = NonNull::new((header.virtual_address & !arch::PAGE_MASK) as *mut _).unwrap();
+		for i in 0..(header.memory_size + (header.offset & arch::PAGE_MASK) + arch::PAGE_MASK) / arch::PAGE_SIZE {
+			arch::VirtualMemorySystem::alias_address(from, to, rwx, true, false).unwrap();
+			from = unsafe { NonNull::new_unchecked(from.as_ptr().add(1)) };
+			to = unsafe { NonNull::new_unchecked(to.as_ptr().add(1)) };
+		}
 	}
 
 	task.set_pc(header.entry as *const _);
