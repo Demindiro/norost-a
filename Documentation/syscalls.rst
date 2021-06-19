@@ -44,13 +44,7 @@ Listing
 +------------------------+----+
 | mem_set_flags_         |  6 |
 +------------------------+----+
-| dev_reserve_           | xx |
-+------------------------+----+
-| dev_release_           | xx |
-+------------------------+----+
-| dev_list_              | xx |
-+------------------------+----+
-| dev_info_              | xx |
+| mem_physical_address_  |  7 |
 +------------------------+----+
 | task_id_               | xx |
 +------------------------+----+
@@ -64,13 +58,7 @@ Listing
 +------------------------+----+
 | task_suspend_          | xx |
 +------------------------+----+
-| task_exit_             | xx |
-+------------------------+----+
-| task_signal_           | xx |
-+------------------------+----+
-| task_signal_handler_   | xx |
-+------------------------+----+
-| task_pin_cpu_          | xx |
+| sys_direct_alloc_      | xx |
 +------------------------+----+
 
 
@@ -264,87 +252,22 @@ Set the flags of the given page. The flags are shared between all pages of
 an allocation.
 
 
-dev_reserve
-'''''''''''
+mem_physical_address
+''''''''''''''''''''
 
 +--------+---------------------------+----------------------------+
 | **ID** |                        xx |                            |
 +--------+---------------------------+----------------------------+
-| **a0** | ``*mut mem_page``         | ``virtual_address``        |
+| **a0** | ``*const mem_page``       | ``virtual_address``        |
 +--------+---------------------------+----------------------------+
-| **a1** | ``usize``                 | ``device_id``              |
+| **a1** | ``*mut mem_ppn``          | ``physical_page_numbers``  |
 +--------+---------------------------+----------------------------+
-| **a2** | ``u8``                    | ``flags``                  |
+| **a2** | ``usize``                 | ``count``                  |
 +--------+---------------------------+----------------------------+
-| **r0** | ``dev_reserve_status``      | ``status``                 |
-+--------+---------------------------+----------------------------+
-
-Map the device with the ``device_id`` to the ``virtual_address``.
-
-
-dev_release
-'''''''''''
-
-+--------+---------------------------+----------------------------+
-| **ID** |                        xx |                            |
-+--------+---------------------------+----------------------------+
-| **a0** | ``*mut mem_page``         | ``virtual_address``        |
-+--------+---------------------------+----------------------------+
-| **r0** | ``dev_release_status``    | ``status``                 |
+| **r0** | ``mem_set_flags_status``  | ``status``                 |
 +--------+---------------------------+----------------------------+
 
-Unmap the device allocated at the ``virtual_address``.
-
-
-dev_list
-''''''''
-
-+--------+---------------------------+----------------------------+
-| **ID** |                        xx |                            |
-+--------+---------------------------+----------------------------+
-| **a0** | ``*mut u32``              | ``out``                    |
-+--------+---------------------------+----------------------------+
-| **a1** | ``usize``                 | ``count``                  |
-+--------+---------------------------+----------------------------+
-| **a2** | ``usize``                 | ``offset``                 |
-+--------+---------------------------+----------------------------+
-| **r0** | ``dev_list_status``       | ``status``                 |
-+--------+---------------------------+----------------------------+
-| **r1** | ``usize``                 | ``total``                  |
-+--------+---------------------------+----------------------------+
-
-Return a list of all devices by writing ``count`` IDs to ``out``. Each ID is
-a 32-bit unsigned integer. ``total`` indicates the total amount of devices
-available.
-
-Each ID is sorted chronologically, so ``òffset`` can reliably be used if a
-needed device ID is not present in ``out``.
-
-To only get the total amount of devices, ``count`` can be set to 0 to prevent
-writing to ``out``.
-
-
-dev_info
-''''''''
-
-+--------+---------------------------+----------------------------+
-| **ID** |                        xx |                            |
-+--------+---------------------------+----------------------------+
-| **a0** | ``*mut usize``            | ``out``                    |
-+--------+---------------------------+----------------------------+
-| **a1** | ``usize``                 | ``out_size``               |
-+--------+---------------------------+----------------------------+
-| **r0** | ``dev_info_status``       | ``status``                 |
-+--------+---------------------------+----------------------------+
-| **r1** | ``usize``                 | ``size``                   |
-+--------+---------------------------+----------------------------+
-
-Writes info about the device ``device_id`` to ``out``, which must be at
-least ``out_size`` bytes large and aligned to a ``usize`` boundary.
-
-On success, ``size`` indicates how many bytes were actually written. On
-failure due to an undersized buffer, it indicates how many bytes are needed
-to write the information.
+Return the physical page numbers backing a virtual address range.
 
 
 task_id
@@ -455,44 +378,25 @@ task_suspend
 +--------+---------------------------+----------------------------+
 
 
-task_signal
-'''''''''''
+sys_direct_alloc
+''''''''''''''''
 
 +--------+---------------------------+----------------------------+
 | **ID** |                        xx |                            |
 +--------+---------------------------+----------------------------+
-| **a0** | ``usize``                 | ``task_id``                |
+| **a0** | ``*const mem_page``       | ``virtual_address``        |
 +--------+---------------------------+----------------------------+
-| **a1** | ``u8``                    | ``signal_id``              |
+| **a1** | ``usize``                 | ``physical_page_number``   |
 +--------+---------------------------+----------------------------+
-| **a2** | ``usize``                 | ``arg0``                   |
+| **a2** | ``usize``                 | ``page_count``             |
 +--------+---------------------------+----------------------------+
-| **a3** | ``usize``                 | ``arg1``                   |
-+--------+---------------------------+----------------------------+
-| **r0** | ``task_signal_status``    | ``status``                 |
+| **r0** | ``task_destroy_status``   | ``status``                 |
 +--------+---------------------------+----------------------------+
 
-Sends a signal to a task.
+Directly maps a range of physical addresses into the task's address space. This
+call is very dangerous and may only be used by drivers.
 
-
-task_signal_handler
-'''''''''''''''''''
-
-+--------+---------------------------------+--------------------+
-| **ID** |                              xx |                    |
-+--------+---------------------------------+--------------------+
-| **a0** | ``u8``                          | ``signal_id``      |
-+--------+---------------------------------+--------------------+
-| **a1** | ``*const fn(u8, usize, usize)`` | ``signal_handler`` |
-+--------+---------------------------------+--------------------+
-| **r0** | ``task_set_handler_status``     | ``status``         |
-+--------+---------------------------------+--------------------+
-| **r1** | ``*const fn(u8, usize, usize)`` | ``prev_handler``   |
-+--------+---------------------------------+--------------------+
-
-Set a handler for a signal. This overrides the default handler.
-
-Passing ``null`` restores the default handler.
+Note that the call accepts **page numbers**, not addresses!
 
 
 Error codes
