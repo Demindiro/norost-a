@@ -175,6 +175,7 @@ range! {
 	SHARED_ALLOC => 1 << (44 - 12 - 12 + 1),
 	HART_STACKS => (1 << 12) * MAX_HARTS * 2, // Reserve extra space for guard pages.
 	DEVICE_TREE => 1 << 16,
+	DEVICE_LIST => 1 << 16,
 	[LOCAL]
 	HIGHMEM_A => 1 << 30,
 	HIGHMEM_B => 1 << 30,

@@ -12,10 +12,12 @@
 //!
 //! [dt spec]: https://github.com/devicetree-org/devicetree-specification/releases/download/v0.3/devicetree-specification-v0.3.pdf
 
+#![no_std]
+
 // TODO we should add range checks just in case a manufacturer screws up their DTB.
 
-use crate::util::{self, BigEndianU32, BigEndianU64};
 use core::slice;
+use simple_endian::{u32be, u64be};
 
 /// A structure representing a device tree.
 pub struct DeviceTree {
@@ -35,33 +37,33 @@ pub enum ParseDTBError {
 #[repr(C)]
 struct Header {
 	/// A field that must contain `0xdOOdfeed`.
-	magic: BigEndianU32,
+	magic: u32be,
 	/// The total size of the DTB in bytes.
-	total_size: BigEndianU32,
+	total_size: u32be,
 	/// The offset of the [`StructureBlock`] from the beginning of the header in bytes.
-	offset_structure_block: BigEndianU32,
+	offset_structure_block: u32be,
 	/// The offset of the [`StringsBlock´] from the beginning of the header in bytes.
-	offset_strings_block: BigEndianU32,
+	offset_strings_block: u32be,
 	/// The offset of the [`MemoryReservationBlock`] from the beginning of the header in bytes.
-	offset_memory_reservation_block: BigEndianU32,
+	offset_memory_reservation_block: u32be,
 	/// The version of the DTB structure. Must be `17`.
-	version: BigEndianU32,
+	version: u32be,
 	/// The lowest version with which this DTB structure is backwards compatible. Must be `16`.
-	last_compatible_version: BigEndianU32,
+	last_compatible_version: u32be,
 	/// The physical ID of the boot CPU.
-	boot_cpu_id_physical: BigEndianU32,
+	boot_cpu_id_physical: u32be,
 	/// The size of the [`StringsBlock`] in bytes.
-	size_strings_block: BigEndianU32,
+	size_strings_block: u32be,
 	/// The size of the [`StructureBlock`] in bytes.
-	size_structure_block: BigEndianU32,
+	size_structure_block: u32be,
 }
 
 /// A structure indicating a reserved memory region entry.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct ReservedMemoryRegion {
-	pub address: BigEndianU64,
-	pub size: BigEndianU64,
+	pub address: u64be,
+	pub size: u64be,
 }
 
 /// A structure representing the "strings block" of the DTB.
@@ -72,7 +74,7 @@ struct StringsBlock {
 /// An interpreter to parse the tree inside the [`StructureBlock`].
 pub struct Interpreter {
 	/// The current pointer in the StructureBlock that is being parsed.
-	pc: *const BigEndianU32,
+	pc: *const u32be,
 	/// The address of the [`StringsBlock`]
 	strings: &'static StringsBlock,
 	/// The total amount of nodes parsed.
@@ -122,8 +124,8 @@ impl DeviceTree {
 	pub unsafe fn parse_dtb(address: *const u8) -> Result<Self, ParseDTBError> {
 		let header = &*(address as *const Header);
 
-		if header.magic.get() != Self::MAGIC {
-			return Err(ParseDTBError::BadMagic(header.magic.get()));
+		if header.magic != Self::MAGIC.into() {
+			return Err(ParseDTBError::BadMagic(header.magic.into()));
 		}
 
 		Ok(Self { header })
@@ -144,7 +146,7 @@ impl DeviceTree {
 			fn next(&mut self) -> Option<Self::Item> {
 				// SAFETY: The DTB is valid
 				let rmr = unsafe { *self.rmr };
-				if rmr.address.get() == 0 && rmr.size.get() == 0 {
+				if rmr.address == 0.into() && rmr.size == 0.into() {
 					None
 				} else {
 					// SAFETY: The DTB is valid
@@ -157,7 +159,7 @@ impl DeviceTree {
 		// SAFETY: The DTB is valid
 		let rmr = unsafe {
 			(self.header as *const _ as *const u8)
-				.add(self.header.offset_memory_reservation_block.get() as usize)
+				.add(u32::from(self.header.offset_memory_reservation_block) as usize)
 				.cast()
 		};
 
@@ -169,13 +171,13 @@ impl DeviceTree {
 		// SAFETY: The DTB is valid
 		let pc = unsafe {
 			(self.header as *const _ as *const u8)
-				.add(self.header.offset_structure_block.get() as usize)
+				.add(u32::from(self.header.offset_structure_block) as usize)
 				.cast()
 		};
 		// SAFETY: The DTB is valid
 		let strings = unsafe {
 			&*(self.header as *const _ as *const u8)
-				.add(self.header.offset_strings_block.get() as usize)
+				.add(u32::from(self.header.offset_strings_block) as usize)
 				.cast()
 		};
 		let (node_count, finished) = (0, false);
@@ -184,17 +186,17 @@ impl DeviceTree {
 
 	/// Return the total size of the FDT
 	pub fn total_size(&self) -> usize {
-		self.header.total_size.get() as usize
+		u32::from(self.header.total_size) as usize
 	}
 }
 
 impl StringsBlock {
 	/// Returns the string at the given offset
-	fn get<'a>(&'a self, offset: u32) -> &'a str {
+	fn into<'a>(&'a self, offset: u32) -> &'a str {
 		// SAFETY: The offset is in range.
 		unsafe {
 			let ptr = (self as *const _ as *const u8).add(offset as usize);
-			util::cstr_to_str(ptr).expect("String isn't valid UTF-8")
+			cstr_to_str(ptr).expect("String isn't valid UTF-8")
 		}
 	}
 }
@@ -214,7 +216,7 @@ impl Interpreter {
 	/// Return the current token
 	fn current(&self) -> u32 {
 		// SAFETY: the token tree is valid and the pointer is aligned
-		unsafe { *self.pc }.get()
+		unsafe { *self.pc }.into()
 	}
 
 	/// Advances the program counter by the given number of steps
@@ -253,7 +255,7 @@ impl Interpreter {
 				Self::TOKEN_BEGIN_NODE => {
 					let ptr = self.pc as *const u8;
 					// SAFETY: ptr points to a null-terminated byte string
-					let name = unsafe { util::cstr_to_str(ptr).expect("Invalid UTF-8 node name") };
+					let name = unsafe { cstr_to_str(ptr).expect("Invalid UTF-8 node name") };
 					let align = name.len() as u32 + 1; // Include null terminator
 					let align = (align + 3) & !3;
 					self.advance(align / 4);
@@ -300,7 +302,7 @@ impl Interpreter {
 				Self::TOKEN_PROP => {
 					let len = self.step();
 					let name = self.step();
-					let name = self.strings.get(name);
+					let name = self.strings.into(name);
 					let ptr = self.pc as *const u8;
 					// SAFETY: the pointer and length are valid.
 					let value = unsafe { slice::from_raw_parts(ptr, len as usize) };
@@ -372,4 +374,20 @@ impl Drop for Node<'_> {
 		while self.next_property().is_some() {}
 		while self.next_child_node().is_some() {}
 	}
+}
+
+/// Converts a null-terminated C string to a Rust `str`.
+///
+/// ## SAFETY
+///
+/// The pointer must remain valid for as long as the returned `str`
+pub unsafe fn cstr_to_str<'a>(cstr: *const u8) -> Result<&'a str, core::str::Utf8Error> {
+	let mut len = 0;
+	// SAFETY: the pointer remains withing a valid range
+	while *cstr.add(len) != 0 {
+		len += 1;
+	}
+	// SAFETY: The pointer and length are both valid
+	let s = slice::from_raw_parts(cstr, len);
+	core::str::from_utf8(s)
 }

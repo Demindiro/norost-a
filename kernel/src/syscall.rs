@@ -33,11 +33,11 @@ pub static TABLE: [Syscall; TABLE_LEN] = [
 	sys::mem_physical_addresses,// 7
 	sys::placeholder,			// 8
 	sys::placeholder,			// 9
-	sys::dev_reserve,			// 10
+	sys::placeholder,			// 10
 	sys::placeholder,			// 11
 	sys::dev_dma_alloc,			// 12
-	sys::placeholder,			// 13
-	sys::placeholder,			// 14
+	sys::sys_platform_info,		// 13
+	sys::sys_direct_alloc,		// 14
 	sys::sys_log,				// 15
 ];
 
@@ -367,6 +367,30 @@ mod sys {
 				arch::VirtualMemorySystem::add(a, p, arch::RWX::RW, true, false);
 			}
 			Return(Status::Ok, a as usize)
+		}
+	}
+
+	sys! {
+		[_] sys_platform_info(address, _max_count) {
+			log!("sys_platform_info 0x{:x}, {}", address, _max_count);
+			use crate::{PLATFORM_INFO_SIZE, PLATFORM_INFO_PHYS_PTR};
+			use crate::memory::PPN;
+			for i in 0..*PLATFORM_INFO_SIZE {
+				let a = NonNull::new((address as *mut arch::Page).wrapping_add(i)).unwrap();
+				let p = unsafe { PPN::from_ptr(*PLATFORM_INFO_PHYS_PTR + (i << arch::PAGE_BITS)) };
+				arch::VirtualMemorySystem::add(a, p, arch::RWX::R, true, false).unwrap();
+			}
+			Return(Status::Ok, *PLATFORM_INFO_SIZE)
+		}
+	}
+
+	sys! {
+		[_] sys_direct_alloc(address, ppn, count, _flags) {
+			use crate::memory::PPNRange;
+			log!("sys_direct_alloc 0x{:x}, 0x{:x}, {}, 0b{:b}", address, ppn << arch::PAGE_BITS, count, _flags);
+			let ppn = unsafe { PPNRange::from_ptr(ppn << arch::PAGE_BITS, count as u32).try_into().unwrap() };
+			arch::VirtualMemorySystem::add_range(NonNull::new(address as *mut _).unwrap(), ppn, arch::RWX::RW, true, false).unwrap();
+			Return(Status::Ok, 0)
 		}
 	}
 

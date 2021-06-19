@@ -58,10 +58,10 @@ syscall!(io_wait, 0, flags: u8, time: u64);
 syscall!(mem_alloc, 3, address: *mut Page, size: usize, flags: u8);
 syscall!(mem_physical_address, 7, address: *const Page, store: *mut usize, count: usize);
 
-syscall!(dev_reserve, 10, id: usize, reg: *mut Page, ranges: *const *mut Page, ranges_count: usize);
-syscall!(dev_mmio_map, 11, id: usize, size: usize, flags: u8);
 syscall!(dev_dma_alloc, 12, address: *mut Page, size: usize, flags: u8);
 
+syscall!(sys_platform_info, 13, address: *mut Page, max_count: usize);
+syscall!(sys_direct_alloc, 14, address: *mut Page, start_page: usize, count: usize, flags: u8);
 syscall!(sys_log, 15, string: *const u8, length: usize);
 
 /// Interface for sending messages to the kernel log.

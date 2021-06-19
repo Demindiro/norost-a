@@ -58,7 +58,9 @@ Listing
 +------------------------+----+
 | task_suspend_          | xx |
 +------------------------+----+
-| sys_direct_alloc_      | xx |
+| sys_direct_alloc_      | 14 |
++------------------------+----+
+| sys_log_               | 15 |
 +------------------------+----+
 
 
@@ -397,6 +399,23 @@ Directly maps a range of physical addresses into the task's address space. This
 call is very dangerous and may only be used by drivers.
 
 Note that the call accepts **page numbers**, not addresses!
+
+
+sys_log
+'''''''
+
++--------+---------------------------+----------------------------+
+| **ID** |                        xx |                            |
++--------+---------------------------+----------------------------+
+| **a0** | ``*const u8``             | ``message``                |
++--------+---------------------------+----------------------------+
+| **a1** | ``usize``                 | ``size``                   |
++--------+---------------------------+----------------------------+
+| **r0** | ``task_destroy_status``   | ``status``                 |
++--------+---------------------------+----------------------------+
+
+Send / put a message in the kernel's log. This is intended for drivers which
+may not have any other way to log their status.
 
 
 Error codes

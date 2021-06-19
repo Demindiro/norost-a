@@ -496,7 +496,7 @@ impl Sv39 {
 				let mut pte = Self::get_pte_alloc_giga(address)?;
 				unsafe {
 					pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)?;
-					address = NonNull::new_unchecked(address.as_ptr().add(1));
+					address = NonNull::new_unchecked(address.as_ptr().add(1 << 18));
 				}
 			}
 		} else if addr & ((1 << 21) - 1) == 0
@@ -509,7 +509,7 @@ impl Sv39 {
 				let mut pte = Self::get_pte_alloc_mega(address)?;
 				unsafe {
 					pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)?;
-					address = NonNull::new_unchecked(address.as_ptr().add(1));
+					address = NonNull::new_unchecked(address.as_ptr().add(1 << 9));
 				}
 			}
 		} else {

@@ -3,9 +3,17 @@
 version = 3
 
 [[package]]
+name = "device_tree"
+version = "0.1.0"
+dependencies = [
+ "simple_endian",
+]
+
+[[package]]
 name = "hello_world_virtio"
 version = "0.1.0"
 dependencies = [
+ "device_tree",
  "pci",
  "syscalls",
  "virtio",

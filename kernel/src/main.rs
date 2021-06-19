@@ -63,9 +63,27 @@ mod sync;
 mod task;
 mod util;
 
+use core::cell::UnsafeCell;
 use core::convert::TryInto;
 use core::{mem, panic, ptr};
+use core::ops;
 use core::ptr::NonNull;
+
+static PLATFORM_INFO_SIZE: OnceCell<usize> = OnceCell(UnsafeCell::new(0));
+static PLATFORM_INFO_PHYS_PTR: OnceCell<usize> = OnceCell(UnsafeCell::new(0));
+
+pub struct OnceCell<T>(UnsafeCell<T>);
+
+impl<T> ops::Deref for OnceCell<T> {
+	type Target = T;
+
+	fn deref(&self) -> &T {
+		unsafe { &*self.0.get() }
+	}
+}
+
+unsafe impl<T> Sync for OnceCell<T> {}
+
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
@@ -315,7 +333,7 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, initfs: *const u
 		}
 	}
 	mem::drop(root);
-	mem::drop(interpreter);
+	interpreter.finish();
 
 	memory::reserved::dump_vms_map();
 
@@ -332,6 +350,7 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, initfs: *const u
 	log!("Device model: '{}'", model);
 	log!("Boot arguments: '{}'", boot_args);
 	log!("Dumping logs on '{}'", stdout);
+	dbg!(interpreter.node_count());
 
 	let start = address;
 	let end = start + size;
@@ -339,7 +358,24 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, initfs: *const u
 
 	log!("initfs: {:p}, {}", initfs, initfs_size);
 
+	// Initialize the device list
+	struct IterProp<'a> {
+		properties: [Option<(&'a str, &'a [u32])>; 16],
+		counter: usize,
+	}
+
+	impl<'a> Iterator for IterProp<'a> {
+		type Item = (&'a str, &'a [u32]);
+
+		fn next(&mut self) -> Option<Self::Item> {
+			self.counter += 1;
+			self.properties[self.counter - 1]
+		}
+	}
+
 	// Remap FDT to kernel global space
+	unsafe { *PLATFORM_INFO_PHYS_PTR.0.get() = dtb_ptr as usize};
+	unsafe { *PLATFORM_INFO_SIZE.0.get() = (dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE };
 	for i in 0..(dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE {
 		unsafe {
 			let p = memory::PPN::from_ptr(dtb_ptr.add(i) as usize);
