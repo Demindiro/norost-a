@@ -10,7 +10,7 @@
 use super::{AddError, RWX};
 use crate::arch;
 use crate::arch::Page;
-use crate::memory::{self, AllocateError, PPN, PPNRange, SharedPPN};
+use crate::memory::{self, AllocateError, PPN, PPNBox, PPNRange, PPNDirect, SharedPPN};
 use crate::memory::reserved::{self, GLOBAL, VMM_ROOT};
 use core::convert::TryFrom;
 use core::mem;
@@ -40,8 +40,10 @@ const HIGHMEM_B: NonNull<Page> = reserved::HIGHMEM_B.start.cast();
 /// - 9 bits PPN[1]
 /// - 9 bits PPN[0]
 /// - 2 bits RSW, free for us to use
-///   - The MSb indicates whether the page's RWX flags are locked.
-///   - The LSb is currently unused.
+///   - 0b00 indicates a private mapping
+///   - 0b01 indicates a direct mapping
+///   - 0b10 indicates a shared mapping
+///   - 0b11 indicates a shared but locked mapping
 /// - 1 bit Dirty flag
 /// - 1 bit Accessed flag
 /// - 1 bit Global flag
@@ -154,12 +156,16 @@ pub enum PrivateOrShared {
 }
 
 impl Leaf {
-	const VALID_BIT: usize = 0;
-	const USERMODE_BIT: usize = 4;
-	const GLOBAL_BIT: usize = 5;
-	const ACCESSED_BIT: usize = 6;
-	const DIRTY_BIT: usize = 7;
-	const SHARED_BIT: usize = 8;
+	const VALID_BIT: u64 = 0;
+	const USERMODE_BIT: u64 = 4;
+	const GLOBAL_BIT: u64 = 5;
+	const ACCESSED_BIT: u64 = 6;
+	const DIRTY_BIT: u64 = 7;
+	const TYPE_MASK: u64 = 0b11 << 8;
+	const TYPE_PRIVATE: u64 = 0b00 << 8;
+	const TYPE_SHARED: u64 = 0b01 << 8;
+	const TYPE_SHARED_LOCKED: u64 = 0b10 << 8;
+	const TYPE_DIRECT: u64 = 0b11 << 8;
 
 	fn clear(&mut self) -> Result<PrivateOrShared, ()> {
 		if self.is_valid() {
@@ -175,36 +181,43 @@ impl Leaf {
 		}
 	}
 
+	fn set_generic(&mut self, ppn: PPNBox, rwx: RWX, usermode: bool, global: bool) {
+		self.0 = (ppn as u64) << 10;
+		self.0 |= 1 << Self::VALID_BIT;
+		self.0 |= u64::from(rwx);
+		self.0 |= (usermode as u64) << Self::USERMODE_BIT;
+		self.0 |= (global as u64) << Self::GLOBAL_BIT;
+		self.0 |= 1 << Self::ACCESSED_BIT;
+		self.0 |= 1 << Self::DIRTY_BIT;
+	}
+
 	fn set(&mut self, ppn: PPN, rwx: RWX, usermode: bool, global: bool) -> Result<(), ()> {
 		if !self.is_valid() {
-			let ppn = ppn.into_raw() as u64;
-			self.0 = ppn << 10;
-			self.0 |= 1 << Self::VALID_BIT;
-			self.0 |= u64::from(rwx);
-			self.0 |= (usermode as u64) << Self::USERMODE_BIT;
-			self.0 |= (global as u64) << Self::GLOBAL_BIT;
-			self.0 |= 1 << Self::ACCESSED_BIT;
-			self.0 |= 1 << Self::DIRTY_BIT;
+			self.set_generic(ppn.into_raw(), rwx, usermode, global);
+			self.0 |= Self::TYPE_PRIVATE;
 			Ok(())
 		} else {
 			Err(())
 		}
 	}
 
-	fn set_shared(&mut self, ppn: SharedPPN, rwx: RWX, usermode: bool, global: bool) -> Result<(), ()> {
+	fn set_shared(&mut self, ppn: SharedPPN, rwx: RWX, usermode: bool, global: bool, locked: bool) -> Result<(), ()> {
 		if !self.is_valid() {
-			let ppn = ppn.into_raw().into_raw() as u64;
-			self.0 = ppn << 10;
-			self.0 |= 1 << Self::VALID_BIT;
-			self.0 |= u64::from(rwx);
-			self.0 |= (usermode as u64) << Self::USERMODE_BIT;
-			self.0 |= (global as u64) << Self::GLOBAL_BIT;
-			self.0 |= 1 << Self::ACCESSED_BIT;
-			self.0 |= 1 << Self::DIRTY_BIT;
-			self.0 |= 1 << Self::SHARED_BIT;
+			self.set_generic(ppn.into_raw().into_raw(), rwx, usermode, global);
+			self.0 |= if locked { Self::TYPE_SHARED_LOCKED } else { Self::TYPE_SHARED };
 			Ok(())
 		} else {
 			Err(())
+		}
+	}
+
+	fn set_direct(&mut self, ppn: PPNDirect, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
+		if !self.is_valid() {
+			self.set_generic(ppn.into(), rwx, usermode, global);
+			self.0 |= Self::TYPE_DIRECT;
+			Ok(())
+		} else {
+			Err(AddError::Overlaps)
 		}
 	}
 
@@ -228,7 +241,7 @@ impl Leaf {
 
 	#[must_use]
 	fn is_shared(&self) -> bool {
-		self.0 & (1 << Self::SHARED_BIT) > 0
+		self.0 & Self::TYPE_SHARED > 0 || self.0 & Self::TYPE_SHARED_LOCKED > 0
 	}
 }
 
@@ -361,18 +374,6 @@ impl Sv39 {
 		Ok(Self(satp))
 	}
 
-	/// Allocate the given amount of private pages and insert it as virtual memory at the
-	/// given address.
-	pub fn allocate(&mut self, virtual_address: NonNull<Page>, count: usize, rwx: RWX) -> Result<(), AddError> {
-		let mut va = virtual_address;
-		// FIXME deallocate pages on failure.
-		memory::mem_allocate_range(count, |ppn| {
-			Self::add(va, ppn, rwx, true, false).unwrap();
-			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
-		}).unwrap();
-		Ok(())
-	}
-
 	/// Uses HIGHMEM_A
 	fn get_pte(address: NonNull<Page>) -> Result<NonNull<Leaf>, ()> {
 		let va = VirtualAddress(address.as_ptr() as u64);
@@ -474,6 +475,18 @@ impl Sv39 {
 		Ok(NonNull::from(pte))
 	}
 
+	/// Allocate the given amount of private pages and insert it as virtual memory at the
+	/// given address.
+	pub fn allocate(&mut self, virtual_address: NonNull<Page>, count: usize, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
+		   let mut va = virtual_address;
+		   // FIXME deallocate pages on failure.
+		   memory::mem_allocate_range(count, |ppn| {
+			   Self::add(va, ppn, rwx, true, false).unwrap();
+			   va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
+		   }).unwrap();
+		   Ok(())
+	}
+
 	/// Add a single page mapping.
 	pub fn add(address: NonNull<Page>, ppn: PPN, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
 		let mut pte = Self::get_pte_alloc(address)?;
@@ -482,42 +495,58 @@ impl Sv39 {
 		}
 	}
 
-	/// Map a range of pages. If the range of pages as well as the address are well aligned mega-
+	/// Map a range of pages directly. If the range of pages as well as the address are well aligned mega-
 	/// and/or gigapages will be used.
-	pub fn add_range(mut address: NonNull<Page>, mut ppn_range: PPNRange, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
+	pub fn add_direct(mut address: NonNull<Page>, mut ppn: PPNDirect, count: usize, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
+
+		let count = PPNBox::try_from(count).map_err(|_| AddError::OutOfRange)?;
+		let ppn_min = PPNBox::from(ppn);
+		let ppn_max = ppn_min.checked_add(count).ok_or(AddError::OutOfRange)?;
+
 		let addr = address.as_ptr() as usize;
 		if addr & ((1 << 30) - 1) == 0
-			&& ppn_range.as_usize() & ((1 << 30) - 1) == 0
-			&& ppn_range.len() & ((1 << 18) - 1) == 0
+			&& PPNBox::from(ppn_min) & ((1 << 18) - 1) == 0
+			&& PPNBox::from(ppn_max) & ((1 << 18) - 1) == 0
 		{
-			while let Some(ppn) = ppn_range.pop_base() {
-				let len = ppn_range.forget_base((1 << 18) - 1);
-				assert_eq!(len + 1, 1 << 18);
-				let mut pte = Self::get_pte_alloc_giga(address)?;
-				unsafe {
-					pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)?;
-					address = NonNull::new_unchecked(address.as_ptr().add(1 << 18));
+			let mut undo = #[cold] |err: AddError| todo!();
+			for ppn in (ppn_min..ppn_max).step_by(1 << 18).map(PPNDirect::from) {
+				match Self::get_pte_alloc_giga(address) {
+					Ok(mut pte) => unsafe {
+						if let Err(e) = pte.as_mut().set_direct(ppn, rwx, usermode, global) {
+							return undo(e);
+						}
+						address = NonNull::new_unchecked(address.as_ptr().add(1 << 18));
+					},
+					Err(e) => return undo(e),
 				}
 			}
 		} else if addr & ((1 << 21) - 1) == 0
-			&& ppn_range.as_usize() & ((1 << 21) - 1) == 0
-			&& ppn_range.len() & ((1 << 9) - 1) == 0
+			&& PPNBox::from(ppn_min) & ((1 << 9) - 1) == 0
+			&& PPNBox::from(ppn_max) & ((1 << 9) - 1) == 0
 		{
-			while let Some(ppn) = ppn_range.pop_base() {
-				let len = ppn_range.forget_base((1 << 9) - 1);
-				assert_eq!(len + 1, 1 << 9);
-				let mut pte = Self::get_pte_alloc_mega(address)?;
-				unsafe {
-					pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)?;
-					address = NonNull::new_unchecked(address.as_ptr().add(1 << 9));
+			let mut undo = #[cold] |err: AddError| todo!();
+			for ppn in (ppn_min..ppn_max).step_by(1 << 9).map(PPNDirect::from) {
+				match Self::get_pte_alloc_mega(address) {
+					Ok(mut pte) => unsafe {
+						if let Err(e) = pte.as_mut().set_direct(ppn, rwx, usermode, global) {
+							return undo(e);
+						}
+						address = NonNull::new_unchecked(address.as_ptr().add(1 << 9));
+					},
+					Err(e) => return undo(e),
 				}
 			}
 		} else {
-			while let Some(ppn) = ppn_range.pop() {
-				let mut pte = Self::get_pte_alloc(address)?;
-				unsafe {
-					pte.as_mut().set(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)?;
-					address = NonNull::new_unchecked(address.as_ptr().add(1));
+			let mut undo = #[cold] |err: AddError| todo!();
+			for ppn in (ppn_min..ppn_max).map(PPNDirect::from) {
+				match Self::get_pte_alloc(address) {
+					Ok(mut pte) => unsafe {
+						if let Err(e) = pte.as_mut().set_direct(ppn, rwx, usermode, global) {
+							return undo(e);
+						}
+						address = NonNull::new_unchecked(address.as_ptr().add(1));
+					},
+					Err(e) => return undo(e),
 				}
 			}
 		}
@@ -527,10 +556,10 @@ impl Sv39 {
 	/// Add a SharedPPN. If no virtual address is given, the first available
 	/// entry with enough space is used.
 	#[allow(dead_code)]
-	pub fn add_shared(address: NonNull<Page>, ppn: SharedPPN, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
+	pub fn add_shared(address: NonNull<Page>, ppn: SharedPPN, rwx: RWX, usermode: bool, global: bool, locked: bool) -> Result<(), AddError> {
 		let mut pte = Self::get_pte_alloc(address)?;
 		unsafe {
-			pte.as_mut().set_shared(ppn, rwx, usermode, global).map_err(|_| AddError::Overlaps)
+			pte.as_mut().set_shared(ppn, rwx, usermode, global, locked).map_err(|_| AddError::Overlaps)
 		}
 	}
 
@@ -566,7 +595,7 @@ impl Sv39 {
 
 		if from.is_valid() {
 			if !to.is_valid() {
-				to.set_shared(from.share().map_err(|_| ())?, rwx, usermode, global)
+				to.set_shared(from.share().map_err(|_| ())?, rwx, usermode, global, false)
 			} else {
 				Err(())
 			}

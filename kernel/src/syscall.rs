@@ -4,6 +4,7 @@
 
 use crate::arch;
 use crate::task;
+use crate::memory::{PPNBox, PPNDirect};
 use core::convert::{TryFrom, TryInto};
 use core::ptr::NonNull;
 
@@ -242,111 +243,6 @@ mod sys {
 	}
 
 	sys! {
-		[task] dev_reserve(id, a_reg, a_ranges, a_ranges_count) {
-			arch::set_supervisor_userpage_access(true);
-			let mut a_ranges = unsafe {
-				core::slice::from_raw_parts(a_ranges as *const *mut arch::Page, a_ranges_count)
-			};
-			log!("dev_reserve {}, 0x{}, {:?}", id, a_reg, a_ranges);
-			use crate::driver::DeviceTree;
-			use crate::memory::reserved::DEVICE_TREE;
-
-			let dt = unsafe { DeviceTree::parse_dtb(DEVICE_TREE.start.as_ptr()).unwrap() };
-			let mut int = dt.interpreter();
-
-			let mut address_cells = 0;
-			let mut size_cells = 0;
-
-			while let Some(mut node) = int.next_node() {
-				while let Some(p) = node.next_property() {
-					match p.name {
-						"#address-cells" => {
-							let num = p.value.try_into().expect("Malformed #address-cells");
-							address_cells = u32::from_be_bytes(num);
-						}
-						"#size-cells" => {
-							let num = p.value.try_into().expect("Malformed #size-cells");
-							size_cells = u32::from_be_bytes(num);
-						}
-						_ => (),
-					}
-				}
-				use crate::memory::PPNRange;
-				while let Some(mut node) = node.next_child_node() {
-					if node.name == "soc" {
-						while let Some(p) = node.next_property() {}
-						while let Some(mut node) = node.next_child_node() {
-							let mut compatible = false;
-							let mut ranges = None;
-							let mut reg = None;
-							let mut child_address_cells = address_cells;
-							let mut child_size_cells = size_cells;
-							while let Some(p) = node.next_property() {
-								match p.name {
-									"compatible" => compatible = p.value == b"pci-host-ecam-generic\0",
-									"ranges" => ranges = Some(p.value),
-									"reg" => reg = Some(p.value),
-									"#address-cells" => child_address_cells = u32::from_be_bytes(p.value.try_into().unwrap()),
-									"#size-cells" => child_size_cells = u32::from_be_bytes(p.value.try_into().unwrap()),
-									_ => (),
-								}
-							}
-							if !compatible {
-								continue;
-							}
-							dbg!(node.name);
-							log!("ranges {:?}", ranges);
-							log!("reg {:?}", reg);
-
-							// Map regions into address space.
-							let mut addr = NonNull::new(a_reg as *mut arch::Page).expect("Address is 0");
-
-							// Map reg first
-							let reg = reg.expect("No reg property");
-							let (start, reg): (usize, _) = match address_cells {
-								1 => (u32::from_be_bytes(reg[..4].try_into().unwrap()).try_into().unwrap(), &reg[4..]),
-								2 => (u64::from_be_bytes(reg[..8].try_into().unwrap()).try_into().unwrap(), &reg[8..]),
-								_ => panic!("Address cell size too large"),
-							};
-							let size: usize = match size_cells {
-								1 => u32::from_be_bytes(reg.try_into().unwrap()).try_into().unwrap(),
-								2 => u64::from_be_bytes(reg.try_into().unwrap()).try_into().unwrap(),
-								_ => panic!("Size cell size too large"),
-							};
-							let ppn = unsafe { PPNRange::from_ptr(start, (size / arch::PAGE_SIZE).try_into().unwrap()) };
-							arch::VirtualMemorySystem::add_range(addr, ppn, arch::RWX::RW, true, false);
-
-							// Map ranges
-							let mut ranges = ranges.expect("No ranges property");
-							while ranges.len() > 0 {
-								let mut addr = NonNull::new(a_ranges[0] as *mut arch::Page).unwrap();
-								a_ranges = &a_ranges[1..];
-								let r = &ranges[child_address_cells as usize * 4..];
-								let (start, r): (usize, _) = match address_cells {
-									1 => (u32::from_be_bytes(r[..4].try_into().unwrap()).try_into().unwrap(), &r[4..]),
-									2 => (u64::from_be_bytes(r[..8].try_into().unwrap()).try_into().unwrap(), &r[8..]),
-									_ => panic!("Address cell size too large"),
-								};
-								let (size, r): (usize, _) = match size_cells {
-									1 => (u32::from_be_bytes(r[..4].try_into().unwrap()).try_into().unwrap(), &r[4..]),
-									2 => (u64::from_be_bytes(r[..8].try_into().unwrap()).try_into().unwrap(), &r[8..]),
-									_ => panic!("Size cell size too large"),
-								};
-								ranges = r;
-								let ppn = unsafe { PPNRange::from_ptr(start, (size / arch::PAGE_SIZE).try_into().unwrap()) };
-								arch::VirtualMemorySystem::add_range(addr, ppn, arch::RWX::RW, true, false);
-							}
-						}
-					}
-				}
-			}
-
-			arch::set_supervisor_userpage_access(false);
-			Return(Status::Ok, 0)
-		}
-	}
-
-	sys! {
 		[_] dev_dma_alloc(address, size, _flags) {
 			log!("dev_dma_alloc 0x{:x}, {}, 0b{:b}", address, size, _flags);
 			assert_ne!(size, 0, "TODO just return an error doof");
@@ -386,11 +282,20 @@ mod sys {
 
 	sys! {
 		[_] sys_direct_alloc(address, ppn, count, _flags) {
-			use crate::memory::PPNRange;
 			log!("sys_direct_alloc 0x{:x}, 0x{:x}, {}, 0b{:b}", address, ppn << arch::PAGE_BITS, count, _flags);
-			let ppn = unsafe { PPNRange::from_ptr(ppn << arch::PAGE_BITS, count as u32).try_into().unwrap() };
-			arch::VirtualMemorySystem::add_range(NonNull::new(address as *mut _).unwrap(), ppn, arch::RWX::RW, true, false).unwrap();
-			Return(Status::Ok, 0)
+			if let Some(addr) = NonNull::new(address as *mut _) {
+				if let Ok(ppn) = PPNBox::try_from(ppn) {
+					let ppn = PPNDirect::from(ppn);
+					match arch::VirtualMemorySystem::add_direct(addr, ppn, count, arch::RWX::RW, true, false) {
+						Ok(()) => Return(Status::Ok, 0),
+						Err(_) => Return(Status::MemoryOverlap, 0),
+					}
+				} else {
+					Return(Status::MemoryUnavailable, 0)
+				}
+			} else {
+				Return(Status::NullArgument, 0)
+			}
 		}
 	}
 

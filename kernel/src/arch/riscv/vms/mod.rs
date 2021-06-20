@@ -83,5 +83,6 @@ impl TryFrom<u32> for RWX {
 pub enum AddError {
 	/// The mapping overlaps with an existing mapping
 	Overlaps,
+	OutOfRange,
 	AllocateError(AllocateError),
 }

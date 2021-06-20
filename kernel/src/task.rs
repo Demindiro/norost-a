@@ -246,7 +246,7 @@ impl Task {
 
 	/// Allocate private memory at the given virtual address.
 	pub fn allocate_memory(&self, address: NonNull<crate::arch::Page>, count: usize, rwx: crate::arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
-		self.inner().shared_state.virtual_memory.allocate(address, count, rwx)
+		self.inner().shared_state.virtual_memory.allocate(address, count, rwx, true, false)
 	}
 
 	/// Deallocate memory

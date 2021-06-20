@@ -1,8 +1,9 @@
 use crate::arch;
+use core::convert::{TryFrom, TryInto};
 use core::fmt;
 use core::mem;
 
-pub(super) type PPNBox = u32;
+pub type PPNBox = u32;
 
 /// A struct representing a PPN.
 ///
@@ -15,6 +16,9 @@ pub struct PPNRange {
 	start: PPNBox,
 	count: u32,
 }
+
+/// A page that was allocated directly and hence is not tracked by the PMM.
+pub struct PPNDirect(PPNBox);
 
 impl PPN {
 	/// Creates a new PPN from a physical pointer
@@ -130,5 +134,51 @@ impl fmt::Debug for PPNRange {
 		} else {
 			write!(f, "PPNRange (empty)")
 		}
+	}
+}
+
+impl PPNDirect {
+	#[inline]
+	#[must_use]
+	pub fn from_usize(ptr: usize) -> Result<Self, Error> {
+		if ptr & arch::PAGE_MASK > 0 {
+			Err(Error::BadAlignment)
+		} else if let Ok(ppn) = (ptr >> arch::PAGE_BITS).try_into() {
+			Ok(Self(ppn))
+		} else {
+			Err(Error::OutOfRange)
+		}
+	}
+}
+
+impl From<PPNDirect> for PPNBox {
+	fn from(ppn: PPNDirect) -> PPNBox {
+		ppn.0
+	}
+}
+
+impl From<PPNBox> for PPNDirect {
+	fn from(ppn: PPNBox) -> PPNDirect {
+		Self(ppn)
+	}
+}
+
+impl fmt::Debug for PPNDirect {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "PPNDirect (page: 0x{:x})", self.0 << 12)
+	}
+}
+
+pub enum Error {
+	BadAlignment,
+	OutOfRange,
+}
+
+impl fmt::Debug for Error {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.write_str(match self {
+			Self::BadAlignment => "Bad alignment",
+			Self::OutOfRange => "Out of range",
+		})
 	}
 }

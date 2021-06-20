@@ -18,9 +18,8 @@ pub use shared::SharedPPN;
 use crate::sync::Mutex;
 
 use allocator::Allocator;
-use ppn::PPNBox;
 
-pub use ppn::{PPN, PPNRange};
+pub use ppn::{PPN, PPNRange, PPNDirect, PPNBox};
 
 #[derive(Debug)]
 pub struct AllocateError;

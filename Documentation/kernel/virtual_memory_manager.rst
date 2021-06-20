@@ -140,3 +140,19 @@ majority of new architectures / CPUs will support address tags in some form
 the tradeoff is considered acceptable. Older systems suffer, but there is
 not much that can be done about that short of designing a separate kernel
 for them.
+
+
+Mapping flags
+~~~~~~~~~~~~~
+
+There are 4 mutually exclusive flags, which take a total of 2 bits:
+
+* ``PRIVATE``: The mapping is not shared with any address space nor is
+  it a direct mapping.
+* ``SHARED``: The mapping is shared between multiple address spaces and a
+  counter is associated with it.
+* ``DIRECT``: The mapping was allocated with ``sys_direct_alloc``. While
+  there are shareable they do not have a counter associated with them nor
+  are they ever given to the PMM.
+* ``SHARED_LOCKED``: The mapping is shared between multiple address spaces.
+  The RWX flags for this mapping cannot be changed.
