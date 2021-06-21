@@ -53,6 +53,10 @@ impl PPN {
 	pub fn as_usize(&self) -> usize {
 		(self.0 as usize) << 12
 	}
+
+	pub fn as_raw(&self) -> PPNBox {
+		self.0
+	}
 }
 
 impl fmt::Debug for PPN {

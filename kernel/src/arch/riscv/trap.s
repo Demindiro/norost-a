@@ -142,7 +142,8 @@ sync_trap_table:
 	.balign 4	# 4
 	ret
 	.balign 4	# 5
-	ret
+0:
+	j		0b
 	.balign 4	# 6
 	ret
 	.balign 4	# 7
@@ -164,7 +165,8 @@ sync_trap_table:
 	.balign 4	# 14
 	ret
 	.balign 4	# 15
-	ret
+0:
+	j		0b
 
 ## Default handler for traps
 trap_handler:

@@ -2,7 +2,7 @@ include src/arch/riscv/Makefile
 
 INIT        ?= init.elf
 READELF_OPT ?= -a
-OBJDUMP_OPT ?= -S
+OBJDUMP_OPT ?= -Sl
 
 
 clean:

@@ -99,6 +99,18 @@ impl Entry {
 		s
 	}
 
+	/// Create a new entry for a single physical entry.
+	#[must_use]
+	fn new_leaf3(ppn: PPNBox, rwx: RWX, usermode: bool, global: bool) -> Self {
+		let mut s = Self(u64::from(ppn) << 10);
+		s.set_rwx(rwx);
+		s.set_valid(true);
+		s.set_usermode(usermode);
+		s.set_global(global);
+		s.0 |= 0b1100_0000;
+		s
+	}
+
 	/// Create a new entry for a single table entry.
 	#[must_use]
 	fn new_table(ppn: PPN) -> Self {
@@ -326,13 +338,16 @@ impl Sv39 {
 
 		let va = VirtualAddress(ROOT.as_ptr() as u64);
 
-		let satp = ((ppn_2.as_usize() as u64) >> 12) & (1 << 63);
+		dbg!(&ppn_2, &ppn_1, &ppn_0);
+
+		let satp = ppn_2.as_raw() as u64 | (1 << 63);
 
 		// Map global kernel PTEs.
 		unsafe {
 			let curr = ROOT.cast::<[u64; 512]>().as_mut();
-			Self::map_highmem_a(Some(&ppn_1));
-			let new = Self::translate_highmem_a(&ppn_1).cast::<[u64; 512]>().as_mut();
+			Self::map_highmem_a(Some(ppn_2.as_raw()));
+			let new = Self::translate_highmem_a(ppn_2.as_raw()).cast::<[u64; 512]>().as_mut();
+			dbg!(GLOBAL_KERNEL_TABLE_START_INDEX);
 			for i in GLOBAL_KERNEL_TABLE_START_INDEX..512 {
 				new[i] = curr[i];
 			}
@@ -345,21 +360,21 @@ impl Sv39 {
 			let ppn_2 = PPN::from_raw(ppn_2);
 
 			// Add a PTE pointing to VPN[2] in VPN[0]
-			Self::map_highmem_a(Some(&ppn_0));
+			Self::map_highmem_a(Some(ppn_0.as_raw()));
 			Self::flush_highmem_a();
-			Self::translate_highmem_a(&ppn_0).cast::<[Leaf; 512]>().as_mut()[va.ppn_0()]
+			Self::translate_highmem_a(ppn_0.as_raw()).cast::<[Leaf; 512]>().as_mut()[va.ppn_0()]
 				.set(Map::Private(ppn_2_alias), RWX::RW, false, false).unwrap();
 
 			// Add a PTE pointing to VPN[0] in VPN[1]
-			Self::map_highmem_a(Some(&ppn_1));
+			Self::map_highmem_a(Some(ppn_1.as_raw()));
 			Self::flush_highmem_a();
-			Self::translate_highmem_a(&ppn_1).cast::<[Entry; 512]>().as_mut()[va.ppn_0()]
+			Self::translate_highmem_a(ppn_1.as_raw()).cast::<[Entry; 512]>().as_mut()[va.ppn_1()]
 				= Entry::new_table(ppn_0);
 
 			// Add a PTE pointing to VPN[1] in VPN[2]
-			Self::map_highmem_a(Some(&ppn_2));
+			Self::map_highmem_a(Some(ppn_2.as_raw()));
 			Self::flush_highmem_a();
-			Self::translate_highmem_a(&ppn_2).cast::<[Entry; 512]>().as_mut()[va.ppn_0()]
+			Self::translate_highmem_a(ppn_2.as_raw()).cast::<[Entry; 512]>().as_mut()[va.ppn_2()]
 				= Entry::new_table(ppn_1);
 		}
 
@@ -369,7 +384,17 @@ impl Sv39 {
 			Self::flush_highmem_a();
 		}
 
-		Ok(Self(satp))
+		dbg!(Self::current());
+		let s = Self(satp);
+		dbg!(&s);
+
+		dbg!();
+		unsafe {
+			asm!("csrw	SATP, {0}", in(reg) satp);
+			asm!("sfence.vma");
+		}
+		dbg!();
+		Ok(s)
 	}
 
 	/// Uses HIGHMEM_A
@@ -384,9 +409,9 @@ impl Sv39 {
 
 		// VPN[1]
 		let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
-		unsafe { Self::map_highmem_a(Some(&ppn)) };
+		unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 		Self::flush_highmem_a();
-		let tbl = unsafe { Self::translate_highmem_a(&ppn).cast::<[Entry; 512]>() };
+		let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).cast::<[Entry; 512]>() };
 		let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 		let pte = &mut tbl[va.ppn_1()];
 		if !pte.is_table() {
@@ -395,9 +420,9 @@ impl Sv39 {
 
 		// VPN[0]
 		let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
-		unsafe { Self::map_highmem_a(Some(&ppn)) };
+		unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 		Self::flush_highmem_a();
-		let tbl = unsafe { Self::translate_highmem_a(&ppn).cast::<[Leaf; 512]>() };
+		let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).cast::<[Leaf; 512]>() };
 		let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 		let pte = &mut tbl[va.ppn_0()];
 		Ok(NonNull::from(pte))
@@ -572,36 +597,6 @@ impl Sv39 {
 		unsafe { Self::get_pte(address).map_err(|_| ())?.as_mut().clear() }
 	}
 
-	/// Alias an address to another address.
-	///
-	/// The flags can optionally be changed (left to right: RWX, usermode)
-	/// 
-	/// ## Returns
-	///
-	/// * `Ok(())` if the address has been moved successfully.
-	/// * `Err(())` if the source address doesn't map to a page.
-	/// * `Err(())` if the destination address is already occupied.
-	// FIXME is copy, should be move
-	pub fn alias_address(from: NonNull<Page>, to: NonNull<Page>, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
-
-		if from == to {
-			todo!()
-		}
-
-		let from = unsafe { Self::get_pte(from)?.as_mut() };
-		let to = unsafe { Self::get_pte_alloc(to)?.as_mut() };
-
-		if from.is_valid() {
-			if !to.is_valid() {
-				to.set(from.share().map_err(|_| todo!())?, rwx, usermode, global)
-			} else {
-				todo!()
-			}
-		} else {
-			todo!()
-		}
-	}
-
 	/// Write the physical *addresses* from the start of the virtual address into the given slice.
 	pub fn physical_addresses(address: NonNull<Page>, store: &mut [usize]) -> Result<(), ()> {
 		for (i, s) in store.iter_mut().enumerate() {
@@ -618,9 +613,9 @@ impl Sv39 {
 
 			// VPN[1]
 			let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
-			unsafe { Self::map_highmem_a(Some(&ppn)) };
+			unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 			Self::flush_highmem_a();
-			let tbl = unsafe { Self::translate_highmem_a(&ppn).cast::<[Entry; 512]>() };
+			let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).cast::<[Entry; 512]>() };
 			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_1()];
 			if !pte.is_valid() {
@@ -632,9 +627,9 @@ impl Sv39 {
 
 			// VPN[0]
 			let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
-			unsafe { Self::map_highmem_a(Some(&ppn)) };
+			unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 			Self::flush_highmem_a();
-			let tbl = unsafe { Self::translate_highmem_a(&ppn).cast::<[Leaf; 512]>() };
+			let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).cast::<[Leaf; 512]>() };
 			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_0()];
 			*s = ((pte.0 & !0x3ff) << 2) as usize;
@@ -694,10 +689,11 @@ impl Sv39 {
 			}
 
 			// PPN[1]
-			let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
-			unsafe { Self::map_highmem_a(Some(&ppn)) };
+			let ppn = (pte.0 >> 10) as u32;
+			unsafe { Self::map_highmem_a(Some(ppn)) };
+			log!("reijoregij   0x{:x}", (ppn as u64) << 12);
 			Self::flush_highmem_a();
-			let tbl = unsafe { Self::translate_highmem_a(&ppn).cast::<[Entry; 512]>() };
+			let tbl = unsafe { Self::translate_highmem_a(ppn).cast::<[Entry; 512]>() };
 			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_1()];
 			if !pte.is_valid() {
@@ -706,13 +702,12 @@ impl Sv39 {
 			} else if !pte.is_table() {
 				panic!("Page overlaps with an existing page");
 			}
-			mem::forget(ppn);
 
 			// PPN[0]
 			let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
-			unsafe { Self::map_highmem_a(Some(&ppn)) };
+			unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 			Self::flush_highmem_a();
-			let tbl = unsafe { Self::translate_highmem_a(&ppn).cast::<[Leaf; 512]>() };
+			let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).cast::<[Leaf; 512]>() };
 			let tbl = unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_0()];
 			pte.set(Map::Private(f()), RWX::RW, false, true).expect("Page overlaps with an existing page");
@@ -746,12 +741,12 @@ impl Sv39 {
 	///
 	/// If HIGHMEM_A is mapped to another address the TLB *must* be flushed after this call.
 	/// There may not be any lingering mappings either for security and performance.
-	unsafe fn map_highmem_a(ppn: Option<&PPN>) {
+	unsafe fn map_highmem_a(ppn: Option<PPNBox>) {
 		let va = VirtualAddress(HIGHMEM_A.as_ptr() as u64);
 		let root = &mut *ROOT.as_ptr();
 		root[va.ppn_2()] = if let Some(ppn) = ppn {
-			let ppn = ppn.as_usize() & !((1 << 30) - 1);
-			Entry::new_leaf2(ppn, RWX::RW, false, false)
+			let ppn = ppn & !((1 << 18) - 1);
+			Entry::new_leaf3(ppn, RWX::RW, false, false)
 		} else {
 			Entry::new_invalid()
 		};
@@ -779,8 +774,8 @@ impl Sv39 {
 	/// ## Safety
 	///
 	/// `map_highmem_a` has been called before with the same PPN.
-	unsafe fn translate_highmem_a(ppn: &PPN) -> NonNull<Page> {
-		NonNull::new_unchecked(HIGHMEM_A.as_ptr().add((ppn.as_usize() & ((1 << 30) - 1)) >> 12))
+	unsafe fn translate_highmem_a(ppn: PPNBox) -> NonNull<Page> {
+		NonNull::new_unchecked(HIGHMEM_A.as_ptr().add(ppn as usize % (1 << 18)))
 	}
 
 	/// Translate the PPN mapped to HIGHMEM_A to a virtual address.
@@ -807,6 +802,51 @@ impl Sv39 {
 	fn flush(address: Option<NonNull<Page>>) {
 		let address = address.map(|p| p.as_ptr() as *const _).unwrap_or(core::ptr::null());
 		unsafe { asm!("sfence.vma {0}, zero", in(reg) address); }
+	}
+}
+
+use core::fmt;
+
+impl fmt::Debug for Sv39 {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		writeln!(f, "")?;
+		writeln!(f, "0x{:x}", self.0)?;
+		let ppn = self.0 as u32;
+		unsafe {
+			for i in 0..512 {
+				Self::map_highmem_a(Some(ppn));
+				Self::flush_highmem_a();
+				let base = Self::translate_highmem_a(ppn).cast::<[Entry; 512]>().as_ref();
+				if base[i].is_valid() {
+					writeln!(f, "  {:>}:  0x{:x}, 0b{:b}", i, (base[i].0 & !0x3ff) << 2, base[i].0 & 0x3ff);
+					if base[i].is_table() {
+						let ppn = (base[i].0 >> 10) as u32;
+						Self::map_highmem_a(Some(ppn));
+						Self::flush_highmem_a();
+						let base = Self::translate_highmem_a(ppn).cast::<[Entry; 512]>().as_ref();
+						for k in 0..512 {
+							if base[k].is_valid() {
+								writeln!(f, "    {:>}:  0x{:x}, 0b{:b}", k, (base[k].0 & !0x3ff) << 2, base[k].0 & 0x3ff);
+								if base[k].is_table() {
+									let ppn = (base[k].0 >> 10) as u32;
+									Self::map_highmem_a(Some(ppn));
+									Self::flush_highmem_a();
+									let base = Self::translate_highmem_a(ppn).cast::<[Leaf; 512]>().as_ref();
+									for m in 0..512 {
+										if base[m].is_valid() {
+											writeln!(f, "      {:>}:  0x{:x}, 0b{:b}", m, (base[m].0 & !0x3ff) << 2, base[m].0 & 0x3ff);
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			Self::map_highmem_a(None);
+			Self::flush_highmem_a();
+		}
+		Ok(())
 	}
 }
 

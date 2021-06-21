@@ -167,7 +167,7 @@ impl Task {
 		// FIXME may leak memory on alloc error.
 		let task_data = Map::Private(memory::allocate()?);
 		let stack = Map::Private(memory::allocate()?);
-		let vms = arch::VirtualMemorySystem::current();
+		let vms = arch::VirtualMemorySystem::new()?;
 		arch::VirtualMemorySystem::add(STACK_ADDRESS, stack, RWX::RW, false, false).unwrap();
 		arch::VirtualMemorySystem::add(TASK_DATA_ADDRESS, task_data, RWX::RW, false, false).unwrap();
 		let task_data = TASK_DATA_ADDRESS.cast();
@@ -226,7 +226,6 @@ impl Task {
 			arch::set_supervisor_userpage_access(false);
 		}
 		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
-		dbg!(task.inner().register_state.pc);
 		unsafe { arch::trap_start_task(task) }
 	}
 
