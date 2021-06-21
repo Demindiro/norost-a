@@ -8,18 +8,17 @@
 pub use crate::arch::{Page, PAGE_SIZE};
 
 pub mod reserved;
+pub mod ppn;
 
 mod allocator;
-mod ppn;
 mod shared;
 
-pub use shared::SharedPPN;
+pub use shared::{SharedPPN, SharedPPNRange};
+pub use ppn::{PPN, PPNRange, PPNDirect, PPNBox};
 
 use crate::sync::Mutex;
 
 use allocator::Allocator;
-
-pub use ppn::{PPN, PPNRange, PPNDirect, PPNBox};
 
 #[derive(Debug)]
 pub struct AllocateError;

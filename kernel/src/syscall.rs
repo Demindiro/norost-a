@@ -2,9 +2,9 @@
 //!
 //! This module contains generic code. Arch-specific code is located in [`arch`](crate::arch)
 
-use crate::arch;
+use crate::arch::{self, Map, MapRange, VirtualMemorySystem, RWX};
 use crate::task;
-use crate::memory::{PPNBox, PPNDirect};
+use crate::memory::ppn::*;
 use core::convert::{TryFrom, TryInto};
 use core::ptr::NonNull;
 
@@ -258,7 +258,7 @@ mod sys {
 			let a = address as *mut arch::Page;
 			for i in 0..count {
 				let p = core::mem::replace(&mut ppns[i], None).unwrap();
-				dbg!(i, &p);
+				let p = Map::Private(p);
 				let a = NonNull::new(a.wrapping_add(i)).unwrap();
 				arch::VirtualMemorySystem::add(a, p, arch::RWX::RW, true, false);
 			}
@@ -270,13 +270,18 @@ mod sys {
 		[_] sys_platform_info(address, _max_count) {
 			log!("sys_platform_info 0x{:x}, {}", address, _max_count);
 			use crate::{PLATFORM_INFO_SIZE, PLATFORM_INFO_PHYS_PTR};
-			use crate::memory::PPN;
-			for i in 0..*PLATFORM_INFO_SIZE {
-				let a = NonNull::new((address as *mut arch::Page).wrapping_add(i)).unwrap();
-				let p = unsafe { PPN::from_ptr(*PLATFORM_INFO_PHYS_PTR + (i << arch::PAGE_BITS)) };
-				arch::VirtualMemorySystem::add(a, p, arch::RWX::R, true, false).unwrap();
+			if let Some(a) = NonNull::new(address as *mut arch::Page) {
+				let p = PPNDirect::from_usize(*PLATFORM_INFO_PHYS_PTR).unwrap();
+				if let Ok(p) = PPNDirectRange::new(p.into(), *PLATFORM_INFO_SIZE) {
+					let p = MapRange::Direct(p);
+					arch::VirtualMemorySystem::add_range(a, p, arch::RWX::R, true, false).unwrap();
+					Return(Status::Ok, *PLATFORM_INFO_SIZE)
+				} else {
+					todo!()
+				}
+			} else {
+				Return(Status::NullArgument, 0)
 			}
-			Return(Status::Ok, *PLATFORM_INFO_SIZE)
 		}
 	}
 
@@ -285,10 +290,15 @@ mod sys {
 			log!("sys_direct_alloc 0x{:x}, 0x{:x}, {}, 0b{:b}", address, ppn << arch::PAGE_BITS, count, _flags);
 			if let Some(addr) = NonNull::new(address as *mut _) {
 				if let Ok(ppn) = PPNBox::try_from(ppn) {
-					let ppn = PPNDirect::from(ppn);
-					match arch::VirtualMemorySystem::add_direct(addr, ppn, count, arch::RWX::RW, true, false) {
-						Ok(()) => Return(Status::Ok, 0),
-						Err(_) => Return(Status::MemoryOverlap, 0),
+					if let Ok(ppn) = PPNDirectRange::new(ppn, count) {
+						let map = MapRange::Direct(ppn);
+						match VirtualMemorySystem::add_range(addr, map, RWX::RW, true, false) {
+							Ok(()) => Return(Status::Ok, 0),
+							Err(_) => Return(Status::MemoryOverlap, 0),
+						}
+					} else {
+						todo!()
+						//Return(Status::, 0)
 					}
 				} else {
 					Return(Status::MemoryUnavailable, 0)

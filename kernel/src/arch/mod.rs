@@ -1,3 +1,6 @@
+use core::convert::TryFrom;
+use crate::memory::ppn::*;
+
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub mod riscv;
 
@@ -118,4 +121,60 @@ pub fn set_supervisor_userpage_access(enable: bool) {
 	sstatus &= !sum_bit;
 	sstatus |= sum_bit * (enable as usize);
 	unsafe { asm!("csrw sstatus, {0}", in(reg) sstatus) };
+}
+
+/// A PPN of a certain type.
+#[repr(u8)]
+pub enum Map {
+	Private(PPN) = 0b00,
+	Direct(PPNDirect) = 0b01,
+	Shared(SharedPPN) = 0b10,
+	SharedLocked(SharedPPN) = 0b11,
+}
+
+impl Map {
+}
+
+/// A range of PPNs of a certain type.
+#[repr(u8)]
+pub enum MapRange {
+	Private(PPNRange) = 0b00,
+	Direct(PPNDirectRange) = 0b01,
+	Shared(SharedPPNRange) = 0b10,
+	SharedLocked(SharedPPNRange) = 0b11,
+}
+
+impl MapRange {
+	pub fn len(&self) -> usize {
+		match self {
+			Self::Private(p) => p.len(),
+			Self::Direct(d) => d.len(),
+			Self::Shared(s) | Self::SharedLocked(s) => s.len(),
+		}
+	}
+
+	pub fn start(&self) -> PPNBox {
+		match self {
+			Self::Private(p) => p.start(),
+			Self::Direct(d) => d.start(),
+			Self::Shared(s) | Self::SharedLocked(s) => s.start(),
+		}
+	}
+
+	pub fn pop_base(&mut self) -> Option<Map> {
+		match self {
+			Self::Private(p) => p.pop_base().map(Map::Private),
+			Self::Direct(d) => d.pop_base().map(Map::Direct),
+			Self::Shared(s) => s.pop_base().map(Map::Shared),
+			Self::SharedLocked(s) => s.pop_base().map(Map::SharedLocked),
+		}
+	}
+
+	pub fn forget_base(&mut self, count: usize) -> usize {
+		match self {
+			Self::Private(p) => p.forget_base(count),
+			Self::Direct(d) => d.forget_base(count),
+			Self::Shared(s) | Self::SharedLocked(s) => s.forget_base(count),
+		}
+	}
 }

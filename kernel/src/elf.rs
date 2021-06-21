@@ -11,6 +11,9 @@
 //! [elf64]: https://uclibc.org/docs/elf-64-gen.pdf
 
 use crate::arch;
+use crate::memory::{PPN, PPNRange};
+use crate::task::Task;
+use core::convert::TryInto;
 use core::ptr::NonNull;
 use core::mem;
 
@@ -119,83 +122,71 @@ const _PROGRAM_HEADER_SIZE_CHECK: usize = 0 - (56 - mem::size_of::<ProgramHeader
 
 const TYPE_EXEC: u16 = 2;
 
-/// Parse the ELF file and return a new task.
-pub fn create_task(data: &[u8]) -> crate::task::Task {
+pub struct Segment {
+	/// The address to map the segment to.
+	pub address: NonNull<arch::Page>,
+	/// The PPNs of this segment.
+	pub ppn: PPNRange,
+	/// The RWX flags.
+	pub flags: arch::RWX,
+}
+
+/// Parse the ELF file and set the PPNs & flags to be mapped.
+///
+/// ## Panics
+///
+/// The ELF file has bad data anywhere. Panicking is fine since if the init ELF cannot
+/// be parsed we cannot continue anyways.
+pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const ()) {
 	// Parse the file header
 
-	if data.len() < 16 {
-		panic!("Data too short to include magic");
-	}
+	assert!(data.len() >= 16, "Data too short to include magic");
 
 	// SAFETY: the data is at least 16 bytes long
 	let identifier = unsafe { &*(data as *const [u8] as *const Identifier) };
 
-	if &identifier.magic != b"\x7fELF" {
-		panic!("Bad ELF magic");
-	}
-
-	if data.as_ptr().align_offset(mem::size_of::<usize>()) != 0 {
-		panic!("Bad alignment");
-	}
+	assert_eq!(&identifier.magic, b"\x7fELF", "Bad ELF magic");
+	assert_eq!(data.as_ptr().align_offset(mem::size_of::<usize>()), 0, "Bad alignment");
 
 	#[cfg(target_pointer_width = "32")]
-	let class = 1;
+	assert_eq!(identifier.class, 1, "Unsupported class");
 	#[cfg(target_pointer_width = "64")]
-	let class = 2;
-	if identifier.class != class {
-		panic!("Unsupported class");
-	}
+	assert_eq!(identifier.class, 2, "Unsupported class");
 
 	#[cfg(target_endian = "little")]
-	let endian = 1;
+	assert_eq!(identifier.data, 1, "Unsupported endianness");
 	#[cfg(target_endian = "big")]
-	let endian = 2;
-	if identifier.data != endian {
-		panic!("Unsupported endianness");
-	}
+	assert_eq!(identifier.data, 2, "Unsupported endianness");
 
-	if identifier.version != 1 {
-		panic!("Unsupported version");
-	}
+	assert_eq!(identifier.version, 1, "Unsupported version");
 
-	if data.len() < mem::size_of::<FileHeader>() {
-		panic!("Header too small");
-	}
+	assert!(data.len() >= mem::size_of::<FileHeader>(), "Header too small");
 	// SAFETY: the data is long enough
 	let header = unsafe { &*(data as *const [u8] as *const FileHeader) };
 
-	if header.typ != TYPE_EXEC {
-		panic!("Unsupported type");
-	}
+	assert_eq!(header.typ, TYPE_EXEC, "Unsupported type");
 
-	if header.machine != arch::ELF_MACHINE {
-		panic!("Unsupported machine type");
-	}
+	assert_eq!(header.machine, arch::ELF_MACHINE, "Unsupported machine type");
 
-	if header.flags & !arch::ELF_FLAGS > 0 {
-		panic!("Unsupported flags");
-	}
+	assert_eq!(header.flags & !arch::ELF_FLAGS, 0, "Unsupported flags");
 
 	// Parse the program headers and create the segments.
 
 	let count = header.program_header_entry_count as usize;
 	let size = header.program_header_entry_size as usize;
-	if size != mem::size_of::<ProgramHeader>() {
-		panic!("Bad program header size");
-	}
-	if data.len() < count * size + header.program_header_offset {
-		panic!("Program headers exceed the size of the file");
-	}
+	assert_eq!(size, mem::size_of::<ProgramHeader>(), "Bad program header size");
+	assert!(data.len() >= count * size + header.program_header_offset, "Program headers exceed the size of the file");
 
-	let task = crate::task::Task::new().expect("Failed to allocate task");
+	let mut i = 0;
+	for k in 0..count {
+		assert!(i < segments.len(), "Too many segments");
 
-	for i in 0..count {
 		// SAFETY: the data is large enough and aligned and the header size matches.
 		let header = unsafe {
 			let h = data as *const [u8] as *const u8;
 			let h = h.add(header.program_header_offset);
 			let h = h as *const ProgramHeader;
-			&*h.add(i)
+			&*h.add(k)
 		};
 
 		// Skip non-loadable segments
@@ -205,8 +196,7 @@ pub fn create_task(data: &[u8]) -> crate::task::Task {
 
 		use arch::RWX;
 
-		// Set flags
-		let rwx = match header.flags & 7 {
+		let flags = match header.flags & 7 {
 			f if f == FLAG_EXEC | FLAG_WRITE | FLAG_READ => RWX::RWX,
 			f if f == FLAG_EXEC | FLAG_READ => RWX::RX,
 			f if f == FLAG_EXEC | FLAG_WRITE => panic!("Write-execute pages are unsupported"),
@@ -223,18 +213,26 @@ pub fn create_task(data: &[u8]) -> crate::task::Task {
 			header.virtual_address & arch::PAGE_MASK,
 			"Offset is not aligned"
 		);
-		let mut from = NonNull::from(&data[header.offset & !arch::PAGE_MASK..]).cast();
-		let mut to = NonNull::new((header.virtual_address & !arch::PAGE_MASK) as *mut _).unwrap();
-		for i in 0..(header.memory_size + (header.offset & arch::PAGE_MASK) + arch::PAGE_MASK) / arch::PAGE_SIZE {
-			arch::VirtualMemorySystem::alias_address(from, to, rwx, true, false).unwrap();
-			from = unsafe { NonNull::new_unchecked(from.as_ptr().add(1)) };
-			to = unsafe { NonNull::new_unchecked(to.as_ptr().add(1)) };
-		}
+
+		let offset = header.offset & arch::PAGE_MASK;
+
+		let address = NonNull::new((header.virtual_address & !arch::PAGE_MASK) as *mut _)
+			.expect("Address is 0x0");
+		let count = ((header.memory_size + offset + arch::PAGE_MASK) / arch::PAGE_SIZE)
+			.try_into()
+			.expect("Segment too large");
+		// TODO add 'register' method to PMM that marks a page as managed by PMM but already
+		// allocated.
+		// FIXME these pages may be shared.
+		let ppn = &data[header.offset & !arch::PAGE_MASK..] as *const _ as *const u8 as usize;
+		let ppn = unsafe { PPNRange::from_ptr(ppn, count) };
+
+		dbg!(address, &ppn, flags);
+		segments[i] = Some(Segment { address, ppn, flags });
+		i += 1;
 	}
 
-	task.set_pc(header.entry as *const _);
-
-	task
+	*entry = header.entry as *const _;
 }
 
 const FLAG_EXEC: u32 = 0x1;

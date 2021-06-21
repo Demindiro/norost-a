@@ -2,10 +2,8 @@ include src/arch/riscv/Makefile
 
 INIT        ?= init.elf
 READELF_OPT ?= -a
-VIRTIO_DISK ?= $(PWD)/../target/disk
+OBJDUMP_OPT ?= -S
 
-mkdisk:
-	fallocate -l $$((7 * 512)) $(VIRTIO_DISK)
 
 clean:
 	cargo clean

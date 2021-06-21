@@ -1,6 +1,6 @@
 //! Management of shared pages.
 
-use super::{AllocateError, PPN};
+use super::{AllocateError, PPN, PPNBox};
 use super::reserved::{SHARED_COUNTERS, SHARED_ALLOC};
 use crate::arch::PAGE_BITS;
 use core::fmt;
@@ -113,6 +113,33 @@ impl fmt::Debug for SharedPPN {
 		// Note that fetch_sub returns the value from _before_ the substraction.
 		let counter = counter.load(Ordering::Relaxed);
 		write!(f, "SharedPPN (page: 0x{:x}, count: {})", self.0, counter)
+	}
+}
+
+pub struct SharedPPNRange {
+	_m: (),
+}
+
+impl SharedPPNRange {
+	pub fn len(&self) -> usize {
+		todo!()
+	}
+
+	#[must_use]
+	pub fn start(&self) -> PPNBox {
+		todo!()
+	}
+
+	pub fn pop_base(&mut self) -> Option<SharedPPN> {
+		todo!()
+	}
+
+	/// Forget about the last N PPNs and return the amount of PPNs that actually got removed.
+	#[must_use]
+	#[track_caller]
+	#[inline]
+	pub fn forget_base(&mut self, count: usize) -> usize {
+		todo!()
 	}
 }
 

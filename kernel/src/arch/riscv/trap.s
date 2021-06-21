@@ -156,7 +156,9 @@ sync_trap_table:
 	.balign 4	# 11
 	jal		trap_syscall
 	.balign 4	# 12
-	ret
+0:
+	j		0b
+	#ret
 	.balign 4	# 13
 	ret
 	.balign 4	# 14

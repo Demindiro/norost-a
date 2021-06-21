@@ -24,6 +24,13 @@ kernel:
 kernel_end:
 .equ KERNEL_SIZE, . - kernel
 
+.section .data
+.align 12
+init:
+	.incbin "../init.elf"
+.equ INIT_SIZE, . - init
+init_size:
+	.quad	INIT_SIZE
 
 # Macros to ensure we don't accidently invoke UB.
 # It won't eliminate all cases but it helps catch common bugs such
@@ -61,7 +68,11 @@ _start:
 	## Global registers used & meanings:
 	#
 	#   a0: Hart ID
-	#   a1: DTB
+	#   a1: FDT
+	#   a2: kernel start
+	#   a3: kernel size
+	#   a4: init start
+	#   a5: init size
 	#
 	#   s0: PPN[0]
 	#   s1: PPN[1]
@@ -191,6 +202,14 @@ _start:
 	li		t0, 1 << 63			# Use Sv39
 	or		s2, s2, t0
 	csrw	satp, s2
+
+	# Set arguments
+	mv		a2, s3
+	sub		a3, s4, s3
+	la		a4, init
+	#li		a5, INIT_SIZE
+	la		a5, init_size
+	ld		a5, 0(a5)
 
 	# Get the entry point and jump to it.
 	ld		ra, 24(s3)

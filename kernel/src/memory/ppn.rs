@@ -3,6 +3,8 @@ use core::convert::{TryFrom, TryInto};
 use core::fmt;
 use core::mem;
 
+pub use super::{SharedPPN, SharedPPNRange};
+
 pub type PPNBox = u32;
 
 /// A struct representing a PPN.
@@ -16,9 +18,6 @@ pub struct PPNRange {
 	start: PPNBox,
 	count: u32,
 }
-
-/// A page that was allocated directly and hence is not tracked by the PMM.
-pub struct PPNDirect(PPNBox);
 
 impl PPN {
 	/// Creates a new PPN from a physical pointer
@@ -124,6 +123,11 @@ impl PPNRange {
 	pub fn len(&self) -> usize {
 		self.count as usize
 	}
+
+	#[must_use]
+	pub fn start(&self) -> PPNBox {
+		self.start
+	}
 }
 
 impl fmt::Debug for PPNRange {
@@ -151,6 +155,9 @@ impl PPNDirect {
 	}
 }
 
+/// A page that was allocated directly and hence is not tracked by the PMM.
+pub struct PPNDirect(PPNBox);
+
 impl From<PPNDirect> for PPNBox {
 	fn from(ppn: PPNDirect) -> PPNBox {
 		ppn.0
@@ -166,6 +173,66 @@ impl From<PPNBox> for PPNDirect {
 impl fmt::Debug for PPNDirect {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "PPNDirect (page: 0x{:x})", self.0 << 12)
+	}
+}
+
+/// A range of pages that were allocated directly and hence aren't tracked by the PPM.
+pub struct PPNDirectRange {
+	start: PPNBox,
+	count: u32,
+}
+
+impl PPNDirectRange {
+	/// Create a new direct PPN range.
+	pub fn new(start: PPNBox, count: usize) -> Result<Self, Error> {
+		let count = u32::try_from(count).map_err(|_| Error::OutOfRange)?;
+		Ok(Self { start, count })
+	}
+
+	/// Return the bottom PPN and decrement the count.
+	pub fn pop_base(&mut self) -> Option<PPNDirect> {
+		self.count.checked_sub(1).map(|c| {
+			self.count = c;
+			let ppn = PPNDirect(self.start);
+			self.start += 1;
+			ppn
+		})
+	}
+
+	pub fn len(&self) -> usize {
+		self.count.try_into().unwrap()
+	}
+
+	#[must_use]
+	pub fn start(&self) -> PPNBox {
+		self.start
+	}
+
+	/// Forget about the last N PPNs and return the amount of PPNs that actually got removed.
+	#[must_use]
+	#[track_caller]
+	#[inline]
+	pub fn forget_base(&mut self, count: usize) -> usize {
+		use core::convert::TryInto;
+		let count = count.try_into().unwrap();
+		if let Some(c) = self.count.checked_sub(count) {
+			self.count = c;
+			self.start += count;
+			count
+		} else {
+			core::mem::replace(&mut self.count, 0)
+		}.try_into().unwrap()
+	}
+}
+
+impl fmt::Debug for PPNDirectRange {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if self.count > 0 {
+			let (s, e) = (self.start << 12, ((self.start + self.count) << 12) - 1);
+			write!(f, "PPNDirectRange (0x{:x}-0x{:x})", s, e)
+		} else {
+			write!(f, "PPNDirectRange (empty)")
+		}
 	}
 }
 

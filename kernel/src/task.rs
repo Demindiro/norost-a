@@ -17,7 +17,7 @@
 //! highest level. This does sacrifice some security but there is not much that can be done about
 //! it.
 
-use crate::arch::{self, Page, PAGE_SIZE, RWX};
+use crate::arch::{self, Page, PAGE_SIZE, RWX, Map};
 use crate::memory::{self, AllocateError};
 use core::mem;
 use core::num::NonZeroU8;
@@ -165,8 +165,8 @@ impl Task {
 	/// Create a new empty task.
 	pub fn new() -> Result<Self, AllocateError> {
 		// FIXME may leak memory on alloc error.
-		let task_data = memory::allocate()?;
-		let stack = memory::allocate()?;
+		let task_data = Map::Private(memory::allocate()?);
+		let stack = Map::Private(memory::allocate()?);
 		let vms = arch::VirtualMemorySystem::current();
 		arch::VirtualMemorySystem::add(STACK_ADDRESS, stack, RWX::RW, false, false).unwrap();
 		arch::VirtualMemorySystem::add(TASK_DATA_ADDRESS, task_data, RWX::RW, false, false).unwrap();
@@ -226,6 +226,7 @@ impl Task {
 			arch::set_supervisor_userpage_access(false);
 		}
 		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
+		dbg!(task.inner().register_state.pc);
 		unsafe { arch::trap_start_task(task) }
 	}
 

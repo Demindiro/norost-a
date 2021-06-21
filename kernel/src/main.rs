@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(allocator_api)]
 #![feature(alloc_layout_extra)]
+#![feature(arbitrary_enum_discriminant)]
 #![feature(asm)]
 #![feature(bindings_after_at)]
 #![feature(const_option)]
@@ -150,7 +151,7 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 
 #[no_mangle]
 #[cfg(not(test))]
-extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, initfs: *const u8, initfs_size: usize) {
+extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u8, kernel_suze: usize, init: *const u8, init_size: usize) {
 
 	// Initialize trap table immediately so we can catch errors as early as possible.
 	arch::init();
@@ -346,17 +347,8 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, initfs: *const u
 	let mm = unsafe { memory::PPNRange::from_ptr(address, (size / arch::PAGE_SIZE).try_into().unwrap()) };
 	unsafe { memory::mem_add_ranges(&mut [mm]) };
 
-	// Log some of the properties we just fetched
-	log!("Device model: '{}'", model);
-	log!("Boot arguments: '{}'", boot_args);
-	log!("Dumping logs on '{}'", stdout);
-	dbg!(interpreter.node_count());
-
 	let start = address;
 	let end = start + size;
-	log!("Useable memory range: 0x{:x}-0x{:x}", start, end);
-
-	log!("initfs: {:p}, {}", initfs, initfs_size);
 
 	// Initialize the device list
 	struct IterProp<'a> {
@@ -378,19 +370,48 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, initfs: *const u
 	unsafe { *PLATFORM_INFO_SIZE.0.get() = (dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE };
 	for i in 0..(dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE {
 		unsafe {
-			let p = memory::PPN::from_ptr(dtb_ptr.add(i) as usize);
+			let p = arch::Map::Private(memory::PPN::from_ptr(dtb_ptr.add(i) as usize));
 			let v = memory::reserved::DEVICE_TREE.start.cast::<arch::Page>().as_ptr().add(i);
 			arch::VirtualMemorySystem::add(NonNull::new_unchecked(v), p, arch::RWX::R, false, true)
 				.unwrap();
 		}
 	}
 
+	// Get init segments
+	#[rustfmt::ignore]
+	let mut segments = [
+		None, None, None, None,
+		None, None, None, None,
+		None, None, None, None,
+		None, None, None, None,
+
+		None, None, None, None,
+		None, None, None, None,
+		None, None, None, None,
+		None, None, None, None,
+	];
+	let mut entry = core::ptr::null();
+	// SAFETY: a valid init pointer and size should have been passed by boot.s.
+	let init = unsafe { core::slice::from_raw_parts(init, init_size) };
+	elf::parse(init.as_ref(), &mut segments[..], &mut entry);
+
+	// Unmap identity maps (making the init elf file inaccessible)
 	arch::VirtualMemorySystem::clear_identity_maps();
 
-	// Run init
-	// SAFETY: a valid init pointer and size should have been passed by boot.s.
-	let init = unsafe { core::slice::from_raw_parts(initfs, initfs_size) };
-	let init = elf::create_task(init.as_ref());
+	// Create init task and map pages.
+	let mut init = task::Task::new().expect("Failed to create task");
+	for s in segments.iter_mut().filter_map(|s| s.as_mut()) {
+		let mut a = s.address;
+		while let Some(ppn) = s.ppn.pop_base() {
+			dbg!(&a, &ppn, &s.flags);
+			let ppn = arch::Map::Private(ppn);
+			arch::VirtualMemorySystem::add(a, ppn, s.flags, true, false).unwrap();
+			a = NonNull::new(a.as_ptr().wrapping_add(1)).unwrap();
+		}
+	}
+	dbg!(entry);
+	init.set_pc(entry);
+
 	init.next();
 }
 

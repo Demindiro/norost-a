@@ -1,16 +1,11 @@
+include run.mk
+
 default: build
 
 
-build: build-kernel
-
-
-build-kernel:
+build:
 	$(MAKE) -C kernel
-
+	$(MAKE) -C boot
 
 clean:
 	rm -rf target/
-
-
-run:
-	$(MAKE) -C kernel $@
