@@ -40,6 +40,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "multi_process"
+version = "0.1.0"
+dependencies = [
+ "syscalls",
+]
+
+[[package]]
 name = "pci"
 version = "0.1.0"
 dependencies = [

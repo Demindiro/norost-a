@@ -2,14 +2,22 @@
 //!
 //! This module contains generic code. Arch-specific code is located in [`arch`](crate::arch)
 
-use crate::arch::{self, Map, MapRange, VirtualMemorySystem, RWX};
-use crate::task;
+use crate::arch::{self, Map, MapRange, Page, VirtualMemorySystem, RWX};
 use crate::memory::ppn::*;
+use crate::task;
 use core::convert::{TryFrom, TryInto};
 use core::ptr::NonNull;
 
 /// The type of a syscall, specifically the amount and type of arguments it takes.
-pub type Syscall = extern "C" fn(a0: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize, task: task::Task) -> Return;
+pub type Syscall = extern "C" fn(
+	a0: usize,
+	a1: usize,
+	a2: usize,
+	a3: usize,
+	a4: usize,
+	a5: usize,
+	task: task::Task,
+) -> Return;
 
 /// The FFI-safe return value of syscalls
 ///
@@ -24,22 +32,22 @@ pub const TABLE_LEN: usize = 16;
 /// Table with all syscalls.
 #[export_name = "syscall_table"]
 pub static TABLE: [Syscall; TABLE_LEN] = [
-	sys::io_wait,				// 0
-	sys::io_resize_requester,	// 1
-	sys::io_resize_responder,	// 2
-	sys::mem_alloc,				// 3
-	sys::mem_dealloc,			// 4
-	sys::mem_get_flags,			// 5
-	sys::mem_set_flags,			// 6
-	sys::mem_physical_addresses,// 7
-	sys::placeholder,			// 8
-	sys::placeholder,			// 9
-	sys::placeholder,			// 10
-	sys::placeholder,			// 11
-	sys::dev_dma_alloc,			// 12
-	sys::sys_platform_info,		// 13
-	sys::sys_direct_alloc,		// 14
-	sys::sys_log,				// 15
+	sys::io_wait,                // 0
+	sys::io_resize_requester,    // 1
+	sys::io_resize_responder,    // 2
+	sys::mem_alloc,              // 3
+	sys::mem_dealloc,            // 4
+	sys::mem_get_flags,          // 5
+	sys::mem_set_flags,          // 6
+	sys::mem_physical_addresses, // 7
+	sys::placeholder,            // 8
+	sys::placeholder,            // 9
+	sys::placeholder,            // 10
+	sys::task_spawn,             // 11
+	sys::dev_dma_alloc,          // 12
+	sys::sys_platform_info,      // 13
+	sys::sys_direct_alloc,       // 14
+	sys::sys_log,                // 15
 ];
 
 /// Enum representing whether a syscall was successfull or failed.
@@ -71,6 +79,15 @@ impl From<Status> for u8 {
 		// SAFETY: there is no potential for UB here
 		unsafe { core::mem::transmute(status) }
 	}
+}
+
+/// Mapping used to spawn new tasks.
+#[repr(C)]
+pub struct Mapping {
+	task_address: *mut Page,
+	typ: u8,
+	flags: u8,
+	self_address: *mut Page,
 }
 
 /// Module containing all the actual syscalls.
@@ -133,7 +150,9 @@ mod sys {
 		[task] io_wait(flags, time) {
 			log!("io_wait 0b{:b}, {}", flags, time);
 			// FIXME actually wait for I/O
-			unsafe { crate::arch::trap_next_task(task); }
+			//unsafe { crate::arch::trap_next_task(task); }
+			// FIXME lol, lmao
+			crate::task::Executor::default().next()
 		}
 	}
 
@@ -141,7 +160,7 @@ mod sys {
 		/// Resize the task's requester buffers to be able to hold the given amount of entries.
 		[task] io_resize_requester(request_queue, request_size, completion_queue, completion_size) {
 			log!(
-				"io_resize_requester 0x{:x}, {}, 0x{:x}, {}", 
+				"io_resize_requester 0x{:x}, {}, 0x{:x}, {}",
 				request_queue,
 				request_size,
 				completion_queue,
@@ -239,6 +258,40 @@ mod sys {
 			let ret = arch::VirtualMemorySystem::physical_addresses(address, store);
 			arch::set_supervisor_userpage_access(false);
 			Return(if ret.is_ok() { Status::Ok } else { Status::MemoryNotAllocated }, 0)
+		}
+	}
+
+	sys! {
+		[_] task_spawn(mappings, mappings_count, program_counter, stack_pointer) {
+			log!("task_spawn 0x{:x}, {}, 0x{:x}, 0x{:x}", mappings, mappings_count, program_counter, stack_pointer);
+			let mappings = unsafe { core::slice::from_raw_parts(mappings as *const Mapping, mappings_count) };
+			use crate::task::*;
+			let vms = arch::VirtualMemorySystem::new().unwrap();
+			arch::set_supervisor_userpage_access(true);
+			for map in mappings {
+				match map.typ {
+					// Share mapping from current process.
+					0 => {
+						log!("  share_map  {:p} -> {:p}", map.self_address, map.task_address);
+						vms.share(
+							NonNull::new(map.task_address).unwrap(),
+							NonNull::new(map.self_address).unwrap(),
+							RWX::RWX, // TODO
+							true,
+							false,
+						).unwrap()
+					}
+					// Invalid type
+					_ => todo!(),
+				}
+			}
+			arch::set_supervisor_userpage_access(false);
+			dbg!(&vms);
+			let task = Task::new(vms).unwrap();
+			task.set_pc(program_counter as *const ());
+			let group = Group::get(0).unwrap();
+			let id = group.insert(task).unwrap();
+			Return(Status::Ok, id)
 		}
 	}
 

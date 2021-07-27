@@ -1,5 +1,5 @@
-use core::convert::TryFrom;
 use crate::memory::ppn::*;
+use core::convert::TryFrom;
 
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub mod riscv;
@@ -132,8 +132,7 @@ pub enum Map {
 	SharedLocked(SharedPPN) = 0b11,
 }
 
-impl Map {
-}
+impl Map {}
 
 /// A range of PPNs of a certain type.
 #[repr(u8)]

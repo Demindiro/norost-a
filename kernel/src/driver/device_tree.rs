@@ -179,7 +179,12 @@ impl DeviceTree {
 				.cast()
 		};
 		let (node_count, finished) = (0, false);
-		Interpreter { pc, strings, node_count, finished }
+		Interpreter {
+			pc,
+			strings,
+			node_count,
+			finished,
+		}
 	}
 
 	/// Return the total size of the FDT

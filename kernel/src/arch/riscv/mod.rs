@@ -9,8 +9,8 @@
 //! [priv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
 
 pub mod rv64;
-pub mod vms;
 pub mod sbi;
+pub mod vms;
 
 /// Structure used to save register state
 #[repr(C)]
@@ -45,7 +45,6 @@ use core::{mem, ptr};
 pub fn init() {
 	trap::init();
 }
-
 
 /// A representation of a single memory page.
 // TODO figure out how to set repr align based on a constant

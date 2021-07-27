@@ -7,20 +7,19 @@
 //!
 //! [rv]: https://riscv.org/wp-content/uploads/2017/05/riscv-privileged-v1.10.pdf
 
-use super::{AddError, RWX};
+use super::*;
 use crate::arch;
-use crate::arch::{Page, Map, MapRange};
-use crate::memory::{self, AllocateError, PPN, PPNBox, PPNRange, PPNDirect, SharedPPN};
+use crate::arch::{Map, MapRange, Page};
 use crate::memory::reserved::{self, GLOBAL, VMM_ROOT};
-use core::convert::{TryInto, TryFrom};
+use crate::memory::{self, AllocateError, PPNBox, PPNDirect, PPNRange, SharedPPN, PPN};
+use core::convert::{TryFrom, TryInto};
 use core::mem;
 use core::ops;
 use core::ptr::NonNull;
 
 /// The start index of the global kernel table.
-const GLOBAL_KERNEL_TABLE_START_INDEX: usize = unsafe {
-	(GLOBAL.start.as_ptr() as usize >> 30) & 0x1ff
-};
+const GLOBAL_KERNEL_TABLE_START_INDEX: usize =
+	unsafe { (GLOBAL.start.as_ptr() as usize >> 30) & 0x1ff };
 
 /// The root table (level 2).
 const ROOT: NonNull<[Entry; 512]> = VMM_ROOT.start.cast();
@@ -221,13 +220,15 @@ impl Leaf {
 			self.0 |= (global as u64) << Self::GLOBAL_BIT;
 			self.0 |= 1 << Self::ACCESSED_BIT;
 			self.0 |= 1 << Self::DIRTY_BIT;
+			log!("OK   0x{:x}", (self.0 & !0x3ff) << 10);
 			Ok(())
 		} else {
+			log!("ERR  0x{:x}", (self.0 & !0x3ff) << 10);
 			Err(AddError::Overlaps)
 		}
 	}
 
-	fn share(&self) -> Result<Map, ()> {
+	fn share(&self) -> Result<Map, ShareError> {
 		if self.is_valid() {
 			if self.0 & Self::TYPE_MASK == Self::TYPE_DIRECT {
 				Ok(Map::Direct(PPNDirect::from((self.0 >> 10) as u32)))
@@ -240,7 +241,7 @@ impl Leaf {
 				}
 			}
 		} else {
-			Err(())
+			Err(ShareError::NoEntry)
 		}
 	}
 
@@ -327,7 +328,6 @@ impl VirtualAddress {
 }
 
 impl Sv39 {
-
 	/// Create a new Sv39 mapping.
 	#[allow(dead_code)]
 	pub fn new() -> Result<Self, AllocateError> {
@@ -337,8 +337,7 @@ impl Sv39 {
 		let ppn_0 = memory::allocate()?;
 
 		let va = VirtualAddress(ROOT.as_ptr() as u64);
-
-		dbg!(&ppn_2, &ppn_1, &ppn_0);
+		dbg!(ROOT);
 
 		let satp = ppn_2.as_raw() as u64 | (1 << 63);
 
@@ -346,8 +345,9 @@ impl Sv39 {
 		unsafe {
 			let curr = ROOT.cast::<[u64; 512]>().as_mut();
 			Self::map_highmem_a(Some(ppn_2.as_raw()));
-			let new = Self::translate_highmem_a(ppn_2.as_raw()).cast::<[u64; 512]>().as_mut();
-			dbg!(GLOBAL_KERNEL_TABLE_START_INDEX);
+			let new = Self::translate_highmem_a(ppn_2.as_raw())
+				.cast::<[u64; 512]>()
+				.as_mut();
 			for i in GLOBAL_KERNEL_TABLE_START_INDEX..512 {
 				new[i] = curr[i];
 			}
@@ -362,20 +362,25 @@ impl Sv39 {
 			// Add a PTE pointing to VPN[2] in VPN[0]
 			Self::map_highmem_a(Some(ppn_0.as_raw()));
 			Self::flush_highmem_a();
-			Self::translate_highmem_a(ppn_0.as_raw()).cast::<[Leaf; 512]>().as_mut()[va.ppn_0()]
-				.set(Map::Private(ppn_2_alias), RWX::RW, false, false).unwrap();
+			Self::translate_highmem_a(ppn_0.as_raw())
+				.cast::<[Leaf; 512]>()
+				.as_mut()[va.ppn_0()]
+			.set(Map::Private(ppn_2_alias), RWX::RW, false, false)
+			.unwrap();
 
 			// Add a PTE pointing to VPN[0] in VPN[1]
 			Self::map_highmem_a(Some(ppn_1.as_raw()));
 			Self::flush_highmem_a();
-			Self::translate_highmem_a(ppn_1.as_raw()).cast::<[Entry; 512]>().as_mut()[va.ppn_1()]
-				= Entry::new_table(ppn_0);
+			Self::translate_highmem_a(ppn_1.as_raw())
+				.cast::<[Entry; 512]>()
+				.as_mut()[va.ppn_1()] = Entry::new_table(ppn_0);
 
 			// Add a PTE pointing to VPN[1] in VPN[2]
 			Self::map_highmem_a(Some(ppn_2.as_raw()));
 			Self::flush_highmem_a();
-			Self::translate_highmem_a(ppn_2.as_raw()).cast::<[Entry; 512]>().as_mut()[va.ppn_2()]
-				= Entry::new_table(ppn_1);
+			Self::translate_highmem_a(ppn_2.as_raw())
+				.cast::<[Entry; 512]>()
+				.as_mut()[va.ppn_2()] = Entry::new_table(ppn_1);
 		}
 
 		// Unmap HIGHMEM_A
@@ -384,16 +389,8 @@ impl Sv39 {
 			Self::flush_highmem_a();
 		}
 
-		dbg!(Self::current());
 		let s = Self(satp);
-		dbg!(&s);
 
-		dbg!();
-		unsafe {
-			asm!("csrw	SATP, {0}", in(reg) satp);
-			asm!("sfence.vma");
-		}
-		dbg!();
 		Ok(s)
 	}
 
@@ -429,11 +426,14 @@ impl Sv39 {
 	}
 
 	/// Uses HIGHMEM_B
-	fn get_pte_alloc(address: NonNull<Page>) -> Result<NonNull<Leaf>, AddError> {
+	fn get_pte_from_alloc(
+		root: NonNull<[Entry; 512]>,
+		address: NonNull<Page>,
+	) -> Result<NonNull<Leaf>, AddError> {
 		let va = VirtualAddress(address.as_ptr() as u64);
 
 		// PPN[2]
-		let pte = &mut unsafe { &mut *ROOT.as_ptr() }[va.ppn_2()];
+		let pte = &mut unsafe { &mut *root.as_ptr() }[va.ppn_2()];
 		if !pte.is_valid() {
 			let ppn = memory::allocate().map_err(AddError::AllocateError)?;
 			*pte = Entry::new_table(ppn);
@@ -463,6 +463,11 @@ impl Sv39 {
 		let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 		let pte = &mut tbl[va.ppn_0()];
 		Ok(NonNull::from(pte))
+	}
+
+	/// Uses HIGHMEM_B
+	fn get_pte_alloc(address: NonNull<Page>) -> Result<NonNull<Leaf>, AddError> {
+		Self::get_pte_from_alloc(ROOT, address)
 	}
 
 	/// Uses HIGHMEM_B
@@ -500,21 +505,61 @@ impl Sv39 {
 
 	/// Allocate the given amount of private pages and insert it as virtual memory at the
 	/// given address.
-	pub fn allocate(&mut self, virtual_address: NonNull<Page>, count: usize, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
-		   let mut va = virtual_address;
-		   // FIXME deallocate pages on failure.
-		   memory::mem_allocate_range(count, |ppn| {
-			   Self::add(va, Map::Private(ppn), rwx, true, false).unwrap();
-			   va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
-		   }).unwrap();
-		   Ok(())
+	pub fn allocate(
+		&mut self,
+		virtual_address: NonNull<Page>,
+		count: usize,
+		rwx: RWX,
+		usermode: bool,
+		global: bool,
+	) -> Result<(), AddError> {
+		let mut va = virtual_address;
+		// FIXME deallocate pages on failure.
+		memory::mem_allocate_range(count, |ppn| {
+			Self::add(va, Map::Private(ppn), rwx, true, false).unwrap();
+			va = NonNull::new(va.as_ptr().wrapping_add(1)).unwrap();
+		})
+		.unwrap();
+		Ok(())
 	}
 
 	/// Add a single page mapping.
-	pub fn add(address: NonNull<Page>, map: Map, rwx: RWX, usermode: bool, global: bool) -> Result<(), AddError> {
+	pub fn add(
+		address: NonNull<Page>,
+		map: Map,
+		rwx: RWX,
+		usermode: bool,
+		global: bool,
+	) -> Result<(), AddError> {
 		let mut pte = Self::get_pte_alloc(address)?;
 		unsafe {
-			pte.as_mut().set(map, rwx, usermode, global).map_err(|_| AddError::Overlaps)
+			pte.as_mut()
+				.set(map, rwx, usermode, global)
+				.map_err(|_| AddError::Overlaps)
+		}
+	}
+
+	/// Add a single page mapping to a specific VMS.
+	pub fn add_to(
+		&self,
+		address: NonNull<Page>,
+		map: Map,
+		rwx: RWX,
+		usermode: bool,
+		global: bool,
+	) -> Result<(), AddError> {
+		// Use HIGHMEM_B
+		let ppn = unsafe { PPN::from_raw(self.0 as u32) };
+		unsafe { Self::map_highmem_b(Some(&ppn)) };
+		let root = unsafe { Self::translate_highmem_b(&ppn) };
+		Self::flush_highmem_b();
+		mem::forget(ppn);
+
+		let mut pte = Self::get_pte_from_alloc(root.cast(), address)?;
+		unsafe {
+			pte.as_mut()
+				.set(map, rwx, usermode, global)
+				.map_err(|_| AddError::Overlaps)
 		}
 	}
 
@@ -525,19 +570,21 @@ impl Sv39 {
 		mut map_range: MapRange,
 		rwx: RWX,
 		usermode: bool,
-		global: bool
+		global: bool,
 	) -> Result<(), AddError> {
-
 		let count = map_range.len();
 		let ppn_min = PPNBox::try_from(map_range.start()).unwrap();
-		let ppn_max = ppn_min.checked_add(count.try_into().unwrap()).ok_or(AddError::OutOfRange)?;
+		let ppn_max = ppn_min
+			.checked_add(count.try_into().unwrap())
+			.ok_or(AddError::OutOfRange)?;
 
 		let addr = address.as_ptr() as usize;
 		if addr % (1 << 30) == 0
 			&& PPNBox::from(ppn_min) % (1 << 18) == 0
 			&& PPNBox::from(ppn_max) % (1 << 18) == 0
 		{
-			let mut undo = #[cold] |err: AddError| todo!();
+			let mut undo = #[cold]
+			|err: AddError| todo!();
 			while let Some(map) = map_range.pop_base() {
 				let c = map_range.forget_base((1 << 18) - 1);
 				assert_eq!(c + 1, 1 << 18);
@@ -555,7 +602,8 @@ impl Sv39 {
 			&& PPNBox::from(ppn_min) % (1 << 9) == 0
 			&& PPNBox::from(ppn_max) % (1 << 9) == 0
 		{
-			let mut undo = #[cold] |err: AddError| todo!();
+			let mut undo = #[cold]
+			|err: AddError| todo!();
 			while let Some(map) = map_range.pop_base() {
 				let c = map_range.forget_base((1 << 9) - 1);
 				assert_eq!(c + 1, 1 << 9);
@@ -570,7 +618,8 @@ impl Sv39 {
 				}
 			}
 		} else {
-			let mut undo = #[cold] |err: AddError| todo!();
+			let mut undo = #[cold]
+			|err: AddError| todo!();
 			while let Some(map) = map_range.pop_base() {
 				match Self::get_pte_alloc(address) {
 					Ok(mut pte) => unsafe {
@@ -587,7 +636,7 @@ impl Sv39 {
 	}
 
 	/// Remove a mapping and return the original PPN.
-	/// 
+	///
 	/// ## Returns
 	///
 	/// * `Ok(PPN)` if the mapping existed and was removed successfully.
@@ -647,7 +696,7 @@ impl Sv39 {
 	/// allocations.
 	pub fn allocate_pages<F>(mut f: F, address: NonNull<Page>, count: usize)
 	where
-		F: FnMut() -> PPN
+		F: FnMut() -> PPN,
 	{
 		// Map the root table
 		unsafe {
@@ -668,17 +717,23 @@ impl Sv39 {
 			let ppn_2_ptr = ppn_2.as_ptr();
 
 			let mut leaf = Leaf(0);
-			leaf.set(Map::Private(PPN::from_ptr(root)), RWX::RW, false, true).unwrap();
+			leaf.set(Map::Private(PPN::from_ptr(root)), RWX::RW, false, true)
+				.unwrap();
 			ppn_0_ptr.cast::<Leaf>().add(va.ppn_0()).write(leaf);
-			ppn_1_ptr.cast::<Entry>().add(va.ppn_1()).write(Entry::new_table(ppn_0));
-			ppn_2_ptr.cast::<Entry>().add(va.ppn_2()).write(Entry::new_table(ppn_1));
+			ppn_1_ptr
+				.cast::<Entry>()
+				.add(va.ppn_1())
+				.write(Entry::new_table(ppn_0));
+			ppn_2_ptr
+				.cast::<Entry>()
+				.add(va.ppn_2())
+				.write(Entry::new_table(ppn_1));
 		}
 
 		// Begin allocating pages now.
 		let mut va = VirtualAddress(address.as_ptr() as u64);
 
 		for _ in 0..count {
-
 			// PPN[2]
 			let pte = &mut unsafe { &mut *ROOT.as_ptr() }[va.ppn_2()];
 			if !pte.is_valid() {
@@ -691,7 +746,6 @@ impl Sv39 {
 			// PPN[1]
 			let ppn = (pte.0 >> 10) as u32;
 			unsafe { Self::map_highmem_a(Some(ppn)) };
-			log!("reijoregij   0x{:x}", (ppn as u64) << 12);
 			Self::flush_highmem_a();
 			let tbl = unsafe { Self::translate_highmem_a(ppn).cast::<[Entry; 512]>() };
 			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
@@ -710,17 +764,20 @@ impl Sv39 {
 			let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).cast::<[Leaf; 512]>() };
 			let tbl = unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_0()];
-			pte.set(Map::Private(f()), RWX::RW, false, true).expect("Page overlaps with an existing page");
+			pte.set(Map::Private(f()), RWX::RW, false, true)
+				.expect("Page overlaps with an existing page");
 			mem::forget(ppn);
 
 			va.0 += u64::try_from(arch::PAGE_SIZE).unwrap();
 		}
-		unsafe { Self::map_highmem_a(None); }
+		unsafe {
+			Self::map_highmem_a(None);
+		}
 		Self::flush_highmem_a();
 	}
 
 	/// Clear the identity maps.
-	/// 
+	///
 	/// This **must** only be called once at the end of early boot.
 	pub fn clear_identity_maps() {
 		let root = unsafe { &mut *ROOT.as_ptr() };
@@ -733,6 +790,53 @@ impl Sv39 {
 		let root: u64;
 		unsafe { asm!("csrr {0}, satp", out(reg) root) };
 		Self(root)
+	}
+
+	/// Map a page from the current VMS to this VMS.
+	///
+	/// This will mark private pages as shared.
+	pub fn share(
+		&self,
+		self_address: NonNull<Page>,
+		from_address: NonNull<Page>,
+		rwx: RWX,
+		usermode: bool,
+		global: bool,
+	) -> Result<(), ShareError> {
+		// Get the PTE to copy from (uses HIGHMEM_A)
+		let from = unsafe { Self::get_pte(from_address)?.as_ref() };
+
+		if !from.is_valid() {
+			return Err(ShareError::NoEntry);
+		}
+
+		// Use HIGHMEM_B
+		let ppn = unsafe { PPN::from_raw(self.0 as u32) };
+		unsafe { Self::map_highmem_b(Some(&ppn)) };
+		let root = unsafe { Self::translate_highmem_b(&ppn) }.cast();
+		Self::flush_highmem_b();
+		mem::forget(ppn);
+
+		// Get the PTE to copy to
+		let to = unsafe { Self::get_pte_from_alloc(root, self_address)?.as_mut() };
+
+		if to.is_valid() {
+			return Err(ShareError::Overlaps);
+		}
+
+		unsafe {
+			to.set(from.share()?, rwx, usermode, global);
+		}
+
+		Ok(())
+	}
+
+	/// Activate this VMS, deactivating the current one.
+	pub fn activate(&self) {
+		unsafe {
+			asm!("csrw      SATP, {0}", in(reg) self.0);
+			asm!("sfence.vma");
+		}
 	}
 
 	/// Set HIGHMEM_A to map to the given PPN.
@@ -784,7 +888,11 @@ impl Sv39 {
 	///
 	/// `map_highmem_a` has been called before with the same PPN.
 	unsafe fn translate_highmem_b(ppn: &PPN) -> NonNull<Page> {
-		NonNull::new_unchecked(HIGHMEM_B.as_ptr().add((ppn.as_usize() & ((1 << 30) - 1)) >> 12))
+		NonNull::new_unchecked(
+			HIGHMEM_B
+				.as_ptr()
+				.add((ppn.as_usize() & ((1 << 30) - 1)) >> 12),
+		)
 	}
 
 	/// Flush HIGHMEM_A from the TLB.
@@ -800,8 +908,12 @@ impl Sv39 {
 	/// Flush the given address from the TLB. If address is `None`, the entire TLB
 	/// is flushed.
 	fn flush(address: Option<NonNull<Page>>) {
-		let address = address.map(|p| p.as_ptr() as *const _).unwrap_or(core::ptr::null());
-		unsafe { asm!("sfence.vma {0}, zero", in(reg) address); }
+		let address = address
+			.map(|p| p.as_ptr() as *const _)
+			.unwrap_or(core::ptr::null());
+		unsafe {
+			asm!("sfence.vma {0}, zero", in(reg) address);
+		}
 	}
 }
 
@@ -816,25 +928,49 @@ impl fmt::Debug for Sv39 {
 			for i in 0..512 {
 				Self::map_highmem_a(Some(ppn));
 				Self::flush_highmem_a();
-				let base = Self::translate_highmem_a(ppn).cast::<[Entry; 512]>().as_ref();
+				let base = Self::translate_highmem_a(ppn)
+					.cast::<[Entry; 512]>()
+					.as_ref();
 				if base[i].is_valid() {
-					writeln!(f, "  {:>}:  0x{:x}, 0b{:b}", i, (base[i].0 & !0x3ff) << 2, base[i].0 & 0x3ff);
+					writeln!(
+						f,
+						"  {:>}:  0x{:x}, 0b{:010b}",
+						i,
+						(base[i].0 & !0x3ff) << 2,
+						base[i].0 & 0x3ff
+					);
 					if base[i].is_table() {
 						let ppn = (base[i].0 >> 10) as u32;
 						Self::map_highmem_a(Some(ppn));
 						Self::flush_highmem_a();
-						let base = Self::translate_highmem_a(ppn).cast::<[Entry; 512]>().as_ref();
+						let base = Self::translate_highmem_a(ppn)
+							.cast::<[Entry; 512]>()
+							.as_ref();
 						for k in 0..512 {
 							if base[k].is_valid() {
-								writeln!(f, "    {:>}:  0x{:x}, 0b{:b}", k, (base[k].0 & !0x3ff) << 2, base[k].0 & 0x3ff);
+								writeln!(
+									f,
+									"    {:>}:  0x{:x}, 0b{:010b}",
+									k,
+									(base[k].0 & !0x3ff) << 2,
+									base[k].0 & 0x3ff
+								);
 								if base[k].is_table() {
 									let ppn = (base[k].0 >> 10) as u32;
 									Self::map_highmem_a(Some(ppn));
 									Self::flush_highmem_a();
-									let base = Self::translate_highmem_a(ppn).cast::<[Leaf; 512]>().as_ref();
+									let base = Self::translate_highmem_a(ppn)
+										.cast::<[Leaf; 512]>()
+										.as_ref();
 									for m in 0..512 {
 										if base[m].is_valid() {
-											writeln!(f, "      {:>}:  0x{:x}, 0b{:b}", m, (base[m].0 & !0x3ff) << 2, base[m].0 & 0x3ff);
+											writeln!(
+												f,
+												"      {:>}:  0x{:x}, 0b{:010b}",
+												m,
+												(base[m].0 & !0x3ff) << 2,
+												base[m].0 & 0x3ff
+											);
 										}
 									}
 								}

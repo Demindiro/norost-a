@@ -11,11 +11,11 @@
 //! [elf64]: https://uclibc.org/docs/elf-64-gen.pdf
 
 use crate::arch;
-use crate::memory::{PPN, PPNRange};
+use crate::memory::{PPNRange, PPN};
 use crate::task::Task;
 use core::convert::TryInto;
-use core::ptr::NonNull;
 use core::mem;
+use core::ptr::NonNull;
 
 #[cfg_attr(
 	target_pointer_width = "32",
@@ -146,7 +146,11 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 	let identifier = unsafe { &*(data as *const [u8] as *const Identifier) };
 
 	assert_eq!(&identifier.magic, b"\x7fELF", "Bad ELF magic");
-	assert_eq!(data.as_ptr().align_offset(mem::size_of::<usize>()), 0, "Bad alignment");
+	assert_eq!(
+		data.as_ptr().align_offset(mem::size_of::<usize>()),
+		0,
+		"Bad alignment"
+	);
 
 	#[cfg(target_pointer_width = "32")]
 	assert_eq!(identifier.class, 1, "Unsupported class");
@@ -160,13 +164,20 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 
 	assert_eq!(identifier.version, 1, "Unsupported version");
 
-	assert!(data.len() >= mem::size_of::<FileHeader>(), "Header too small");
+	assert!(
+		data.len() >= mem::size_of::<FileHeader>(),
+		"Header too small"
+	);
 	// SAFETY: the data is long enough
 	let header = unsafe { &*(data as *const [u8] as *const FileHeader) };
 
 	assert_eq!(header.typ, TYPE_EXEC, "Unsupported type");
 
-	assert_eq!(header.machine, arch::ELF_MACHINE, "Unsupported machine type");
+	assert_eq!(
+		header.machine,
+		arch::ELF_MACHINE,
+		"Unsupported machine type"
+	);
 
 	assert_eq!(header.flags & !arch::ELF_FLAGS, 0, "Unsupported flags");
 
@@ -174,8 +185,15 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 
 	let count = header.program_header_entry_count as usize;
 	let size = header.program_header_entry_size as usize;
-	assert_eq!(size, mem::size_of::<ProgramHeader>(), "Bad program header size");
-	assert!(data.len() >= count * size + header.program_header_offset, "Program headers exceed the size of the file");
+	assert_eq!(
+		size,
+		mem::size_of::<ProgramHeader>(),
+		"Bad program header size"
+	);
+	assert!(
+		data.len() >= count * size + header.program_header_offset,
+		"Program headers exceed the size of the file"
+	);
 
 	let mut i = 0;
 	for k in 0..count {
@@ -228,7 +246,11 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 		let ppn = unsafe { PPNRange::from_ptr(ppn, count) };
 
 		dbg!(address, &ppn, flags);
-		segments[i] = Some(Segment { address, ppn, flags });
+		segments[i] = Some(Segment {
+			address,
+			ppn,
+			flags,
+		});
 		i += 1;
 	}
 

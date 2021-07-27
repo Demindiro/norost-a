@@ -5,6 +5,8 @@
 #![feature(arbitrary_enum_discriminant)]
 #![feature(asm)]
 #![feature(bindings_after_at)]
+// Needed because rustc is stupid
+#![feature(const_fn_transmute)]
 #![feature(const_option)]
 #![feature(const_panic)]
 #![feature(const_raw_ptr_to_usize_cast)]
@@ -43,7 +45,12 @@ macro_rules! test {
 	($name:ident() $code:block) => {
 		#[test_case]
 		fn $name() {
-			log!(concat!("  testing ", module_path!(), "::", stringify!($name)));
+			log!(concat!(
+				"  testing ",
+				module_path!(),
+				"::",
+				stringify!($name)
+			));
 			{
 				$code
 			}
@@ -54,21 +61,22 @@ macro_rules! test {
 #[macro_use]
 mod log;
 
+mod allocator;
 mod arch;
 mod driver;
 mod elf;
-mod syscall;
 mod memory;
 mod powerstate;
 mod sync;
+mod syscall;
 mod task;
 mod util;
 
 use core::cell::UnsafeCell;
 use core::convert::TryInto;
-use core::{mem, panic, ptr};
 use core::ops;
 use core::ptr::NonNull;
+use core::{mem, panic, ptr};
 
 static PLATFORM_INFO_SIZE: OnceCell<usize> = OnceCell(UnsafeCell::new(0));
 static PLATFORM_INFO_PHYS_PTR: OnceCell<usize> = OnceCell(UnsafeCell::new(0));
@@ -85,12 +93,11 @@ impl<T> ops::Deref for OnceCell<T> {
 
 unsafe impl<T> Sync for OnceCell<T> {}
 
-
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
 	log!("Kernel panicked!");
 	if let Some(msg) = info.message() {
-	    log!("  Message:  {:?}", msg);
+		log!("  Message:  {:?}", msg);
 	}
 	if let Some(loc) = info.location() {
 		log!("  Source:   {}:{},{}", loc.file(), loc.line(), loc.column());
@@ -122,12 +129,12 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 	fn print_node(level: usize, mut node: driver::Node) {
 		log!("{0:>1$}{2} {{", "", level * 2, node.name);
 		while let Some(property) = node.next_property() {
-			if property.value.len() > 0 &&
-				property.value[..property.value.len() - 1]
+			if property.value.len() > 0
+				&& property.value[..property.value.len() - 1]
 					.iter()
 					// Everything between ' ' and '~' is human-readable
-					.all(|&c| b' ' <= c && c <= b'~') &&
-				property.value.last().unwrap() == &0
+					.all(|&c| b' ' <= c && c <= b'~')
+				&& property.value.last().unwrap() == &0
 			{
 				// SAFETY: The string is a valid null-terminated string
 				let s = unsafe {
@@ -135,7 +142,13 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 				};
 				log!("{0:>1$}{2} = {3:?}", "", level * 2 + 2, property.name, s);
 			} else {
-				log!("{0:>1$}{2} = {3:02x?}", "", level * 2 + 2, property.name, &property.value);
+				log!(
+					"{0:>1$}{2} = {3:02x?}",
+					"",
+					level * 2 + 2,
+					property.name,
+					&property.value
+				);
 			}
 		}
 		while let Some(node) = node.next_child_node() {
@@ -151,8 +164,14 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 
 #[no_mangle]
 #[cfg(not(test))]
-extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u8, kernel_suze: usize, init: *const u8, init_size: usize) {
-
+extern "C" fn main(
+	_hart_id: usize,
+	dtb_ptr: *const arch::Page,
+	kernel: *const u8,
+	kernel_suze: usize,
+	init: *const u8,
+	init_size: usize,
+) {
 	// Initialize trap table immediately so we can catch errors as early as possible.
 	arch::init();
 
@@ -211,7 +230,7 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u
 	dtb.reserved_memory_regions().for_each(|_| ());
 
 	while let Some(mut node) = root.next_child_node() {
-		if node.name.starts_with("reserved-memory")  {
+		if node.name.starts_with("reserved-memory") {
 			// Also, what is the significance of the "ranges" property? It's
 			// always empty anyways.
 			// Ref: https://elixir.bootlin.com/linux/latest/source/Documentation/devicetree/bindings/reserved-memory/reserved-memory.txt
@@ -219,8 +238,12 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u
 			let mut size_cells = size_cells;
 			while let Some(prop) = node.next_property() {
 				match prop.name {
-					"#address-cells" => address_cells = u32::from_be_bytes(prop.value.try_into().unwrap()),
-					"#size-cells" => size_cells = u32::from_be_bytes(prop.value.try_into().unwrap()),
+					"#address-cells" => {
+						address_cells = u32::from_be_bytes(prop.value.try_into().unwrap())
+					}
+					"#size-cells" => {
+						size_cells = u32::from_be_bytes(prop.value.try_into().unwrap())
+					}
 					"ranges" => (),
 					_ => (),
 				}
@@ -344,7 +367,9 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u
 	let (address, size) = (0x8400_0000, 1024 * arch::PAGE_SIZE);
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
-	let mm = unsafe { memory::PPNRange::from_ptr(address, (size / arch::PAGE_SIZE).try_into().unwrap()) };
+	let mm = unsafe {
+		memory::PPNRange::from_ptr(address, (size / arch::PAGE_SIZE).try_into().unwrap())
+	};
 	unsafe { memory::mem_add_ranges(&mut [mm]) };
 
 	let start = address;
@@ -366,12 +391,18 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u
 	}
 
 	// Remap FDT to kernel global space
-	unsafe { *PLATFORM_INFO_PHYS_PTR.0.get() = dtb_ptr as usize};
-	unsafe { *PLATFORM_INFO_SIZE.0.get() = (dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE };
+	unsafe { *PLATFORM_INFO_PHYS_PTR.0.get() = dtb_ptr as usize };
+	unsafe {
+		*PLATFORM_INFO_SIZE.0.get() = (dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE
+	};
 	for i in 0..(dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE {
 		unsafe {
 			let p = arch::Map::Private(memory::PPN::from_ptr(dtb_ptr.add(i) as usize));
-			let v = memory::reserved::DEVICE_TREE.start.cast::<arch::Page>().as_ptr().add(i);
+			let v = memory::reserved::DEVICE_TREE
+				.start
+				.cast::<arch::Page>()
+				.as_ptr()
+				.add(i);
 			arch::VirtualMemorySystem::add(NonNull::new_unchecked(v), p, arch::RWX::R, false, true)
 				.unwrap();
 		}
@@ -380,15 +411,9 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u
 	// Get init segments
 	#[rustfmt::ignore]
 	let mut segments = [
-		None, None, None, None,
-		None, None, None, None,
-		None, None, None, None,
-		None, None, None, None,
-
-		None, None, None, None,
-		None, None, None, None,
-		None, None, None, None,
-		None, None, None, None,
+		None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+		None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+		None, None,
 	];
 	let mut entry = core::ptr::null();
 	// SAFETY: a valid init pointer and size should have been passed by boot.s.
@@ -399,7 +424,8 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u
 	arch::VirtualMemorySystem::clear_identity_maps();
 
 	// Create init task and map pages.
-	let mut init = task::Task::new().expect("Failed to create task");
+	let mut init =
+		task::Task::new(arch::VirtualMemorySystem::current()).expect("Failed to create task");
 	for s in segments.iter_mut().filter_map(|s| s.as_mut()) {
 		let mut a = s.address;
 		while let Some(ppn) = s.ppn.pop_base() {
@@ -412,7 +438,10 @@ extern "C" fn main(_hart_id: usize, dtb_ptr: *const arch::Page, kernel: *const u
 	dbg!(entry);
 	init.set_pc(entry);
 
-	init.next();
+	task::Group::new(init);
+
+	let exec = task::Executor::default();
+	exec.next();
 }
 
 #[cfg(test)]
@@ -431,16 +460,18 @@ mod test {
 		unsafe { NonNull::new_unchecked(0x8100_0000 as *mut _) };
 
 	pub(super) fn runner(tests: &[&dyn Fn()]) {
-		log!("Running {} test{}", tests.len(), if tests.len() == 1 { "" } else { "s" });
+		log!(
+			"Running {} test{}",
+			tests.len(),
+			if tests.len() == 1 { "" } else { "s" }
+		);
 		arch::init();
 		for f in tests {
 			// Reinitialize the memory manager each time in case of leaks or something else
 			// overwriting it's state.
 			// Incredibly unsafe, but w/e.
 			unsafe {
-				memory::mem_add_range(MEMORY_MANAGER_ADDRESS,
-						NonZeroUsize::new(256).unwrap(),
-					);
+				memory::mem_add_range(MEMORY_MANAGER_ADDRESS, NonZeroUsize::new(256).unwrap());
 			}
 			f();
 		}

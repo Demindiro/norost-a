@@ -1,6 +1,7 @@
-include run.mk
-
 default: build
+
+
+include run.mk
 
 
 build:
@@ -11,4 +12,4 @@ clean:
 	rm -rf target/
 
 init:
-	$(MAKE) -C services/init/hello_world_virtio
+	$(MAKE) -C services/init/multi_process

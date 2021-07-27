@@ -74,7 +74,9 @@ impl PPNRange {
 	pub unsafe fn from_ptr(start: usize, count: u32) -> Self {
 		#[cfg(debug_assertions)]
 		let start = {
-			let start: u32 = (start >> arch::PAGE_BITS).try_into().expect("PPN too large");
+			let start: u32 = (start >> arch::PAGE_BITS)
+				.try_into()
+				.expect("PPN too large");
 			assert!(start.checked_add(count).is_some(), "start + count overflow");
 			start
 		};
@@ -119,7 +121,9 @@ impl PPNRange {
 			count
 		} else {
 			core::mem::replace(&mut self.count, 0)
-		}.try_into().unwrap()
+		}
+		.try_into()
+		.unwrap()
 	}
 
 	/// Return the amount of pages this range spans.
@@ -225,7 +229,9 @@ impl PPNDirectRange {
 			count
 		} else {
 			core::mem::replace(&mut self.count, 0)
-		}.try_into().unwrap()
+		}
+		.try_into()
+		.unwrap()
 	}
 }
 

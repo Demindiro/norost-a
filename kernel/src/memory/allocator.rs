@@ -23,8 +23,8 @@
 //!
 //! Using a VMS-like tree structure makes it trivial to support hugepages of any size.
 
-use super::{PPN, PPNRange, PPNBox};
 use super::reserved::PMM_STACK;
+use super::{PPNBox, PPNRange, PPN};
 use crate::arch;
 use core::mem;
 use core::slice;
@@ -43,14 +43,13 @@ pub struct Allocator {
 	stacks: Stacks,
 }
 
-
 impl Stacks {
 	/// The amount of PPNs per stack. Must be a power of `2`.
 	const STACK_SIZE: u16 = 1 << 10;
 
 	/// The amount of bytes used by a single stack, excluding top and bottom.
 	const MEM_STACK_SIZE: usize = Self::STACK_SIZE as usize * mem::size_of::<PPN>();
-	
+
 	/// The amount of bytes used by a single stack, including top and bottom.
 	pub(super) const MEM_TOTAL_SIZE: usize = Self::MEM_STACK_SIZE + mem::size_of::<(u16, u16)>();
 
@@ -117,9 +116,7 @@ impl Tree {
 	const LEVELS: usize = 3;
 
 	/// Inserts a page into the tree.
-	fn insert(&mut self, page: PPN) {
-		
-	}
+	fn insert(&mut self, page: PPN) {}
 
 	/// Remove and return a set of pages from the tree.
 	/// It is a megapage except that some of the pages may already be allocated.
@@ -140,7 +137,7 @@ impl Tree {
 impl Tree {
 	// /// Inserts a gigapage into the tree.
 }
-	
+
 #[cfg(fals)]
 impl Tree {
 	// /// Inserts a terapage into the tree.
@@ -157,33 +154,33 @@ impl Allocator {
 		let count = count / arch::PAGE_SIZE;
 		let stacks = {
 			let mut i = 0;
-			arch::VirtualMemorySystem::allocate_pages(|| {
-				loop {
+			arch::VirtualMemorySystem::allocate_pages(
+				|| loop {
 					if let Some(p) = pages[i].pop() {
 						break p;
 					} else {
 						i += 1;
 					}
-				}
-			}, PMM_STACK.start.cast(), count as usize);
+				},
+				PMM_STACK.start.cast(),
+				count as usize,
+			);
 			PMM_STACK.start
 		};
 		let stacks = unsafe {
 			Stacks {
 				stacks: slice::from_raw_parts_mut(stacks.cast().as_ptr(), hc),
-				top_base: stacks.as_ptr().add(Stacks::MEM_STACK_SIZE * hc).cast()
+				top_base: stacks.as_ptr().add(Stacks::MEM_STACK_SIZE * hc).cast(),
 			}
 		};
-		let mut s = Self {
-			stacks,
-		};
+		let mut s = Self { stacks };
 
 		for p in pages {
 			while let Some(p) = p.pop() {
 				s.insert(p);
 			}
 		}
- 		
+
 		Ok(s)
 	}
 
@@ -192,7 +189,7 @@ impl Allocator {
 		// FIXME use hart IDs.
 		Ok(self.stacks.pop(0).expect("TODO"))
 	}
-	
+
 	/// Free a page.
 	pub fn free(&mut self, page: PPN) {
 		// FIXME use hart IDs.

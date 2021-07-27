@@ -86,3 +86,23 @@ pub enum AddError {
 	OutOfRange,
 	AllocateError(AllocateError),
 }
+
+/// Possible errors when sharing a mapping
+#[derive(Debug)]
+pub enum ShareError {
+	/// The mapping overlaps with an existing mapping
+	Overlaps,
+	OutOfRange,
+	AllocateError(AllocateError),
+	NoEntry,
+}
+
+impl From<AddError> for ShareError {
+	fn from(error: AddError) -> Self {
+		match error {
+			AddError::Overlaps => Self::Overlaps,
+			AddError::OutOfRange => Self::OutOfRange,
+			AddError::AllocateError(e) => Self::AllocateError(e),
+		}
+	}
+}

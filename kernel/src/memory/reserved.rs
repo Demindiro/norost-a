@@ -28,14 +28,13 @@
 //!
 //! The `512T` limit is chosen as it allows 32-bit PPNs (`44 - 12 = 32`)
 //!
-//! 
+//!
 //! ## The maximum size needed for the allocation stacks
 //!
 //! The amount of memory needed is ``CPU_CORES * STACK_SIZE``. In theory, the amount of memory
 //! needed is larger than the available virtual and physical memory but in practice the amount
 //! of CPU cores is very limited. For now, `4096` is assumed to be the practical limit for
 //! commercial CPUs in the future.
-
 
 use core::ptr::NonNull;
 
@@ -45,6 +44,25 @@ pub struct Range {
 	pub start: NonNull<u8>,
 	/// The end address of a range (inclusive).
 	pub end: NonNull<u8>,
+}
+
+impl Range {
+	/// Return the size of the range in bytes.
+	pub const fn byte_count(&self) -> usize {
+		// Using transmute because fuck you rustc
+		//
+		//  error[E0133]: cast of pointer to int is unsafe and requires unsafe function or block
+		//   --> kernel/src/memory/reserved.rs:53:20
+		//    |
+		// 53 |         let s = unsafe { self.end.as_ptr() as usize };
+		//    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^ cast of pointer to int
+		//    |
+		//    = note: casting pointers to integers in constants
+		use core::mem::transmute;
+		let s = unsafe { transmute::<_, usize>(self.end.as_ptr()) };
+		let e = unsafe { transmute::<_, usize>(self.start.as_ptr()) };
+		e + 1 - s
+	}
 }
 
 /// Convienence macro for registering a range.
@@ -175,10 +193,10 @@ range! {
 	SHARED_ALLOC => 1 << (44 - 12 - 12 + 1),
 	HART_STACKS => (1 << 12) * MAX_HARTS * 2, // Reserve extra space for guard pages.
 	DEVICE_TREE => 1 << 16,
-	DEVICE_LIST => 1 << 16,
+	TASK_GROUPS => 1 << 20, // 131_072 tasks
+	TASK_DATA => 1 << 30, // A hella lot of tasks.
 	[LOCAL]
 	HIGHMEM_A => 1 << 30,
 	HIGHMEM_B => 1 << 30,
 	VMM_ROOT => 1 << 12,
-	TASK_DATA => 1 << 12,
 }

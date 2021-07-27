@@ -43,10 +43,10 @@ macro_rules! syscall {
 
 #[repr(align(4096))]
 pub struct Page {
-	_data: [u8; Self::SIZE],
+    _data: [u8; Self::SIZE],
 }
 
 impl Page {
-	pub const SIZE: usize = 4096;
-	pub const MASK: usize = Self::SIZE - 1;
+    pub const SIZE: usize = 4096;
+    pub const MASK: usize = Self::SIZE - 1;
 }

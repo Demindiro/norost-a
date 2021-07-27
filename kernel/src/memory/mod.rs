@@ -7,14 +7,14 @@
 
 pub use crate::arch::{Page, PAGE_SIZE};
 
-pub mod reserved;
 pub mod ppn;
+pub mod reserved;
 
 mod allocator;
 mod shared;
 
+pub use ppn::{PPNBox, PPNDirect, PPNRange, PPN};
 pub use shared::{SharedPPN, SharedPPNRange};
-pub use ppn::{PPN, PPNRange, PPNDirect, PPNBox};
 
 use crate::sync::Mutex;
 
@@ -70,11 +70,21 @@ pub unsafe fn mem_add_ranges(ranges: &mut [PPNRange]) {
 pub fn allocate() -> Result<PPN, AllocateError> {
 	#[cfg(debug_assertions)]
 	unsafe {
-		Ok(ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock().alloc().unwrap())
+		Ok(ALLOCATOR
+			.as_ref()
+			.expect("No initialized buddy allocator")
+			.lock()
+			.alloc()
+			.unwrap())
 	}
 	#[cfg(not(debug_assertions))]
 	unsafe {
-		Ok(ALLOCATOR.as_ref().unwrap_unchecked().lock().alloc().unwrap())
+		Ok(ALLOCATOR
+			.as_ref()
+			.unwrap_unchecked()
+			.lock()
+			.alloc()
+			.unwrap())
 	}
 }
 
@@ -91,7 +101,12 @@ where
 	for _ in 0..count {
 		// TODO add a re-entrant lock to workaround this sillyness.
 		#[cfg(debug_assertions)]
-		let mut a = unsafe { ALLOCATOR.as_ref().expect("No initialized buddy allocator").lock() };
+		let mut a = unsafe {
+			ALLOCATOR
+				.as_ref()
+				.expect("No initialized buddy allocator")
+				.lock()
+		};
 		#[cfg(not(debug_assertions))]
 		let mut a = unsafe { ALLOCATOR.as_ref().unwrap_unchecked().lock() };
 		let p = a.alloc()?;
@@ -110,7 +125,11 @@ where
 #[allow(dead_code)]
 pub unsafe fn deallocate(page: PPN) {
 	#[cfg(debug_assertions)]
-	ALLOCATOR.as_ref().expect("No initialized PMM").lock().free(page);
+	ALLOCATOR
+		.as_ref()
+		.expect("No initialized PMM")
+		.lock()
+		.free(page);
 	#[cfg(not(debug_assertions))]
 	ALLOCATOR.as_ref().unwrap_unchecked().lock().free(page);
 }

@@ -17,12 +17,18 @@
 //! highest level. This does sacrifice some security but there is not much that can be done about
 //! it.
 
-use crate::arch::{self, Page, PAGE_SIZE, RWX, Map};
+mod executor;
+mod group;
+
+pub use executor::Executor;
+pub use group::Group;
+
+use crate::arch::{self, Map, Page, PAGE_SIZE, RWX};
 use crate::memory::{self, AllocateError};
 use core::mem;
 use core::num::NonZeroU8;
-use core::sync::atomic;
 use core::ptr::NonNull;
+use core::sync::atomic;
 
 /// A global counter for assigning Task IDs.
 // TODO handle wrap around + try to keep TIDs low
@@ -80,10 +86,6 @@ pub struct TaskData {
 	server_request_index: RingIndex,
 	/// The index of the next entry to be processed in the server completion buffer.
 	server_completion_index: RingIndex,
-	/// A pointer to the next task. It points to itself if there is only one task.
-	next_task: Task,
-	/// A pointer to the previous task or itself, which is needed to efficiently remove tasks.
-	prev_task: Task,
 	/// The ID of this task.
 	id: u32,
 }
@@ -133,10 +135,7 @@ const _SIZE_CHECK_CCE: usize = 0 - (32 - mem::size_of::<ClientCompletionEntry>()
 
 impl Default for RingIndex {
 	fn default() -> Self {
-		Self {
-			mask: 0,
-			index: 0,
-		}
+		Self { mask: 0, index: 0 }
 	}
 }
 
@@ -152,33 +151,38 @@ impl RingIndex {
 		self.index += 1;
 		self.index &= self.mask;
 	}
-	
+
 	fn get(&self) -> usize {
 		self.index.into()
 	}
 }
 
-const STACK_ADDRESS: NonNull<Page> = crate::memory::reserved::HART_STACKS.start.cast();
-const TASK_DATA_ADDRESS: NonNull<Page> = crate::memory::reserved::TASK_DATA.start.cast();
+static mut STACK_ADDRESS: NonNull<Page> = crate::memory::reserved::HART_STACKS.start.cast();
+static mut TASK_DATA_ADDRESS: NonNull<Page> = crate::memory::reserved::TASK_DATA.start.cast();
 
 impl Task {
-	/// Create a new empty task.
-	pub fn new() -> Result<Self, AllocateError> {
+	/// Create a new empty task with the given VMS.
+	pub fn new(vms: arch::VirtualMemorySystem) -> Result<Self, AllocateError> {
 		// FIXME may leak memory on alloc error.
 		let task_data = Map::Private(memory::allocate()?);
 		let stack = Map::Private(memory::allocate()?);
-		let vms = arch::VirtualMemorySystem::new()?;
-		arch::VirtualMemorySystem::add(STACK_ADDRESS, stack, RWX::RW, false, false).unwrap();
-		arch::VirtualMemorySystem::add(TASK_DATA_ADDRESS, task_data, RWX::RW, false, false).unwrap();
-		let task_data = TASK_DATA_ADDRESS.cast();
+		unsafe {
+			dbg!(TASK_DATA_ADDRESS);
+			dbg!(STACK_ADDRESS);
+		}
+		unsafe {
+			vms.add_to(STACK_ADDRESS, stack, RWX::RW, false, false)
+				.unwrap();
+			vms.add_to(TASK_DATA_ADDRESS, task_data, RWX::RW, false, false)
+				.unwrap();
+		}
+		let task_data = unsafe { TASK_DATA_ADDRESS.cast() };
 		let task = Self(task_data);
 		// SAFETY: task is valid
 		unsafe {
 			task_data.as_ptr().write(TaskData {
 				register_state: Default::default(),
 				stack: NonNull::new(STACK_ADDRESS.as_ptr().add(1)).unwrap(),
-				next_task: task.clone(),
-				prev_task: task.clone(),
 				id: TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed),
 				shared_state: SharedState {
 					virtual_memory: vms,
@@ -193,6 +197,8 @@ impl Task {
 				server_completion_index: RingIndex::default(),
 			});
 		}
+		unsafe { TASK_DATA_ADDRESS = NonNull::new_unchecked(TASK_DATA_ADDRESS.as_ptr().add(1)) };
+		unsafe { STACK_ADDRESS = NonNull::new_unchecked(STACK_ADDRESS.as_ptr().add(1)) };
 		Ok(task)
 	}
 
@@ -202,13 +208,13 @@ impl Task {
 	}
 
 	/// Process I/O entries and begin executing the next task.
-	pub fn next(self) -> ! {
-		let task = self.inner().next_task.clone();
-		if let Some(cq) = task.inner().client_request_queue {
+	pub fn process_io(&self) {
+		if let Some(cq) = self.inner().client_request_queue {
 			arch::set_supervisor_userpage_access(true);
-			let mut cq = cq.cast::<[ClientRequestEntry; PAGE_SIZE / mem::size_of::<ClientRequestEntry>()]>();
+			let mut cq =
+				cq.cast::<[ClientRequestEntry; PAGE_SIZE / mem::size_of::<ClientRequestEntry>()]>();
 			let cq = unsafe { cq.as_mut() };
-			let cqi = &mut task.inner().client_request_index;
+			let cqi = &mut self.inner().client_request_index;
 			loop {
 				let cq = &mut cq[cqi.get()];
 				if let Some(_op) = cq.opcode {
@@ -225,32 +231,34 @@ impl Task {
 			}
 			arch::set_supervisor_userpage_access(false);
 		}
-		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
-		unsafe { arch::trap_start_task(task) }
 	}
 
-	/// Insert a new task right after the current one. This removes it from any other task lists.
-	#[allow(dead_code)]
-	pub fn insert(&self, task: Task) {
-		// Remove from current list
-		task.inner().prev_task.inner().next_task = task.inner().next_task.clone();
-		task.inner().next_task.inner().prev_task = task.inner().prev_task.clone();
-		// Insert in new list
-		let prev = self.inner().prev_task.clone();
-		let next = self.inner().next_task.clone();
-		task.inner().prev_task = prev.clone();
-		task.inner().next_task = next.clone();
-		prev.inner().next_task = task.clone();
-		next.inner().prev_task = task;
+	/// Begin executing this task.
+	fn execute(&self) -> ! {
+		self.inner().shared_state.virtual_memory.activate();
+		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
+		unsafe { arch::trap_start_task(self.clone()) };
 	}
 
 	/// Allocate private memory at the given virtual address.
-	pub fn allocate_memory(&self, address: NonNull<crate::arch::Page>, count: usize, rwx: crate::arch::RWX) -> Result<(), crate::arch::riscv::vms::AddError> {
-		self.inner().shared_state.virtual_memory.allocate(address, count, rwx, true, false)
+	pub fn allocate_memory(
+		&self,
+		address: NonNull<crate::arch::Page>,
+		count: usize,
+		rwx: crate::arch::RWX,
+	) -> Result<(), crate::arch::riscv::vms::AddError> {
+		self.inner()
+			.shared_state
+			.virtual_memory
+			.allocate(address, count, rwx, true, false)
 	}
 
 	/// Deallocate memory
-	pub fn deallocate_memory(&self, address: NonNull<crate::arch::Page>, count: usize) -> Result<(), ()> {
+	pub fn deallocate_memory(
+		&self,
+		address: NonNull<crate::arch::Page>,
+		count: usize,
+	) -> Result<(), ()> {
 		let _ = (address, count);
 		todo!()
 		//self.inner().shared_state.virtual_memory.deallocate(address, count)
@@ -280,7 +288,8 @@ impl Task {
 #[export_name = "executor_next_task"]
 #[linkage = "external"]
 extern "C" fn next(exec: Task) -> ! {
-	exec.next()
+	exec.process_io();
+	exec.execute()
 }
 
 /*

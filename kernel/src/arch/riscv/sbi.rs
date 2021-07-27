@@ -6,7 +6,6 @@
 //!
 //! [sbi]: https://github.com/riscv/riscv-sbi-doc/blob/master/riscv-sbi.adoc
 
-
 // TODO Never inline for now so that registers are properly preserved.
 #[inline(never)]
 pub fn console_putchar(c: u8) {

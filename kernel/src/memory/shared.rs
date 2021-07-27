@@ -1,7 +1,7 @@
 //! Management of shared pages.
 
-use super::{AllocateError, PPN, PPNBox};
-use super::reserved::{SHARED_COUNTERS, SHARED_ALLOC};
+use super::reserved::{SHARED_ALLOC, SHARED_COUNTERS};
+use super::{AllocateError, PPNBox, PPN};
 use crate::arch::PAGE_BITS;
 use core::fmt;
 use core::mem;
@@ -37,8 +37,13 @@ impl SharedPPN {
 				Err(-1) => (),
 				// The page is already allocated, so try to increase.
 				// Trying is necessary in case the page just got dropped.
-				Err(c) => if counter.compare_exchange_weak(c, c + 1, Ordering::Relaxed, Ordering::Relaxed).is_err() {
-					break;
+				Err(c) => {
+					if counter
+						.compare_exchange_weak(c, c + 1, Ordering::Relaxed, Ordering::Relaxed)
+						.is_err()
+					{
+						break;
+					}
 				}
 			}
 		}
@@ -60,7 +65,10 @@ impl SharedPPN {
 		loop {
 			let curr = counter.load(Ordering::Relaxed);
 			if let Some(new) = curr.checked_add(1) {
-				if counter.compare_exchange_weak(curr, new, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+				if counter
+					.compare_exchange_weak(curr, new, Ordering::Relaxed, Ordering::Relaxed)
+					.is_ok()
+				{
 					break Ok(Self(self.0));
 				}
 			} else {
@@ -147,8 +155,7 @@ impl SharedPPNRange {
 mod test {
 	use super::*;
 
-	fn reset() {
-	}
+	fn reset() {}
 
 	test!(alloc_drop() {
 		reset();

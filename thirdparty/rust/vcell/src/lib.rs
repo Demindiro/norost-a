@@ -22,13 +22,16 @@ pub struct VolatileCell<T> {
 impl<T> VolatileCell<T> {
     /// Creates a new `VolatileCell` containing the given value
     pub const fn new(value: T) -> Self {
-        VolatileCell { value: UnsafeCell::new(value) }
+        VolatileCell {
+            value: UnsafeCell::new(value),
+        }
     }
 
     /// Returns a copy of the contained value
     #[inline(always)]
     pub fn get(&self) -> T
-        where T: Copy
+    where
+        T: Copy,
     {
         unsafe { ptr::read_volatile(self.value.get()) }
     }
@@ -36,7 +39,8 @@ impl<T> VolatileCell<T> {
     /// Sets the contained value
     #[inline(always)]
     pub fn set(&self, value: T)
-        where T: Copy
+    where
+        T: Copy,
     {
         unsafe { ptr::write_volatile(self.value.get(), value) }
     }
