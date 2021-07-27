@@ -52,7 +52,7 @@ pub struct ServerCompletionEntry {
 pub struct TaskSpawnMapping {
     pub task_address: *mut Page,
     pub typ: u8,
-	pub flags: u8,
+    pub flags: u8,
     pub self_address: *mut Page,
 }
 

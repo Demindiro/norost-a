@@ -12,9 +12,9 @@
 //!
 //! It is currently unable to free pages, so memory peaks have permanent effects.
 
+use crate::arch::vms::VirtualMemorySystem;
 use crate::arch::*;
 use crate::memory;
-use core::cell::Cell;
 use core::mem;
 use core::ops::Deref;
 use core::ptr;
@@ -74,7 +74,7 @@ impl<T> Arena<T> {
 	pub const unsafe fn new(address: NonNull<T>, bytes: usize) -> Self {
 		// Ensure we can fit T in a single page. This keeps things simple for now.
 		// TODO use `const _: usize = ...` for this somehow.
-		assert!(crate::arch::PAGE_SIZE >= mem::size_of::<Slot<T>>());
+		assert!(crate::arch::Page::SIZE >= mem::size_of::<Slot<T>>());
 		Self {
 			slots: address.cast(),
 			next: AtomicUsize::new(usize::MAX),
@@ -117,13 +117,11 @@ impl<T> Arena<T> {
 				{
 					let page = memory::allocate().map_err(|_| InsertError::NoMemory)?;
 					// FIXME don't allocate just the first page ya fuckwit
-					// FIXME adding a page may fail because race conditions.
-					VirtualMemorySystem::add(
-						self.slots.cast(),
+					VMS::add(
+						Page::new(self.slots).unwrap(),
 						Map::Private(page),
-						RWX::RW,
-						false,
-						true,
+						vms::RWX::RW,
+						vms::Accessibility::KernelGlobal,
 					)
 					.expect("Page was already mapped");
 					// FIXME *sigh*
@@ -143,7 +141,7 @@ impl<T> Arena<T> {
 	}
 
 	/// Attempt to free a slot. Returns the original item if successful.
-	pub unsafe fn remove(&self, index: usize) -> Result<T, RemoveError> {
+	pub fn remove(&self, index: usize) -> Result<T, RemoveError> {
 		(index < self.capacity.load(Ordering::Relaxed))
 			.then(|| ())
 			.ok_or(RemoveError::NoItem)?;

@@ -11,8 +11,7 @@
 //! [elf64]: https://uclibc.org/docs/elf-64-gen.pdf
 
 use crate::arch;
-use crate::memory::{PPNRange, PPN};
-use crate::task::Task;
+use crate::memory::PPNRange;
 use core::convert::TryInto;
 use core::mem;
 use core::ptr::NonNull;
@@ -124,11 +123,11 @@ const TYPE_EXEC: u16 = 2;
 
 pub struct Segment {
 	/// The address to map the segment to.
-	pub address: NonNull<arch::Page>,
+	pub address: arch::Page,
 	/// The PPNs of this segment.
 	pub ppn: PPNRange,
 	/// The RWX flags.
-	pub flags: arch::RWX,
+	pub flags: arch::vms::RWX,
 }
 
 /// Parse the ELF file and set the PPNs & flags to be mapped.
@@ -212,7 +211,7 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 			continue;
 		}
 
-		use arch::RWX;
+		use arch::vms::RWX;
 
 		let flags = match header.flags & 7 {
 			f if f == FLAG_EXEC | FLAG_WRITE | FLAG_READ => RWX::RWX,
@@ -234,9 +233,10 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 
 		let offset = header.offset & arch::PAGE_MASK;
 
-		let address = NonNull::new((header.virtual_address & !arch::PAGE_MASK) as *mut _)
+		let address = ((header.virtual_address & !arch::PAGE_MASK) as *mut ())
+			.try_into()
 			.expect("Address is 0x0");
-		let count = ((header.memory_size + offset + arch::PAGE_MASK) / arch::PAGE_SIZE)
+		let count = ((header.memory_size + offset + arch::PAGE_MASK) / arch::Page::SIZE)
 			.try_into()
 			.expect("Segment too large");
 		// TODO add 'register' method to PMM that marks a page as managed by PMM but already

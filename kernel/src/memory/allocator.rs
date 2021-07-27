@@ -19,13 +19,14 @@
 //! * The backend is a tree structure that is very similar to VMA tables: The upper bits are the
 //!   PPN of each page. The main difference is that the lower bits are used as a counter indicating
 //!   how many pages are free. If the counter is 0, the table can be removed. If the counter is
-//!   `PAGE_SIZE / PTE_SIZE`, the table can be merged into a hugepage.
+//!   `Page::SIZE / PTE_SIZE`, the table can be merged into a hugepage.
 //!
 //! Using a VMS-like tree structure makes it trivial to support hugepages of any size.
 
 use super::reserved::PMM_STACK;
 use super::{PPNBox, PPNRange, PPN};
 use crate::arch;
+use crate::arch::vms::VirtualMemorySystem;
 use core::mem;
 use core::slice;
 
@@ -151,10 +152,10 @@ impl Allocator {
 		let hc = 1; // TODO
 		let count = hc * Stacks::MEM_TOTAL_SIZE;
 		let count = (count + arch::PAGE_MASK) & !arch::PAGE_MASK;
-		let count = count / arch::PAGE_SIZE;
+		let count = count / arch::Page::SIZE;
 		let stacks = {
 			let mut i = 0;
-			arch::VirtualMemorySystem::allocate_pages(
+			arch::VMS::allocate_pages(
 				|| loop {
 					if let Some(p) = pages[i].pop() {
 						break p;
@@ -162,15 +163,18 @@ impl Allocator {
 						i += 1;
 					}
 				},
-				PMM_STACK.start.cast(),
+				PMM_STACK.start,
 				count as usize,
 			);
 			PMM_STACK.start
 		};
 		let stacks = unsafe {
 			Stacks {
-				stacks: slice::from_raw_parts_mut(stacks.cast().as_ptr(), hc),
-				top_base: stacks.as_ptr().add(Stacks::MEM_STACK_SIZE * hc).cast(),
+				stacks: slice::from_raw_parts_mut(stacks.as_ptr(), hc),
+				top_base: stacks
+					.as_ptr::<u8>()
+					.add(Stacks::MEM_STACK_SIZE * hc)
+					.cast(),
 			}
 		};
 		let mut s = Self { stacks };

@@ -7,6 +7,8 @@ use crate::arch;
 
 #[repr(C)]
 pub struct Executor<'a> {
+	/// The stack of this executor.
+	stack: arch::Page,
 	/// A pointer to the current task being executed.
 	current_task: Option<group::Guard<'a>>,
 }
@@ -15,22 +17,30 @@ pub struct Executor<'a> {
 pub struct NoTask;
 
 // FIXME lol wtf
-static mut NEXT_ID: usize = 0;
+// FIXME the boot elf parser doesn't zero initialize this. Workaround is to set it to 1 first (lmao)
+static mut NEXT_ID: usize = 1;
+
+pub fn next_id() -> usize {
+	unsafe { NEXT_ID }
+}
 
 impl Executor<'_> {
 	/// Suspend the current task (if any) and begin executing another task.
 	pub fn next(&self) -> ! {
 		// TODO lol, lmao
 		let id = unsafe { NEXT_ID };
-		let task = group::Group::get(0)
-			.expect("No root group")
-			.task(id)
-			.expect("No task 0");
-		if id > 0 {
+		let id = if id > 0 {
 			unsafe { NEXT_ID = 0 };
+			0
 		} else {
 			unsafe { NEXT_ID = id + 1 };
-		}
+			id + 1
+		};
+		let task = if let Ok(task) = group::Group::get(0).expect("No root group").task(id) {
+			task
+		} else {
+			panic!("No task with ID {}", id);
+		};
 		task.execute()
 	}
 
@@ -40,7 +50,7 @@ impl Executor<'_> {
 		if let Some(cq) = task.inner().client_request_queue {
 			arch::set_supervisor_userpage_access(true);
 			let mut cq =
-				cq.cast::<[ClientRequestEntry; PAGE_SIZE / mem::size_of::<ClientRequestEntry>()]>();
+				cq.cast::<[ClientRequestEntry; Page::SIZE / mem::size_of::<ClientRequestEntry>()]>();
 			let cq = unsafe { cq.as_mut() };
 			let cqi = &mut task.inner().client_request_index;
 			loop {
@@ -68,10 +78,35 @@ impl Executor<'_> {
 			crate::powerstate::halt();
 		}
 	}
-}
 
-impl Default for Executor<'_> {
-	fn default() -> Self {
-		Self { current_task: None }
+	/// Create a new executor.
+	///
+	/// # Panics
+	///
+	/// If it failed to allocate memory or if the stack address is out of range.
+	pub fn new(id: usize) -> Self {
+		use arch::vms::VirtualMemorySystem;
+		const STACK_ADDRESS: Page = crate::memory::reserved::HART_STACKS.start;
+
+		let stack = Map::Private(memory::allocate().unwrap());
+		arch::VMS::add(
+			STACK_ADDRESS,
+			stack,
+			RWX::RW,
+			vms::Accessibility::KernelGlobal,
+		)
+		.unwrap();
+		Self {
+			stack: crate::memory::reserved::HART_STACKS.start.skip(id + 1).unwrap(),
+			current_task: None,
+		}
+	}
+
+	// FIXME lol
+	pub fn default() -> Self {
+		Self {
+			stack: crate::memory::reserved::HART_STACKS.start.skip(1).unwrap(),
+			current_task: None,
+		}
 	}
 }

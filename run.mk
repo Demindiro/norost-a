@@ -21,6 +21,8 @@ run: build $(VIRTIO_DISK)
 	@echo Enter Ctrl-A + X to quit
 	$(QEMU) $(QEMU_OPT)
 
+RUST_TARGET ?= riscv64gc-unknown-none-elf
+
 gdb: build $(VIRTIO_DISK)
 	riscv64-unknown-linux-gnu-gdb \
 		-ex='set arch riscv64' \

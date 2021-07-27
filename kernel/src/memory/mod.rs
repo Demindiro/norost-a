@@ -5,7 +5,7 @@
 //!
 //! Regular pages (i.e. non-MMIO/DMA pages) are reference counted with a binary tree.
 
-pub use crate::arch::{Page, PAGE_SIZE};
+pub use crate::arch::Page;
 
 pub mod ppn;
 pub mod reserved;

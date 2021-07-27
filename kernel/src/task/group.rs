@@ -15,7 +15,7 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 /// The start of the task group list.
 static GROUPS: arena::Arena<GroupData> = unsafe {
 	arena::Arena::new(
-		reserved::TASK_GROUPS.start.cast(),
+		reserved::TASK_GROUPS.start.as_non_null_ptr(),
 		reserved::TASK_GROUPS.byte_count(),
 	)
 };
@@ -63,7 +63,7 @@ impl Group<'_> {
 
 	/// Get a reference to a task in this group
 	pub fn task(&self, id: usize) -> Result<Task, NoTask> {
-		let tasks = unsafe { &self.data.tasks };
+		let tasks = &self.data.tasks;
 		tasks
 			.get(id)
 			.and_then(|ptr| unsafe { ptr.load(Ordering::Relaxed).as_ref() })
@@ -75,8 +75,8 @@ impl Group<'_> {
 	///
 	/// If any tasks are left, the group itself is returned.
 	// FIXME this isn't thread-safe
-	pub fn remove_task(mut self, id: usize) -> Result<Option<Self>, NoTask> {
-		let tasks = unsafe { &self.data.tasks };
+	pub fn remove_task(self, id: usize) -> Result<Option<Self>, NoTask> {
+		let tasks = &self.data.tasks;
 		tasks
 			.get(id)
 			.map(|t| t.store(ptr::null_mut(), Ordering::Relaxed));
@@ -85,9 +85,11 @@ impl Group<'_> {
 			.iter()
 			.all(|ptr| ptr.load(Ordering::Relaxed).is_null())
 		{
-			unsafe {
-				GROUPS.remove(self.index);
-			}
+			// TODO I'm not using unwrap because it's possible
+			// for other harts to have a reference to this group.
+			let index = self.index;
+			drop(self);
+			let _ = GROUPS.remove(index);
 			Ok(None)
 		} else {
 			Ok(Some(self))

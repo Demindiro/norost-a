@@ -20,10 +20,12 @@
 mod executor;
 mod group;
 
+pub use executor::next_id;
 pub use executor::Executor;
 pub use group::Group;
 
-use crate::arch::{self, Map, Page, PAGE_SIZE, RWX};
+use crate::arch::vms::{self, VirtualMemorySystem, RWX};
+use crate::arch::{self, Map, Page};
 use crate::memory::{self, AllocateError};
 use core::mem;
 use core::num::NonZeroU8;
@@ -43,7 +45,7 @@ pub struct Task(NonNull<TaskData>);
 #[repr(C)]
 struct SharedState {
 	/// Mapping of virtual memory.
-	virtual_memory: arch::VirtualMemorySystem,
+	virtual_memory: arch::VMS,
 }
 
 /// Structure representing an index and mask in a ring buffer.
@@ -66,7 +68,7 @@ pub struct TaskData {
 	/// The register state of this task. Needed for context switches.
 	register_state: arch::RegisterState,
 	/// A pointer to some stack space for use with syscalls.
-	stack: NonNull<arch::Page>,
+	stack: Page,
 	/// The shared state of this task.
 	// TODO should be reference counted.
 	shared_state: SharedState,
@@ -157,32 +159,30 @@ impl RingIndex {
 	}
 }
 
-static mut STACK_ADDRESS: NonNull<Page> = crate::memory::reserved::HART_STACKS.start.cast();
-static mut TASK_DATA_ADDRESS: NonNull<Page> = crate::memory::reserved::TASK_DATA.start.cast();
+const STACK_ADDRESS: Page = memory::reserved::HART_STACKS.start;
+static mut TASK_DATA_ADDRESS: Page = memory::reserved::TASK_DATA.start;
 
 impl Task {
 	/// Create a new empty task with the given VMS.
-	pub fn new(vms: arch::VirtualMemorySystem) -> Result<Self, AllocateError> {
+	pub fn new(vms: arch::VMS) -> Result<Self, AllocateError> {
 		// FIXME may leak memory on alloc error.
 		let task_data = Map::Private(memory::allocate()?);
-		let stack = Map::Private(memory::allocate()?);
 		unsafe {
-			dbg!(TASK_DATA_ADDRESS);
-			dbg!(STACK_ADDRESS);
+			vms.add_to(
+				TASK_DATA_ADDRESS,
+				task_data,
+				RWX::RW,
+				vms::Accessibility::KernelGlobal,
+			)
+			.unwrap();
 		}
-		unsafe {
-			vms.add_to(STACK_ADDRESS, stack, RWX::RW, false, false)
-				.unwrap();
-			vms.add_to(TASK_DATA_ADDRESS, task_data, RWX::RW, false, false)
-				.unwrap();
-		}
-		let task_data = unsafe { TASK_DATA_ADDRESS.cast() };
-		let task = Self(task_data);
+		let task = Self(unsafe { TASK_DATA_ADDRESS }.as_non_null_ptr());
 		// SAFETY: task is valid
 		unsafe {
-			task_data.as_ptr().write(TaskData {
+			dbg!(STACK_ADDRESS);
+			task.0.as_ptr().write(TaskData {
 				register_state: Default::default(),
-				stack: NonNull::new(STACK_ADDRESS.as_ptr().add(1)).unwrap(),
+				stack: STACK_ADDRESS.next().unwrap(),
 				id: TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed),
 				shared_state: SharedState {
 					virtual_memory: vms,
@@ -197,8 +197,7 @@ impl Task {
 				server_completion_index: RingIndex::default(),
 			});
 		}
-		unsafe { TASK_DATA_ADDRESS = NonNull::new_unchecked(TASK_DATA_ADDRESS.as_ptr().add(1)) };
-		unsafe { STACK_ADDRESS = NonNull::new_unchecked(STACK_ADDRESS.as_ptr().add(1)) };
+		unsafe { TASK_DATA_ADDRESS = TASK_DATA_ADDRESS.next().unwrap() };
 		Ok(task)
 	}
 
@@ -212,7 +211,7 @@ impl Task {
 		if let Some(cq) = self.inner().client_request_queue {
 			arch::set_supervisor_userpage_access(true);
 			let mut cq =
-				cq.cast::<[ClientRequestEntry; PAGE_SIZE / mem::size_of::<ClientRequestEntry>()]>();
+				cq.cast::<[ClientRequestEntry; Page::SIZE / mem::size_of::<ClientRequestEntry>()]>();
 			let cq = unsafe { cq.as_mut() };
 			let cqi = &mut self.inner().client_request_index;
 			loop {
@@ -243,22 +242,20 @@ impl Task {
 	/// Allocate private memory at the given virtual address.
 	pub fn allocate_memory(
 		&self,
-		address: NonNull<crate::arch::Page>,
+		address: Page,
 		count: usize,
-		rwx: crate::arch::RWX,
-	) -> Result<(), crate::arch::riscv::vms::AddError> {
-		self.inner()
-			.shared_state
-			.virtual_memory
-			.allocate(address, count, rwx, true, false)
+		rwx: vms::RWX,
+	) -> Result<(), vms::AddError> {
+		self.inner().shared_state.virtual_memory.allocate(
+			address,
+			count,
+			rwx,
+			vms::Accessibility::UserLocal,
+		)
 	}
 
 	/// Deallocate memory
-	pub fn deallocate_memory(
-		&self,
-		address: NonNull<crate::arch::Page>,
-		count: usize,
-	) -> Result<(), ()> {
+	pub fn deallocate_memory(&self, address: NonNull<arch::Page>, count: usize) -> Result<(), ()> {
 		let _ = (address, count);
 		todo!()
 		//self.inner().shared_state.virtual_memory.deallocate(address, count)
@@ -291,29 +288,3 @@ extern "C" fn next(exec: Task) -> ! {
 	exec.process_io();
 	exec.execute()
 }
-
-/*
-impl Executor {
-	/// Destroy this task, removing it from the list it is part of.
-	fn destroy(&mut self) -> Result<(), NoTasks> {
-		if let Some(mut t) = self.tasks {
-			// SAFETY: the task is valid.
-			let tr = unsafe { t.as_mut() };
-			if t == tr.next_task {
-				self.tasks = None;
-			} else {
-				// SAFETY: the tasks are valid and they don't alias `tr`
-				// next_task and prev_task may alias each other, but with
-				// scoping it is not an issue (i.e. there are no two mutable
-				// references to the same struct simultaneously).
-				unsafe { tr.prev_task.as_mut().next_task = tr.next_task };
-				unsafe { tr.next_task.as_mut().prev_task = tr.prev_task };
-			}
-			// FIXME free it
-			Ok(())
-		} else {
-			Err(NoTasks)
-		}
-	}
-}
-*/

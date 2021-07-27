@@ -8,8 +8,8 @@ use core::mem;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicI16, AtomicU32, Ordering};
 
-const COUNTERS: NonNull<AtomicU32> = SHARED_COUNTERS.start.cast();
-const ALLOC: NonNull<AtomicI16> = SHARED_ALLOC.start.cast();
+const COUNTERS: NonNull<AtomicU32> = SHARED_COUNTERS.start.as_non_null_ptr();
+const ALLOC: NonNull<AtomicI16> = SHARED_ALLOC.start.as_non_null_ptr();
 
 /// Representation of a physical page that can be safely shared.
 pub struct SharedPPN(u32);

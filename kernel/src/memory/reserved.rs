@@ -12,8 +12,8 @@
 //!
 //! ## The maximum size needed for the allocation bitmap.
 //!
-//! The bitmap size is determined with `MAX_TOTAL_MEMORY / PAGE_SIZE / 8`, which can also be
-//! expressed as `1 << (log2(MAX_TOTAL_MEMORY) - log2(PAGE_SIZE) - 3)`.
+//! The bitmap size is determined with `MAX_TOTAL_MEMORY / Page::SIZE / 8`, which can also be
+//! expressed as `1 << (log2(MAX_TOTAL_MEMORY) - log2(Page::SIZE) - 3)`.
 //!
 //! For 32-bit systems we need only `4G / 4K / 8 = 32K` memory at most normally. Special
 //! cases include RISC-V's 34 bit addresses, which simply needs `128K`, and x86's PAE with
@@ -36,12 +36,13 @@
 //! of CPU cores is very limited. For now, `4096` is assumed to be the practical limit for
 //! commercial CPUs in the future.
 
+use crate::arch::Page;
 use core::ptr::NonNull;
 
 /// Structure used to denote a start and end range.
 pub struct Range {
 	/// The start address of a range.
-	pub start: NonNull<u8>,
+	pub start: Page,
 	/// The end address of a range (inclusive).
 	pub end: NonNull<u8>,
 }
@@ -60,9 +61,35 @@ impl Range {
 		//    = note: casting pointers to integers in constants
 		use core::mem::transmute;
 		let s = unsafe { transmute::<_, usize>(self.end.as_ptr()) };
-		let e = unsafe { transmute::<_, usize>(self.start.as_ptr()) };
+		let e = unsafe { transmute::<_, usize>(self.start.as_ptr::<()>()) };
 		e + 1 - s
 	}
+}
+
+// fruighhreiughiuergrehreguih
+macro_rules! page {
+	(offset $offset:expr, $s:expr) => {{
+		let val = $offset.wrapping_sub($s * Page::SIZE);
+		match Page::from_usize(val) {
+			Ok(v) => v,
+			Err(_) => {
+				// Partial workaround for const functions being a fucking pain in the ASS AEURGH
+				let val = 0 - val;
+				panic!("Invalid pointer");
+			}
+		}
+	}};
+	(end $offset:expr) => {{
+		let val = $offset & !MAX_PAGE_MASK;
+		match Page::from_usize(val) {
+			Ok(v) => v,
+			Err(_) => {
+				// Ditto
+				let val = 0 - val;
+				panic!("Invalid pointer");
+			}
+		}
+	}};
 }
 
 /// Convienence macro for registering a range.
@@ -79,7 +106,7 @@ macro_rules! range {
 	} => {
 		pub const LOCAL: Range = Range {
 			end: unsafe { NonNull::new_unchecked($g_offset.wrapping_sub(1) as *mut _) },
-			start: unsafe { NonNull::new_unchecked(($offset & !MAX_PAGE_MASK) as *mut _) },
+			start: page!(end $offset),
 		};
 	};
 	{
@@ -90,10 +117,10 @@ macro_rules! range {
 	} => {
 		pub const $n: Range = Range {
 			end: unsafe { NonNull::new_unchecked($offset.wrapping_sub(1) as *mut _) },
-			start: unsafe { NonNull::new_unchecked($offset.wrapping_sub($s) as *mut _) },
+			start: page!(offset $offset, $s),
 		};
 		range! {
-			@offset $offset.wrapping_sub($s),
+			@offset $offset.wrapping_sub($s * Page::SIZE),
 			@local $g_offset,
 			$($l_name => $l_size,)*
 		}
@@ -107,7 +134,7 @@ macro_rules! range {
 	} => {
 		pub const GLOBAL: Range = Range {
 			end: unsafe { NonNull::new_unchecked(0usize.wrapping_sub(1) as *mut _) },
-			start: unsafe { NonNull::new_unchecked(($offset & !MAX_PAGE_MASK) as *mut _) },
+			start: page!(end $offset),
 		};
 		range! {
 			@offset $offset & !MAX_PAGE_MASK,
@@ -125,10 +152,10 @@ macro_rules! range {
 	} => {
 		pub const $n: Range = Range {
 			end: unsafe { NonNull::new_unchecked($offset.wrapping_sub(1) as *mut _) },
-			start: unsafe { NonNull::new_unchecked($offset.wrapping_sub($s) as *mut _) },
+			start: page!(offset $offset, $s),
 		};
 		range! {
-			@offset $offset.wrapping_sub($s),
+			@offset $offset.wrapping_sub($s * Page::SIZE),
 			@global
 			$($g_name => $g_size,)*
 			@local
@@ -167,7 +194,7 @@ macro_rules! range {
 			range![@dump LOCAL $($l_name,)*];
 		}
 
-		const _BORDER_CHECK: usize = unsafe { (LOCAL.start.as_ptr() as usize) } - $limit;
+		const _: usize = unsafe { (LOCAL.start.as_ptr::<()>() as usize) } - $limit; // Limit check
 	};
 }
 
@@ -177,8 +204,8 @@ const MAX_PAGE_MASK: usize = MAX_PAGE_SIZE - 1;
 
 #[cfg(target_arch = "riscv32")]
 range! {
-	KERNEL => 1 << 16,
-	MEMORY_MANAGER => 1 << (30 - 12 - 3),
+	KERNEL => 1 << (16 - Page::OFSSET_BITS),
+	PMM_BITMAP => (1 << (34 - Page::OFSSET_BITS)) / 8,
 }
 
 // Configuration for riscv64 with Sv39 VMS
@@ -186,17 +213,17 @@ range! {
 range! {
 	limit = 0xffff_ff80_0000_0000,
 	[GLOBAL]
-	KERNEL => 1 << 17,
-	PMM_BITMAP => 1 << (44 - 12 - 3),
+	KERNEL => 1 << (17 - Page::OFFSET_BITS),
+	PMM_BITMAP => (1 << (44 - Page::OFFSET_BITS)) / 8 / Page::SIZE,
 	PMM_STACK => super::allocator::Stacks::MEM_TOTAL_SIZE * MAX_HARTS,
-	SHARED_COUNTERS => 1 << (44 - 12 + 2),
-	SHARED_ALLOC => 1 << (44 - 12 - 12 + 1),
-	HART_STACKS => (1 << 12) * MAX_HARTS * 2, // Reserve extra space for guard pages.
-	DEVICE_TREE => 1 << 16,
-	TASK_GROUPS => 1 << 20, // 131_072 tasks
-	TASK_DATA => 1 << 30, // A hella lot of tasks.
+	SHARED_COUNTERS => (1 << (44 - Page::OFFSET_BITS + 2)) / Page::SIZE,
+	SHARED_ALLOC => 1 << (44 - Page::OFFSET_BITS - 12 + 1) / Page::SIZE,
+	HART_STACKS => MAX_HARTS * 2, // Reserve extra space for guard pages.
+	DEVICE_TREE => 1 << (16 - Page::OFFSET_BITS),
+	TASK_GROUPS => 1 << (20 - Page::OFFSET_BITS),
+	TASK_DATA => 1 << (30 - Page::OFFSET_BITS),
 	[LOCAL]
-	HIGHMEM_A => 1 << 30,
-	HIGHMEM_B => 1 << 30,
-	VMM_ROOT => 1 << 12,
+	HIGHMEM_A => 1 << (30 - Page::OFFSET_BITS),
+	HIGHMEM_B => 1 << (30 - Page::OFFSET_BITS),
+	VMM_ROOT => 1 << 0,
 }

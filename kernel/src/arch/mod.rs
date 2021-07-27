@@ -1,12 +1,14 @@
 use crate::memory::ppn::*;
-use core::convert::TryFrom;
+
+pub mod map;
+pub mod page;
+pub mod vms;
+
+pub use map::{Map, MapRange};
+pub use page::Page;
 
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub mod riscv;
-
-/// The size of a single memory page.
-#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
-pub use riscv::PAGE_SIZE;
 
 /// The ELF type of this architecture.
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
@@ -15,15 +17,9 @@ pub use riscv::elf::MACHINE as ELF_MACHINE;
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub use riscv::RegisterState;
 
-#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
-pub use riscv::Page;
-
 /// A system to manage virtual to physical memory mappings.
 #[cfg(target_arch = "riscv64")]
-pub type VirtualMemorySystem = riscv::vms::Sv39;
-
-#[cfg(target_arch = "riscv64")]
-pub type RWX = riscv::vms::RWX;
+pub type VMS = riscv::vms::Sv39;
 
 /// All supported ELF flags.
 // FIXME we need a way to detect individual features at compile time.
@@ -32,7 +28,7 @@ pub type RWX = riscv::vms::RWX;
 pub const ELF_FLAGS: u32 = riscv::elf::RVC | riscv::elf::FLOAT_ABI_DOUBLE;
 
 /// A bitmask that covers the lower zeroed bits of an aligned page.
-pub const PAGE_MASK: usize = PAGE_SIZE - 1;
+pub const PAGE_MASK: usize = Page::SIZE - 1;
 
 /// The amount of bits that are zero due to page alignment.
 pub const PAGE_BITS: usize = 12;
@@ -62,8 +58,6 @@ pub fn init() {
 	#[cfg(not(any(target_arch = "riscv64", target_arch = "riscv32")))]
 	compile_error!("No arch init function defined");
 }
-
-const _PAGE_ALIGN_CHECK: usize = 0 - (PAGE_SIZE - core::alloc::Layout::new::<Page>().align());
 
 /// Returns `true` if an accurate backtrace can be returned, otherwise `false`.
 pub fn is_backtrace_accurate() -> bool {
@@ -121,59 +115,4 @@ pub fn set_supervisor_userpage_access(enable: bool) {
 	sstatus &= !sum_bit;
 	sstatus |= sum_bit * (enable as usize);
 	unsafe { asm!("csrw sstatus, {0}", in(reg) sstatus) };
-}
-
-/// A PPN of a certain type.
-#[repr(u8)]
-pub enum Map {
-	Private(PPN) = 0b00,
-	Direct(PPNDirect) = 0b01,
-	Shared(SharedPPN) = 0b10,
-	SharedLocked(SharedPPN) = 0b11,
-}
-
-impl Map {}
-
-/// A range of PPNs of a certain type.
-#[repr(u8)]
-pub enum MapRange {
-	Private(PPNRange) = 0b00,
-	Direct(PPNDirectRange) = 0b01,
-	Shared(SharedPPNRange) = 0b10,
-	SharedLocked(SharedPPNRange) = 0b11,
-}
-
-impl MapRange {
-	pub fn len(&self) -> usize {
-		match self {
-			Self::Private(p) => p.len(),
-			Self::Direct(d) => d.len(),
-			Self::Shared(s) | Self::SharedLocked(s) => s.len(),
-		}
-	}
-
-	pub fn start(&self) -> PPNBox {
-		match self {
-			Self::Private(p) => p.start(),
-			Self::Direct(d) => d.start(),
-			Self::Shared(s) | Self::SharedLocked(s) => s.start(),
-		}
-	}
-
-	pub fn pop_base(&mut self) -> Option<Map> {
-		match self {
-			Self::Private(p) => p.pop_base().map(Map::Private),
-			Self::Direct(d) => d.pop_base().map(Map::Direct),
-			Self::Shared(s) => s.pop_base().map(Map::Shared),
-			Self::SharedLocked(s) => s.pop_base().map(Map::SharedLocked),
-		}
-	}
-
-	pub fn forget_base(&mut self, count: usize) -> usize {
-		match self {
-			Self::Private(p) => p.forget_base(count),
-			Self::Direct(d) => d.forget_base(count),
-			Self::Shared(s) | Self::SharedLocked(s) => s.forget_base(count),
-		}
-	}
 }

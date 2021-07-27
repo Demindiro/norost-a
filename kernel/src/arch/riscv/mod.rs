@@ -46,15 +46,9 @@ pub fn init() {
 	trap::init();
 }
 
-/// A representation of a single memory page.
-// TODO figure out how to set repr align based on a constant
-#[repr(align(4096))]
-pub struct Page {
-	data: [[usize; 8]; PAGE_SIZE / mem::size_of::<[usize; 8]>()],
-}
+const _: usize = 0 - (4096 - super::Page::SIZE); // Page size check
 
-const _PAGE_SIZE_CHECK: usize = 0 - (4096 - mem::size_of::<Page>());
-
+/*
 impl Page {
 	/// Overwrite this page with zeroes
 	#[inline(always)]
@@ -76,9 +70,7 @@ impl Page {
 		}
 	}
 }
-
-/// The size of a single memory page, which is 4KB for all RISC-V architectures.
-pub const PAGE_SIZE: usize = 4096;
+*/
 
 /// Flags pertaining to ELF files.
 ///

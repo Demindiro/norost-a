@@ -61,38 +61,35 @@ global_asm!(
 	",
 );
 
-
 #[export_name = "main"]
 fn main() {
     let _ = writeln!(kernel::SysLog, "Setting up task data");
-	
-	let addr;
-	unsafe { asm!("la	{0}, hello_world_task", out(reg) addr) };
 
-	let mappings = [
-		kernel::TaskSpawnMapping {
-			typ: 0,
-			task_address: addr,
-			self_address: addr,
-		}
-	];
+    let addr;
+    unsafe { asm!("la	{0}, hello_world_task", out(reg) addr) };
+
+    let mappings = [kernel::TaskSpawnMapping {
+        typ: 0,
+        flags: 0b101,
+        task_address: addr,
+        self_address: addr,
+    }];
 
     let _ = writeln!(kernel::SysLog, "Spawning task");
 
     let kernel::Return { status, value } = unsafe {
-		kernel::task_spawn(
-			mappings.as_ptr(),
-			mappings.len(),
-			addr.cast(),
-			core::ptr::null(),
-		)
-	};
+        kernel::task_spawn(
+            mappings.as_ptr(),
+            mappings.len(),
+            addr.cast(),
+            core::ptr::null(),
+        )
+    };
 
-	assert_eq!(status, 0, "Failed to spawn task");
+    assert_eq!(status, 0, "Failed to spawn task");
 
-	let _ = writeln!(kernel::SysLog, "Spawned task with ID {}", value);
+    let _ = writeln!(kernel::SysLog, "Spawned task with ID {}", value);
 
-	unsafe { kernel::io_wait(0, 0) };
-	loop {
-	}
+    unsafe { kernel::io_wait(0, 0) };
+    loop {}
 }

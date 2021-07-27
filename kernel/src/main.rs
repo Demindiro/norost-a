@@ -7,8 +7,11 @@
 #![feature(bindings_after_at)]
 // Needed because rustc is stupid
 #![feature(const_fn_transmute)]
+#![feature(const_mut_refs)]
 #![feature(const_option)]
 #![feature(const_panic)]
+#![feature(const_ptr_is_null)]
+#![feature(const_raw_ptr_deref)]
 #![feature(const_raw_ptr_to_usize_cast)]
 #![feature(custom_test_frameworks)]
 #![feature(destructuring_assignment)]
@@ -165,16 +168,18 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 #[no_mangle]
 #[cfg(not(test))]
 extern "C" fn main(
-	_hart_id: usize,
+	hart_id: usize,
 	dtb_ptr: *const arch::Page,
 	kernel: *const u8,
 	kernel_suze: usize,
 	init: *const u8,
 	init_size: usize,
 ) {
+	dbg!(task::next_id());
 	// Initialize trap table immediately so we can catch errors as early as possible.
 	arch::init();
 
+	dbg!(task::next_id());
 	/*
 	// Log architecture info
 	use arch::*;
@@ -320,7 +325,7 @@ extern "C" fn main(
 								", out("t0") kernel_start, out("t1") kernel_end
 							);
 						}
-						let page_mask = arch::PAGE_SIZE - 1;
+						let page_mask = arch::Page::SIZE - 1;
 						let end = start + size;
 						let (start, end) = if (start < kernel_start && end < kernel_start)
 							|| (start >= kernel_end && end >= kernel_end)
@@ -359,16 +364,18 @@ extern "C" fn main(
 	mem::drop(root);
 	interpreter.finish();
 
+	dbg!();
 	memory::reserved::dump_vms_map();
 
 	// Initialize the memory manager
 	//let (address, size) = heap.expect("No memory device (check the DTB!)");
 	// FIXME this is utter shit
-	let (address, size) = (0x8400_0000, 1024 * arch::PAGE_SIZE);
+	let (address, size) = (0x8400_0000, 1024 * arch::Page::SIZE);
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
+	dbg!(task::next_id());
 	let mm = unsafe {
-		memory::PPNRange::from_ptr(address, (size / arch::PAGE_SIZE).try_into().unwrap())
+		memory::PPNRange::from_ptr(address, (size / arch::Page::SIZE).try_into().unwrap())
 	};
 	unsafe { memory::mem_add_ranges(&mut [mm]) };
 
@@ -390,23 +397,28 @@ extern "C" fn main(
 		}
 	}
 
+	dbg!(task::next_id());
+
 	// Remap FDT to kernel global space
 	unsafe { *PLATFORM_INFO_PHYS_PTR.0.get() = dtb_ptr as usize };
 	unsafe {
-		*PLATFORM_INFO_SIZE.0.get() = (dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE
+		*PLATFORM_INFO_SIZE.0.get() = (dtb.total_size() + arch::Page::SIZE - 1) / arch::Page::SIZE
 	};
-	for i in 0..(dtb.total_size() + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE {
+	let mut addr = memory::reserved::DEVICE_TREE.start;
+	for i in 0..(dtb.total_size() + arch::Page::SIZE - 1) / arch::Page::SIZE {
 		unsafe {
 			let p = arch::Map::Private(memory::PPN::from_ptr(dtb_ptr.add(i) as usize));
-			let v = memory::reserved::DEVICE_TREE
-				.start
-				.cast::<arch::Page>()
-				.as_ptr()
-				.add(i);
-			arch::VirtualMemorySystem::add(NonNull::new_unchecked(v), p, arch::RWX::R, false, true)
-				.unwrap();
+			arch::VMS::add(
+				addr,
+				p,
+				arch::vms::RWX::R,
+				arch::vms::Accessibility::KernelGlobal,
+			)
+			.unwrap();
+			addr = addr.next().unwrap();
 		}
 	}
+	dbg!(task::next_id());
 
 	// Get init segments
 	#[rustfmt::ignore]
@@ -419,20 +431,22 @@ extern "C" fn main(
 	// SAFETY: a valid init pointer and size should have been passed by boot.s.
 	let init = unsafe { core::slice::from_raw_parts(init, init_size) };
 	elf::parse(init.as_ref(), &mut segments[..], &mut entry);
+	dbg!();
+
+	use arch::vms::VirtualMemorySystem;
 
 	// Unmap identity maps (making the init elf file inaccessible)
-	arch::VirtualMemorySystem::clear_identity_maps();
+	arch::VMS::clear_identity_maps();
 
 	// Create init task and map pages.
-	let mut init =
-		task::Task::new(arch::VirtualMemorySystem::current()).expect("Failed to create task");
+	let mut init = task::Task::new(arch::VMS::current()).expect("Failed to create task");
 	for s in segments.iter_mut().filter_map(|s| s.as_mut()) {
 		let mut a = s.address;
 		while let Some(ppn) = s.ppn.pop_base() {
 			dbg!(&a, &ppn, &s.flags);
 			let ppn = arch::Map::Private(ppn);
-			arch::VirtualMemorySystem::add(a, ppn, s.flags, true, false).unwrap();
-			a = NonNull::new(a.as_ptr().wrapping_add(1)).unwrap();
+			arch::VMS::add(a, ppn, s.flags, arch::vms::Accessibility::UserLocal).unwrap();
+			a = a.next().unwrap();
 		}
 	}
 	dbg!(entry);
@@ -440,7 +454,8 @@ extern "C" fn main(
 
 	task::Group::new(init);
 
-	let exec = task::Executor::default();
+	let exec = task::Executor::new(hart_id);
+	dbg!(task::next_id());
 	exec.next();
 }
 

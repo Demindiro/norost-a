@@ -2,10 +2,11 @@
 //!
 //! This module contains generic code. Arch-specific code is located in [`arch`](crate::arch)
 
-use crate::arch::{self, Map, MapRange, Page, VirtualMemorySystem, RWX};
+use crate::arch::vms::{VirtualMemorySystem, RWX};
+use crate::arch::{self, Map, MapRange, Page};
 use crate::memory::ppn::*;
 use crate::task;
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryFrom;
 use core::ptr::NonNull;
 
 /// The type of a syscall, specifically the amount and type of arguments it takes.
@@ -93,6 +94,32 @@ pub struct Mapping {
 /// Module containing all the actual syscalls.
 mod sys {
 	use super::*;
+
+	use crate::arch::vms::{self, VirtualMemorySystem};
+
+	const PROTECT_R: usize = 0x1;
+	const PROTECT_W: usize = 0x2;
+	const PROTECT_X: usize = 0x4;
+	#[allow(dead_code)]
+	const MEGAPAGE: usize = 0x10;
+	#[allow(dead_code)]
+	const GIGAPAGE: usize = 0x20;
+	#[allow(dead_code)]
+	const TERAPAGE: usize = 0x30;
+
+	#[derive(Debug)]
+	struct InvalidPageFlags;
+
+	fn decode_rwx_flags(flags: usize) -> Result<RWX, InvalidPageFlags> {
+		Ok(match flags & 7 {
+			f if f == PROTECT_R => RWX::R,
+			f if f == PROTECT_X => RWX::X,
+			f if f == PROTECT_R | PROTECT_W => RWX::RW,
+			f if f == PROTECT_R | PROTECT_X => RWX::RX,
+			f if f == PROTECT_R | PROTECT_W | PROTECT_X => RWX::RWX,
+			_ => return Err(InvalidPageFlags),
+		})
+	}
 
 	/// Macro to reduce the typing work for each syscall
 	macro_rules! sys {
@@ -194,31 +221,18 @@ mod sys {
 	sys! {
 		/// Allocates a range of private or shared pages for the current task.
 		[task] mem_alloc(address, count, flags) {
-			const PROTECT_R: usize = 0x1;
-			const PROTECT_W: usize = 0x2;
-			const PROTECT_X: usize = 0x4;
-			#[allow(dead_code)]
-			const MEGAPAGE: usize = 0x10;
-			#[allow(dead_code)]
-			const GIGAPAGE: usize = 0x20;
-			#[allow(dead_code)]
-			const TERAPAGE: usize = 0x30;
 			log!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
-			use crate::arch::RWX;
-			let address = match NonNull::new(address as *mut _) {
-				Some(a) => a,
-				None => return Return(Status::NullArgument, 0),
-			};
-			let rwx = match flags & 7 {
-				PROTECT_R => RWX::R,
-				PROTECT_X => RWX::X,
-				f if f == PROTECT_R | PROTECT_W => RWX::RW,
-				f if f == PROTECT_R | PROTECT_X => RWX::RX,
-				f if f == PROTECT_R | PROTECT_W | PROTECT_X => RWX::RWX,
-				_ => return Return(Status::MemoryInvalidProtectionFlags, 0),
-			};
-			task.allocate_memory(address, count, rwx).unwrap();
-			Return(Status::Ok, address.as_ptr() as usize)
+			match arch::Page::try_from(address as *mut ()) {
+				Ok(address) => match decode_rwx_flags(flags) {
+					Ok(rwx) => {
+						task.allocate_memory(address, count, rwx).unwrap();
+						Return(Status::Ok, address.as_ptr::<()>() as usize)
+					}
+					Err(InvalidPageFlags) => Return(Status::MemoryInvalidProtectionFlags, 0),
+				}
+				Err(arch::page::FromPointerError::Null) => Return(Status::NullArgument, 0),
+				Err(arch::page::FromPointerError::BadAlignment) => Return(Status::BadAlignment, 0),
+			}
 		}
 	}
 
@@ -253,9 +267,9 @@ mod sys {
 				return Return(Status::BadAlignment, 0);
 			}
 			let store = unsafe { core::slice::from_raw_parts_mut(store as *mut _, count) };
-			let address = NonNull::new(address as *mut _).unwrap();
+			let address = arch::Page::try_from(address as *mut ()).unwrap();
 			arch::set_supervisor_userpage_access(true);
-			let ret = arch::VirtualMemorySystem::physical_addresses(address, store);
+			let ret = arch::VMS::physical_addresses(address, store);
 			arch::set_supervisor_userpage_access(false);
 			Return(if ret.is_ok() { Status::Ok } else { Status::MemoryNotAllocated }, 0)
 		}
@@ -266,19 +280,19 @@ mod sys {
 			log!("task_spawn 0x{:x}, {}, 0x{:x}, 0x{:x}", mappings, mappings_count, program_counter, stack_pointer);
 			let mappings = unsafe { core::slice::from_raw_parts(mappings as *const Mapping, mappings_count) };
 			use crate::task::*;
-			let vms = arch::VirtualMemorySystem::new().unwrap();
+			let vms = arch::VMS::new().unwrap();
 			arch::set_supervisor_userpage_access(true);
 			for map in mappings {
 				match map.typ {
 					// Share mapping from current process.
 					0 => {
-						log!("  share_map  {:p} -> {:p}", map.self_address, map.task_address);
+						let rwx = decode_rwx_flags(map.flags.into());
+						log!("  share_map  {:p} -> {:p} ({:?})", map.self_address, map.task_address, rwx);
 						vms.share(
-							NonNull::new(map.task_address).unwrap(),
-							NonNull::new(map.self_address).unwrap(),
+							arch::Page::try_from(map.task_address).unwrap(),
+							arch::Page::try_from(map.self_address).unwrap(),
 							RWX::RWX, // TODO
-							true,
-							false,
+							vms::Accessibility::UserLocal,
 						).unwrap()
 					}
 					// Invalid type
@@ -301,21 +315,29 @@ mod sys {
 			assert_ne!(size, 0, "TODO just return an error doof");
 			// FIXME this should be in the PMM
 			let mut ppns = [None, None, None, None, None, None, None, None];
-			let count = (size + arch::PAGE_SIZE - 1) / arch::PAGE_SIZE;
+			let count = (size + arch::Page::SIZE - 1) / arch::Page::SIZE;
 			use crate::memory;
 			ppns[0] = Some(memory::allocate().unwrap());
 			dbg!(size, count);
 			for i in 1..count {
 				ppns[i] = Some(memory::allocate().unwrap());
 			}
-			let a = address as *mut arch::Page;
-			for i in 0..count {
-				let p = core::mem::replace(&mut ppns[i], None).unwrap();
-				let p = Map::Private(p);
-				let a = NonNull::new(a.wrapping_add(i)).unwrap();
-				arch::VirtualMemorySystem::add(a, p, arch::RWX::RW, true, false);
+			if let Some(addr) = NonNull::new(address as *mut ()) {
+				let mut addr = arch::Page::new(addr).ok();
+				for i in 0..count {
+					if let Some(a) = addr {
+						let p = core::mem::replace(&mut ppns[i], None).unwrap();
+						let p = Map::Private(p);
+						arch::VMS::add(a, p, vms::RWX::RW, vms::Accessibility::UserLocal);
+						addr = a.next();
+					} else {
+						todo!();
+					}
+				}
+				Return(Status::Ok, address)
+			} else {
+				todo!()
 			}
-			Return(Status::Ok, a as usize)
 		}
 	}
 
@@ -324,13 +346,17 @@ mod sys {
 			log!("sys_platform_info 0x{:x}, {}", address, _max_count);
 			use crate::{PLATFORM_INFO_SIZE, PLATFORM_INFO_PHYS_PTR};
 			if let Some(a) = NonNull::new(address as *mut arch::Page) {
-				let p = PPNDirect::from_usize(*PLATFORM_INFO_PHYS_PTR).unwrap();
-				if let Ok(p) = PPNDirectRange::new(p.into(), *PLATFORM_INFO_SIZE) {
-					let p = MapRange::Direct(p);
-					arch::VirtualMemorySystem::add_range(a, p, arch::RWX::R, true, false).unwrap();
-					Return(Status::Ok, *PLATFORM_INFO_SIZE)
+				if let Ok(a) = arch::Page::new(a) {
+					let p = PPNDirect::from_usize(*PLATFORM_INFO_PHYS_PTR).unwrap();
+					if let Ok(p) = PPNDirectRange::new(p.into(), *PLATFORM_INFO_SIZE) {
+						let p = MapRange::Direct(p);
+						arch::VMS::add_range(a, p, vms::RWX::R, vms::Accessibility::UserLocal).unwrap();
+						Return(Status::Ok, *PLATFORM_INFO_SIZE)
+					} else {
+						todo!()
+					}
 				} else {
-					todo!()
+					Return(Status::BadAlignment, 0)
 				}
 			} else {
 				Return(Status::NullArgument, 0)
@@ -341,20 +367,24 @@ mod sys {
 	sys! {
 		[_] sys_direct_alloc(address, ppn, count, _flags) {
 			log!("sys_direct_alloc 0x{:x}, 0x{:x}, {}, 0b{:b}", address, ppn << arch::PAGE_BITS, count, _flags);
-			if let Some(addr) = NonNull::new(address as *mut _) {
-				if let Ok(ppn) = PPNBox::try_from(ppn) {
-					if let Ok(ppn) = PPNDirectRange::new(ppn, count) {
-						let map = MapRange::Direct(ppn);
-						match VirtualMemorySystem::add_range(addr, map, RWX::RW, true, false) {
-							Ok(()) => Return(Status::Ok, 0),
-							Err(_) => Return(Status::MemoryOverlap, 0),
+			if let Some(addr) = NonNull::new(address as *mut ()) {
+				if let Ok(addr) = arch::Page::new(addr) {
+					if let Ok(ppn) = PPNBox::try_from(ppn) {
+						if let Ok(ppn) = PPNDirectRange::new(ppn, count) {
+							let map = MapRange::Direct(ppn);
+							match arch::VMS::add_range(addr, map, RWX::RW, vms::Accessibility::UserLocal) {
+								Ok(()) => Return(Status::Ok, 0),
+								Err(_) => Return(Status::MemoryOverlap, 0),
+							}
+						} else {
+							todo!()
+							//Return(Status::, 0)
 						}
 					} else {
-						todo!()
-						//Return(Status::, 0)
+						Return(Status::MemoryUnavailable, 0)
 					}
 				} else {
-					Return(Status::MemoryUnavailable, 0)
+					Return(Status::NullArgument, 0)
 				}
 			} else {
 				Return(Status::NullArgument, 0)

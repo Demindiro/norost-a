@@ -1,7 +1,7 @@
 OUTPUT_FORMAT("elf64-littleriscv")
 OUTPUT_ARCH(riscv)
 
-STACK_SIZE = 4K;
+STACK_SIZE = 16K;
 
 ENTRY(_start)
 

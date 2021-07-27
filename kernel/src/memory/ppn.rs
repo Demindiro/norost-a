@@ -113,7 +113,6 @@ impl PPNRange {
 	#[track_caller]
 	#[inline]
 	pub fn forget_base(&mut self, count: usize) -> usize {
-		use core::convert::TryInto;
 		let count = count.try_into().unwrap();
 		if let Some(c) = self.count.checked_sub(count) {
 			self.count = c;
@@ -221,7 +220,6 @@ impl PPNDirectRange {
 	#[track_caller]
 	#[inline]
 	pub fn forget_base(&mut self, count: usize) -> usize {
-		use core::convert::TryInto;
 		let count = count.try_into().unwrap();
 		if let Some(c) = self.count.checked_sub(count) {
 			self.count = c;
