@@ -1,5 +1,3 @@
-use crate::memory::ppn::*;
-
 pub mod map;
 pub mod page;
 pub mod vms;
@@ -36,14 +34,6 @@ pub const PAGE_BITS: usize = 12;
 use core::ptr;
 
 extern "C" {
-	/// Saves the registers of the given task and begins running the next task.
-	///
-	/// ## Safety
-	///
-	/// `pc` in the `registers` must be valid.
-	// Task _is_ FFI-safe you stupid fucking compiler.
-	#[allow(improper_ctypes)]
-	pub fn trap_next_task(task: crate::task::Task) -> !;
 
 	/// Begins running the given task.
 	// Task _is_ FFI-safe you stupid fucking compiler.

@@ -192,6 +192,7 @@ where
 	}
 
 	/// Iterate over all the elements in the arena.
+	#[allow(dead_code)]
 	pub fn iter<'a>(&'a self) -> impl Iterator<Item = Guard<'a, T>> + 'a {
 		let cap = self.capacity.load(Ordering::Relaxed);
 		(0..cap).flat_map(move |i| self.get(i))

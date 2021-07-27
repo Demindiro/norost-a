@@ -31,9 +31,12 @@ impl Map {}
 /// A range of PPNs of a certain type.
 #[repr(u8)]
 pub enum MapRange {
+	#[allow(dead_code)]
 	Private(PPNRange) = 0b00,
 	Direct(PPNDirectRange) = 0b01,
+	#[allow(dead_code)]
 	Shared(SharedPPNRange) = 0b10,
+	#[allow(dead_code)]
 	SharedLocked(SharedPPNRange) = 0b11,
 }
 

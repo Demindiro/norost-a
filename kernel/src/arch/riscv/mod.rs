@@ -12,6 +12,8 @@ pub mod rv64;
 pub mod sbi;
 pub mod vms;
 
+use core::ptr;
+
 /// Structure used to save register state
 #[repr(C)]
 pub struct RegisterState {
@@ -39,38 +41,12 @@ impl Default for RegisterState {
 	}
 }
 
-use core::{mem, ptr};
-
 /// Initialize arch-specific structures such as the interrupt table
 pub fn init() {
 	trap::init();
 }
 
 const _: usize = 0 - (4096 - super::Page::SIZE); // Page size check
-
-/*
-impl Page {
-	/// Overwrite this page with zeroes
-	#[inline(always)]
-	#[optimize(speed)]
-	#[allow(dead_code)]
-	pub fn clear(&mut self) {
-		for e in self.data.iter_mut() {
-			// Manual loop unrolling because the compiler is a dumb brick.
-			unsafe {
-				ptr::write_volatile(&mut e[0], 0);
-				ptr::write_volatile(&mut e[1], 0);
-				ptr::write_volatile(&mut e[2], 0);
-				ptr::write_volatile(&mut e[3], 0);
-				ptr::write_volatile(&mut e[4], 0);
-				ptr::write_volatile(&mut e[5], 0);
-				ptr::write_volatile(&mut e[6], 0);
-				ptr::write_volatile(&mut e[7], 0);
-			}
-		}
-	}
-}
-*/
 
 /// Flags pertaining to ELF files.
 ///

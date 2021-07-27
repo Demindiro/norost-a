@@ -14,7 +14,6 @@ use crate::arch;
 use crate::memory::PPNRange;
 use core::convert::TryInto;
 use core::mem;
-use core::ptr::NonNull;
 
 #[cfg_attr(
 	target_pointer_width = "32",
@@ -245,7 +244,6 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 		let ppn = &data[header.offset & !arch::PAGE_MASK..] as *const _ as *const u8 as usize;
 		let ppn = unsafe { PPNRange::from_ptr(ppn, count) };
 
-		dbg!(address, &ppn, flags);
 		segments[i] = Some(Segment {
 			address,
 			ppn,

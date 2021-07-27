@@ -114,7 +114,6 @@ impl Entry {
 	fn new_table(ppn: PPN) -> Self {
 		let ppn = ppn.into_raw();
 		let mut s = Self((ppn as u64) << 10);
-		log!("TBL  0x{:x}", (s.0 & !0x3ff) << 2);
 		s.set_valid(true);
 		s
 	}
@@ -219,10 +218,8 @@ impl Leaf {
 			self.0 |= (global as u64) << Self::GLOBAL_BIT;
 			self.0 |= 1 << Self::ACCESSED_BIT;
 			self.0 |= 1 << Self::DIRTY_BIT;
-			log!("OK   0x{:x}", (self.0 & !0x3ff) << 2);
 			Ok(())
 		} else {
-			log!("ERR  0x{:x}", (self.0 & !0x3ff) << 2);
 			Err(AddError::Overlaps)
 		}
 	}
@@ -334,7 +331,7 @@ impl Sv39 {
 		// VPN[2]
 		let pte = &unsafe { ROOT.as_ref() }[va.ppn_2()];
 		if !pte.is_table() {
-			return todo!();
+			todo!();
 		}
 
 		// VPN[1]
@@ -344,7 +341,7 @@ impl Sv39 {
 		let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).as_mut::<[Entry; 512]>() };
 		let pte = &mut tbl[va.ppn_1()];
 		if !pte.is_table() {
-			return todo!();
+			todo!();
 		}
 
 		// VPN[0]
@@ -516,7 +513,6 @@ impl VirtualMemorySystem for Sv39 {
 		let ppn_0 = memory::allocate()?;
 
 		let va = VirtualAddress(ROOT.as_ptr() as u64);
-		dbg!(ROOT);
 
 		let satp = ppn_2.as_raw() as u64 | (1 << 63);
 
@@ -653,8 +649,8 @@ impl VirtualMemorySystem for Sv39 {
 			&& PPNBox::from(ppn_min) % (1 << 18) == 0
 			&& PPNBox::from(ppn_max) % (1 << 18) == 0
 		{
-			let mut undo = #[cold]
-			|err: AddError| todo!();
+			let undo = #[cold]
+			|err: AddError| todo!("{:?}", err);
 			while let Some(map) = map_range.pop_base() {
 				let c = map_range.forget_base((1 << 18) - 1);
 				assert_eq!(c + 1, 1 << 18);
@@ -672,8 +668,8 @@ impl VirtualMemorySystem for Sv39 {
 			&& PPNBox::from(ppn_min) % (1 << 9) == 0
 			&& PPNBox::from(ppn_max) % (1 << 9) == 0
 		{
-			let mut undo = #[cold]
-			|err: AddError| todo!();
+			let undo = #[cold]
+			|err: AddError| todo!("{:?}", err);
 			while let Some(map) = map_range.pop_base() {
 				let c = map_range.forget_base((1 << 9) - 1);
 				assert_eq!(c + 1, 1 << 9);
@@ -688,8 +684,8 @@ impl VirtualMemorySystem for Sv39 {
 				}
 			}
 		} else {
-			let mut undo = #[cold]
-			|err: AddError| todo!();
+			let undo = #[cold]
+			|err: AddError| todo!("{:?}", err);
 			while let Some(map) = map_range.pop_base() {
 				match Self::get_pte_alloc(address) {
 					Ok(mut pte) => unsafe {
@@ -719,7 +715,7 @@ impl VirtualMemorySystem for Sv39 {
 	/// Write the physical *addresses* from the start of the virtual address into the given slice.
 	fn physical_addresses(address: Page, store: &mut [usize]) -> Result<(), ()> {
 		let mut address = Some(address);
-		for (i, s) in store.iter_mut().enumerate() {
+		for s in store.iter_mut() {
 			let addr = address.unwrap();
 			let va = VirtualAddress(addr.as_ptr::<()>() as u64);
 
@@ -775,7 +771,6 @@ impl VirtualMemorySystem for Sv39 {
 	where
 		F: FnMut() -> PPN,
 	{
-		dbg!();
 		// Map the root table
 		unsafe {
 			let va = VirtualAddress(ROOT.as_ptr() as u64);
@@ -795,7 +790,6 @@ impl VirtualMemorySystem for Sv39 {
 			let ppn_2_ptr = ppn_2.as_ptr();
 
 			let mut leaf = Leaf(0);
-			log!("VAA 0x{:x}", va.0);
 			leaf.set(
 				Map::Private(PPN::from_ptr(root)),
 				RWX::RW,
@@ -848,7 +842,6 @@ impl VirtualMemorySystem for Sv39 {
 				unsafe { Self::translate_highmem_a(ppn.as_raw()).as_non_null_ptr::<[Leaf; 512]>() };
 			let tbl = unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_0()];
-			log!("VA  0x{:x}", va.0);
 			pte.set(Map::Private(f()), RWX::RW, Accessibility::KernelGlobal)
 				.expect("Page overlaps with an existing page");
 			mem::forget(ppn);
@@ -908,7 +901,7 @@ impl VirtualMemorySystem for Sv39 {
 			return Err(ShareError::Overlaps);
 		}
 
-		to.set(from.share()?, rwx, accessibility);
+		to.set(from.share()?, rwx, accessibility)?;
 
 		Ok(())
 	}
@@ -943,7 +936,7 @@ impl fmt::Debug for Sv39 {
 						i,
 						(base[i].0 & !0x3ff) << 2,
 						base[i].0 & 0x3ff
-					);
+					)?;
 					if base[i].is_table() {
 						let ppn = (base[i].0 >> 10) as u32;
 						Self::map_highmem_a(Some(ppn));
@@ -959,7 +952,7 @@ impl fmt::Debug for Sv39 {
 									k,
 									(base[k].0 & !0x3ff) << 2,
 									base[k].0 & 0x3ff
-								);
+								)?;
 								if base[k].is_table() {
 									let ppn = (base[k].0 >> 10) as u32;
 									Self::map_highmem_a(Some(ppn));
@@ -975,7 +968,7 @@ impl fmt::Debug for Sv39 {
 												m,
 												(base[m].0 & !0x3ff) << 2,
 												base[m].0 & 0x3ff
-											);
+											)?;
 										}
 									}
 								}

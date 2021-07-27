@@ -78,7 +78,6 @@ mod util;
 use core::cell::UnsafeCell;
 use core::convert::TryInto;
 use core::ops;
-use core::ptr::NonNull;
 use core::{mem, panic, ptr};
 
 static PLATFORM_INFO_SIZE: OnceCell<usize> = OnceCell(UnsafeCell::new(0));
@@ -170,22 +169,13 @@ fn dump_dtb(dtb: &driver::DeviceTree) {
 extern "C" fn main(
 	hart_id: usize,
 	dtb_ptr: *const arch::Page,
-	kernel: *const u8,
-	kernel_suze: usize,
+	_kernel: *const u8,
+	_kernel_size: usize,
 	init: *const u8,
 	init_size: usize,
 ) {
-	dbg!(task::next_id());
 	// Initialize trap table immediately so we can catch errors as early as possible.
 	arch::init();
-
-	dbg!(task::next_id());
-	/*
-	// Log architecture info
-	use arch::*;
-	arch::id().log();
-	arch::capabilities().log();
-	*/
 
 	// Parse DTB and reserve some memory for heap usage
 	let dtb = unsafe { driver::DeviceTree::parse_dtb(dtb_ptr.cast()).unwrap() };
@@ -364,7 +354,6 @@ extern "C" fn main(
 	mem::drop(root);
 	interpreter.finish();
 
-	dbg!();
 	memory::reserved::dump_vms_map();
 
 	// Initialize the memory manager
@@ -373,14 +362,10 @@ extern "C" fn main(
 	let (address, size) = (0x8400_0000, 1024 * arch::Page::SIZE);
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
-	dbg!(task::next_id());
 	let mm = unsafe {
 		memory::PPNRange::from_ptr(address, (size / arch::Page::SIZE).try_into().unwrap())
 	};
 	unsafe { memory::mem_add_ranges(&mut [mm]) };
-
-	let start = address;
-	let end = start + size;
 
 	// Initialize the device list
 	struct IterProp<'a> {
@@ -396,8 +381,6 @@ extern "C" fn main(
 			self.properties[self.counter - 1]
 		}
 	}
-
-	dbg!(task::next_id());
 
 	// Remap FDT to kernel global space
 	unsafe { *PLATFORM_INFO_PHYS_PTR.0.get() = dtb_ptr as usize };
@@ -418,7 +401,6 @@ extern "C" fn main(
 			addr = addr.next().unwrap();
 		}
 	}
-	dbg!(task::next_id());
 
 	// Get init segments
 	#[rustfmt::ignore]
@@ -431,7 +413,6 @@ extern "C" fn main(
 	// SAFETY: a valid init pointer and size should have been passed by boot.s.
 	let init = unsafe { core::slice::from_raw_parts(init, init_size) };
 	elf::parse(init.as_ref(), &mut segments[..], &mut entry);
-	dbg!();
 
 	use arch::vms::VirtualMemorySystem;
 
@@ -439,23 +420,22 @@ extern "C" fn main(
 	arch::VMS::clear_identity_maps();
 
 	// Create init task and map pages.
-	let mut init = task::Task::new(arch::VMS::current()).expect("Failed to create task");
+	let init = task::Task::new(arch::VMS::current()).expect("Failed to create task");
 	for s in segments.iter_mut().filter_map(|s| s.as_mut()) {
 		let mut a = s.address;
 		while let Some(ppn) = s.ppn.pop_base() {
-			dbg!(&a, &ppn, &s.flags);
 			let ppn = arch::Map::Private(ppn);
 			arch::VMS::add(a, ppn, s.flags, arch::vms::Accessibility::UserLocal).unwrap();
 			a = a.next().unwrap();
 		}
 	}
-	dbg!(entry);
 	init.set_pc(entry);
 
-	task::Group::new(init);
+	task::Group::new(init).expect("failed to create init task group");
+
+	let _ = (boot_args, stdout, model);
 
 	let exec = task::Executor::new(hart_id);
-	dbg!(task::next_id());
 	exec.next();
 }
 

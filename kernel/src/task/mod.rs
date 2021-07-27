@@ -20,7 +20,6 @@
 mod executor;
 mod group;
 
-pub use executor::next_id;
 pub use executor::Executor;
 pub use group::Group;
 
@@ -179,7 +178,6 @@ impl Task {
 		let task = Self(unsafe { TASK_DATA_ADDRESS }.as_non_null_ptr());
 		// SAFETY: task is valid
 		unsafe {
-			dbg!(STACK_ADDRESS);
 			task.0.as_ptr().write(TaskData {
 				register_state: Default::default(),
 				stack: STACK_ADDRESS.next().unwrap(),
@@ -210,8 +208,8 @@ impl Task {
 	pub fn process_io(&self) {
 		if let Some(cq) = self.inner().client_request_queue {
 			arch::set_supervisor_userpage_access(true);
-			let mut cq =
-				cq.cast::<[ClientRequestEntry; Page::SIZE / mem::size_of::<ClientRequestEntry>()]>();
+			let mut cq = cq
+				.cast::<[ClientRequestEntry; Page::SIZE / mem::size_of::<ClientRequestEntry>()]>();
 			let cq = unsafe { cq.as_mut() };
 			let cqi = &mut self.inner().client_request_index;
 			loop {

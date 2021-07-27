@@ -74,7 +74,7 @@ macro_rules! page {
 			Ok(v) => v,
 			Err(_) => {
 				// Partial workaround for const functions being a fucking pain in the ASS AEURGH
-				let val = 0 - val;
+				let _val = 0 - val;
 				panic!("Invalid pointer");
 			}
 		}
@@ -85,7 +85,7 @@ macro_rules! page {
 			Ok(v) => v,
 			Err(_) => {
 				// Ditto
-				let val = 0 - val;
+				let _val = 0 - val;
 				panic!("Invalid pointer");
 			}
 		}

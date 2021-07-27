@@ -20,10 +20,6 @@ pub struct NoTask;
 // FIXME the boot elf parser doesn't zero initialize this. Workaround is to set it to 1 first (lmao)
 static mut NEXT_ID: usize = 1;
 
-pub fn next_id() -> usize {
-	unsafe { NEXT_ID }
-}
-
 impl Executor<'_> {
 	/// Suspend the current task (if any) and begin executing another task.
 	pub fn next(&self) -> ! {
@@ -45,12 +41,13 @@ impl Executor<'_> {
 	}
 
 	/// Process I/O of the current task
+	#[allow(dead_code)]
 	pub fn process_io(&self) -> Result<(), NoTask> {
 		let task = self.current_task.as_ref().ok_or(NoTask)?;
 		if let Some(cq) = task.inner().client_request_queue {
 			arch::set_supervisor_userpage_access(true);
-			let mut cq =
-				cq.cast::<[ClientRequestEntry; Page::SIZE / mem::size_of::<ClientRequestEntry>()]>();
+			let mut cq = cq
+				.cast::<[ClientRequestEntry; Page::SIZE / mem::size_of::<ClientRequestEntry>()]>();
 			let cq = unsafe { cq.as_mut() };
 			let cqi = &mut task.inner().client_request_index;
 			loop {
@@ -73,6 +70,7 @@ impl Executor<'_> {
 	}
 
 	/// Begin idling, i.e. do nothing
+	#[allow(dead_code)]
 	pub fn idle(&self) -> ! {
 		loop {
 			crate::powerstate::halt();
@@ -85,7 +83,6 @@ impl Executor<'_> {
 	///
 	/// If it failed to allocate memory or if the stack address is out of range.
 	pub fn new(id: usize) -> Self {
-		use arch::vms::VirtualMemorySystem;
 		const STACK_ADDRESS: Page = crate::memory::reserved::HART_STACKS.start;
 
 		let stack = Map::Private(memory::allocate().unwrap());
@@ -97,7 +94,10 @@ impl Executor<'_> {
 		)
 		.unwrap();
 		Self {
-			stack: crate::memory::reserved::HART_STACKS.start.skip(id + 1).unwrap(),
+			stack: crate::memory::reserved::HART_STACKS
+				.start
+				.skip(id + 1)
+				.unwrap(),
 			current_task: None,
 		}
 	}

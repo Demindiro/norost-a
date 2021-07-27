@@ -103,11 +103,6 @@ impl PPNRange {
 		})
 	}
 
-	/// Return the start address of this range as a usize
-	pub fn as_usize(&self) -> usize {
-		(self.start as usize) << 12
-	}
-
 	/// Forget about the last N PPNs and return the amount of PPNs that actually got removed.
 	#[must_use]
 	#[track_caller]

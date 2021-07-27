@@ -4,8 +4,7 @@
 //! all the methods that must be present for a VMS to be useable.
 
 use super::*;
-use crate::memory::{self, AllocateError, SharedPPN, PPN};
-use core::ptr::NonNull;
+use crate::memory::{AllocateError, SharedPPN, PPN};
 
 /// The accessibility of the mapping to be added.
 #[derive(Clone, Copy)]
@@ -26,20 +25,6 @@ pub enum RWX {
 	X = 0b100,
 	RX = 0b101,
 	RWX = 0b111,
-}
-
-impl RWX {
-	pub fn r(self) -> bool {
-		self == Self::R || self == Self::RW || self == Self::RX || self == Self::RWX
-	}
-
-	pub fn w(self) -> bool {
-		self == Self::RW || self == Self::RWX
-	}
-
-	pub fn x(self) -> bool {
-		self == Self::X || self == Self::RX || self == Self::RWX
-	}
 }
 
 /// A page that is either private or shared.

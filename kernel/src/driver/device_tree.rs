@@ -323,12 +323,6 @@ impl Interpreter {
 		}
 	}
 
-	/// Returns the total amount of nodes this interpreter iterated over. Returns `None` if it
-	/// hasn't finished yet.
-	pub fn node_count(&self) -> Option<usize> {
-		self.finished.then(|| self.node_count)
-	}
-
 	/// Iterate until the end
 	pub fn finish(&mut self) {
 		while !self.finished {

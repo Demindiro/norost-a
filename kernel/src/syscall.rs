@@ -2,7 +2,7 @@
 //!
 //! This module contains generic code. Arch-specific code is located in [`arch`](crate::arch)
 
-use crate::arch::vms::{VirtualMemorySystem, RWX};
+use crate::arch::vms::{self, VirtualMemorySystem, RWX};
 use crate::arch::{self, Map, MapRange, Page};
 use crate::memory::ppn::*;
 use crate::task;
@@ -95,8 +95,6 @@ pub struct Mapping {
 mod sys {
 	use super::*;
 
-	use crate::arch::vms::{self, VirtualMemorySystem};
-
 	const PROTECT_R: usize = 0x1;
 	const PROTECT_W: usize = 0x2;
 	const PROTECT_X: usize = 0x4;
@@ -174,7 +172,7 @@ mod sys {
 
 	sys! {
 		/// Waits for one or all I/O events to complete
-		[task] io_wait(flags, time) {
+		[_] io_wait(flags, time) {
 			log!("io_wait 0b{:b}, {}", flags, time);
 			// FIXME actually wait for I/O
 			//unsafe { crate::arch::trap_next_task(task); }
@@ -300,7 +298,6 @@ mod sys {
 				}
 			}
 			arch::set_supervisor_userpage_access(false);
-			dbg!(&vms);
 			let task = Task::new(vms).unwrap();
 			task.set_pc(program_counter as *const ());
 			let group = Group::get(0).unwrap();
@@ -318,7 +315,6 @@ mod sys {
 			let count = (size + arch::Page::SIZE - 1) / arch::Page::SIZE;
 			use crate::memory;
 			ppns[0] = Some(memory::allocate().unwrap());
-			dbg!(size, count);
 			for i in 1..count {
 				ppns[i] = Some(memory::allocate().unwrap());
 			}
@@ -328,7 +324,8 @@ mod sys {
 					if let Some(a) = addr {
 						let p = core::mem::replace(&mut ppns[i], None).unwrap();
 						let p = Map::Private(p);
-						arch::VMS::add(a, p, vms::RWX::RW, vms::Accessibility::UserLocal);
+						arch::VMS::add(a, p, vms::RWX::RW, vms::Accessibility::UserLocal)
+							.unwrap();
 						addr = a.next();
 					} else {
 						todo!();
@@ -428,7 +425,7 @@ mod sys {
 			arch::set_supervisor_userpage_access(true);
 			use crate::log::Log;
 			use core::fmt::Write;
-			write!(Log, "{:?}", BrokenStr(unsafe { slice::from_raw_parts(address as *const _, length) }));
+			let _ = write!(Log, "{:?}", BrokenStr(unsafe { slice::from_raw_parts(address as *const _, length) }));
 			arch::set_supervisor_userpage_access(false);
 
 			Return(Status::Ok, 0)

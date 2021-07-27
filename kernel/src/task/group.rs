@@ -42,6 +42,7 @@ pub struct Full;
 /// may still change some of the data it points to.
 pub struct Group<'a> {
 	data: arena::Guard<'a, GroupData>,
+	#[allow(dead_code)]
 	index: usize,
 }
 
@@ -75,6 +76,7 @@ impl Group<'_> {
 	///
 	/// If any tasks are left, the group itself is returned.
 	// FIXME this isn't thread-safe
+	#[allow(dead_code)]
 	pub fn remove_task(self, id: usize) -> Result<Option<Self>, NoTask> {
 		let tasks = &self.data.tasks;
 		tasks
@@ -97,6 +99,7 @@ impl Group<'_> {
 	}
 
 	/// Returns the ID of this group.
+	#[allow(dead_code)]
 	pub fn id(&self) -> usize {
 		self.index
 	}

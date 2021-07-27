@@ -43,9 +43,6 @@ impl Page {
 		if addr.get() & (Self::ALIGN - 1) == 0 {
 			Ok(Self(addr))
 		} else {
-			let a = 0 - addr.get();
-			let b = 0 / addr.get();
-			panic!("wtf");
 			Err(BadAlignment)
 		}
 	}
@@ -57,8 +54,6 @@ impl Page {
 			let ptr = unsafe { NonNull::new_unchecked(ptr) };
 			match Self::new(ptr) {
 				Ok(page) => Ok(page),
-				Err(_) => 
-			panic!("BULLSHIT"),
 				Err(BadAlignment) => Err(FromPointerError::BadAlignment),
 			}
 		} else {
@@ -74,8 +69,6 @@ impl Page {
 			if ptr & (Self::ALIGN - 1) == 0 {
 				Ok(unsafe { Self(NonZeroUsize::new_unchecked(ptr)) })
 			} else {
-				let a = 0 - ptr;
-				//panic!("BULLSHIT");
 				Err(FromPointerError::BadAlignment)
 			}
 		} else {

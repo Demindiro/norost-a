@@ -147,6 +147,7 @@ impl SharedPPNRange {
 	#[track_caller]
 	#[inline]
 	pub fn forget_base(&mut self, count: usize) -> usize {
+		let _ = count;
 		todo!()
 	}
 }
