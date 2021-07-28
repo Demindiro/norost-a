@@ -5,5 +5,4 @@
 
 #define PROT_NONE  (0x0)
 
-
 #endif

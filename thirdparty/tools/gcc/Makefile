@@ -44,7 +44,7 @@ gcc: binutils gcc-$(GCC_VERSION) $(BUILD)/gcc
 		--prefix="$(PREFIX)" \
 		--disable-nls \
 		--enable-languages=c \
-		--without-headers
+		#--without-headers
 	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc all-gcc
 	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc all-target-libgcc
 	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc install-gcc

@@ -1,7 +1,7 @@
 #ifndef __POSIX_COMMON_H
 #define __POSIX_COMMON_H
 
-#include "stdint.h"
+#include "stddef.h"
 
 extern struct kernel_client_request_entry *request_queue;
 extern size_t request_mask;

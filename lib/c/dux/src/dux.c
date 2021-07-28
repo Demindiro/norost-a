@@ -7,7 +7,7 @@
 /**
  * The end address of the null page. The null page can never be allocated.
  */
-#define NULL_PAGE_END (0xfff)
+#define NULL_PAGE_END ((void *)0xfff)
 
 /**
  * A single memory range.
@@ -53,8 +53,8 @@ void __dux_init(void)
 	
 	// Allocate a single page for keeping track of the memory ranges.
 	// FIXME changed top 4 bits from f to 0 to workaround shitty kernel.
-	reserved_ranges = 0x0ff00000;
-	void *reserved_ranges_end = 0x0ff0efff; // 64KiB, or 4096 entries ought to be enough.
+	reserved_ranges = (struct memory_map *)0x0ff00000;
+	void *reserved_ranges_end = (void *)0x0ff0efff; // 64KiB, or 4096 entries ought to be enough.
 	kret = kernel_mem_alloc(reserved_ranges, 1, PROT_READ | PROT_WRITE);
 	if (kret.status != 0) {
 		// FIXME handle errors properly
@@ -68,10 +68,10 @@ void __dux_init(void)
 	//reserved_count = 1;
 
 	// FIXME assume the top and bottom are reserved for stack and ELF respectively.
-	reserved_ranges[2].start = 0xfff00000,
-	reserved_ranges[2].end   = 0xfffeffff,
-	reserved_ranges[0].start =   0x10000,
-	reserved_ranges[0].end   = 0x1ffffff,
+	reserved_ranges[2].start = (void *)0xfff00000,
+	reserved_ranges[2].end   = (void *)0xfffeffff,
+	reserved_ranges[0].start = (void *)   0x10000,
+	reserved_ranges[0].end   = (void *) 0x1ffffff,
 	reserved_count = 3;
 
 	// Reserve pages for client requests and responses
@@ -85,7 +85,7 @@ void __dux_init(void)
 		// FIXME handle errors properly
 		for (;;) {}
 	}
-	crq = (struct kernel_server_request_entry *)dret.address;
+	crq = (struct kernel_client_request_entry *)dret.address;
 	crq_mask = (PAGE_SIZE / sizeof(struct kernel_server_request_entry)) - 1;
 	crq_index = 0;
 
@@ -99,7 +99,7 @@ void __dux_init(void)
 		// FIXME handle errors properly
 		for (;;) {}
 	}
-	ccq = (struct kernel_server_completion_entry *)dret.address;
+	ccq = (struct kernel_client_completion_entry *)dret.address;
 	ccq_mask = (PAGE_SIZE / sizeof(struct kernel_server_completion_entry)) - 1;
 	ccq_index = 0;
 

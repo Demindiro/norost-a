@@ -1,7 +1,8 @@
 #ifndef __KERNEL_H
 #define __KERNEL_H
 
-#include "stdint.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #define IO_NONE   (0)
 #define IO_READ   (1)

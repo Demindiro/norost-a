@@ -6,19 +6,23 @@
 void *universal_buffer;
 size_t universal_buffer_size;
 
-void __posix_init(void) {
+void __posix_init(void)
+{
 #define NULL ((void *)0)
 	asm volatile ("fence");
 	struct dux_reserve_pages dret = dux_reserve_pages(NULL, 16);
 	asm volatile ("fence");
 	if (dret.status != 0) {
-		for (;;) {} // TODO
+		for (;;) {
+		}		// TODO
 	}
 	asm volatile ("fence");
-	kernel_return_t kret = kernel_mem_alloc(dret.address, 1, PROT_READ | PROT_WRITE);
+	kernel_return_t kret =
+	    kernel_mem_alloc(dret.address, 1, PROT_READ | PROT_WRITE);
 	asm volatile ("fence");
 	if (kret.status != 0) {
-		for (;;) {} // TODO
+		for (;;) {
+		}		// TODO
 	}
 	asm volatile ("fence");
 	universal_buffer = dret.address;

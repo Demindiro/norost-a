@@ -7,8 +7,8 @@ system calls. It is not intended to fully implement the standard, it merely
 makes it easier to port existing applications.
 
 The implementation is based on ``glibc`` documentation. I'd reference the
-"official" standard but they charge 900$ for an *open standard*\* it so
-they can go fuck themselves.
+"official" standard but they charge 900$ for an *open standard*\* so they
+can go fuck themselves.
 
 If someone happens to have a link to a *free* copy, as in you don't need to
 sacrifice anything, please let me know.

@@ -3,3 +3,5 @@ drive.bin
 *.dtb
 *.dts
 *.cpio
+
+*~

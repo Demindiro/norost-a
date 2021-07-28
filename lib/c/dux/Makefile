@@ -2,12 +2,7 @@ TOOLS_DIR ?= ../../../thirdparty/tools/gcc/output/bin
 PREFIX    ?= riscv64-unknown-elf
 
 INCLUDE  = -Iinclude
-INCLUDE += -I../dux/include
 INCLUDE += -I../kernel/include
-INCLUDE += -I../errno/include
-#INCLUDE += -I../../../thirdparty/tools/gcc/output/lib/gcc/riscv64-unknown-elf/11.1.0/include/
-
-#DEFINES  = -D_GCC_WRAP_STDINT_H
 
 CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3
 CC        = $(TOOLS_DIR)/$(PREFIX)-gcc
@@ -21,17 +16,12 @@ DIRECTORIES = $(shell for n in `find src -type d -printf "%P\n"`; do if [ $$n ];
 OUTPUT = output
 BUILD  = build
 
-STATIC_LIBS = ../dux/output/dux.a
 
-$(OUTPUT)/posix.a: $(OBJECTS) $(STATIC_LIBS) | $(OUTPUT)
-	$(AR) rcT $@ $^
-	printf 'create $@\naddlib $@\nsave\nend' | $(AR) -M
+$(OUTPUT)/dux.a: $(OBJECTS) | $(OUTPUT)
+	$(AR) rcs $@ $^
 
-$(BUILD)/%.o: src/%.c | $(DIRECTORIES)
-	$(CC) -c $< -o $@ $(INCLUDE) $(CC_ARGS)
-
-../dux/output/dux.a:
-	make -C ../dux
+$(BUILD)/%.o: src/%.c | $(DIRECTORIES) $(BUILD)
+	$(CC) -c $< -o $@ $(INCLUDE) $(CC_ARGS) $(DEFINES)
 
 $(BUILD):
 	mkdir $@
@@ -48,6 +38,3 @@ format:
 clean:
 	for f in $(HEADERS) $(SOURCES); do rm -f "$$f~"; done
 	rm -rf $(BUILD)
-
-clean-all: clean
-	rm -rf $(OUTPUT)
