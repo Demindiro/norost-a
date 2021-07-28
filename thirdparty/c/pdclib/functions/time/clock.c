@@ -8,18 +8,21 @@
 
 #ifndef REGTEST
 
-#include "sys/times.h"
+#include "pdclib/_PDCLIB_dux.h"
+
+//#include "sys/times.h"
 
 clock_t clock( void )
 {
-    struct tms buf;
-
-    if ( times( &buf ) != ( clock_t )-1 )
-    {
-        return buf.tms_utime + buf.tms_stime;
-    }
-
-    return -1;
+	DUX_TODO(0)
+//    struct tms buf;
+//
+//    if ( times( &buf ) != ( clock_t )-1 )
+//    {
+//        return buf.tms_utime + buf.tms_stime;
+//    }
+//
+//    return -1;
 }
 
 #endif

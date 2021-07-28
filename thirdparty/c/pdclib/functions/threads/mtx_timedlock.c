@@ -1,4 +1,4 @@
-/* cnd_timedwait( cnd_t *, mtx_t, const struct timespec * )
+/* mtx_timedlock( mtx_t *, const struct timespec * )
 
    This file is part of the Public Domain C Library (PDCLib).
    Permission is granted to use, modify, and / or redistribute at will.
@@ -8,22 +8,22 @@
 
 #include <threads.h>
 
-#include "/usr/include/errno.h"
+#include <errno.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Implicitly casing the parameters. */
-extern int pthread_cond_timedwait( cnd_t *, mtx_t *, const struct timespec * );
+/* Implicitly casting the first parameters. */
+extern int pthread_mutex_timedlock( mtx_t *, const struct timespec * );
 
 #ifdef __cplusplus
 }
 #endif
 
-int cnd_timedwait( cnd_t * _PDCLIB_restrict cond, mtx_t * _PDCLIB_restrict mtx, const struct timespec * _PDCLIB_restrict ts )
+int mtx_timedlock( mtx_t * _PDCLIB_restrict mtx, const struct timespec * _PDCLIB_restrict ts )
 {
-    switch ( pthread_cond_timedwait( cond, mtx, ts ) )
+    switch ( pthread_mutex_timedlock( mtx, ts ) )
     {
         case 0:
             return thrd_success;

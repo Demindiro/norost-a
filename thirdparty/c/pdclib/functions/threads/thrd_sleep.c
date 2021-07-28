@@ -8,7 +8,7 @@
 
 #include <threads.h>
 
-#include "/usr/include/errno.h"
+#include <errno.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -59,3 +59,7 @@ dkms.conf
 
 # Auxiliary Targets
 get-uctypes
+
+# Output
+build/
+output/

@@ -12,6 +12,17 @@
    at version 2.8.6, which is released under CC0 license just as PDCLib.
 */
 
+/* DUX_TODO stubs to make GCC shut up */
+static void sched_yield() {}
+static int open(const char *, int) { return -1; }
+static void *mmap(int, int, int, int, int, int) { return ((void *)0); }
+static int munmap(void *, int) { return -1; }
+#define PROT_READ 1
+#define PROT_WRITE 2
+#define PROT_EXEC 4
+#define MAP_PRIVATE 1
+#define O_RDWR (PROT_READ | PROT_WRITE)
+
 /* Declared implicitly by dlmalloc. This declaration avoids the warning. */
 #include <stdint.h>
 void * sbrk( intptr_t );
@@ -637,7 +648,9 @@ MAX_RELEASE_CHECK_RATE   default: 4095 unless not HAVE_MMAP
 #endif  /* DARWIN */
 
 #ifndef LACKS_SYS_TYPES_H
-#include <sys/types.h>  /* For size_t */
+// DUX_TODO
+//#include <sys/types.h>  /* For size_t */
+typedef _PDCLIB_size_t size_t;
 #endif  /* LACKS_SYS_TYPES_H */
 
 /* The maximum possible size_t value has all bits set */
@@ -1539,15 +1552,18 @@ DLMALLOC_EXPORT int mspace_mallopt(int, int);
 #include <sys/mman.h>    /* for mmap */
 #undef __USE_GNU
 #else
-#include <sys/mman.h>    /* for mmap */
+// DUX_TODO
+//#include <sys/mman.h>    /* for mmap */
 #endif /* linux */
 #endif /* LACKS_SYS_MMAN_H */
 #ifndef LACKS_FCNTL_H
-#include <fcntl.h>
+// DUX_TODO
+//#include <fcntl.h>
 #endif /* LACKS_FCNTL_H */
 #endif /* HAVE_MMAP */
 #ifndef LACKS_UNISTD_H
-#include <unistd.h>     /* for sbrk, sysconf */
+// DUX_TODO
+//#include <unistd.h>     /* for sbrk, sysconf */
 #else /* LACKS_UNISTD_H */
 #if !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
 extern void*     sbrk(ptrdiff_t);
@@ -1560,7 +1576,8 @@ extern void*     sbrk(ptrdiff_t);
 #if defined (__SVR4) && defined (__sun)  /* solaris */
 #include <thread.h>
 #elif !defined(LACKS_SCHED_H)
-#include <sched.h>
+// DUX_TODO
+//#include <sched.h>
 #endif /* solaris or LACKS_SCHED_H */
 #if (defined(USE_RECURSIVE_LOCKS) && USE_RECURSIVE_LOCKS != 0) || !USE_SPIN_LOCKS
 #include <pthread.h>
@@ -1629,7 +1646,8 @@ unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
 #        define malloc_getpagesize getpagesize()
 #      else
 #        ifndef LACKS_SYS_PARAM_H
-#          include <sys/param.h>
+	   // DUX_TODO
+//#          include <sys/param.h>
 #        endif
 #        ifdef EXEC_PAGESIZE
 #          define malloc_getpagesize EXEC_PAGESIZE

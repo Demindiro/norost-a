@@ -11,9 +11,11 @@
 
 #ifndef REGTEST
 
+#include "pdclib/_PDCLIB_dux.h"
+
 #include <string.h>
 
-#include "/usr/include/errno.h"
+#include <errno.h>
 
 extern struct _PDCLIB_file_t * _PDCLIB_filelist;
 
@@ -29,26 +31,27 @@ extern int unlink( const char * pathname );
 
 int remove( const char * pathname )
 {
-    int rc;
-    struct _PDCLIB_file_t * current = _PDCLIB_filelist;
-
-    while ( current != NULL )
-    {
-        if ( ( current->filename != NULL ) && ( strcmp( current->filename, pathname ) == 0 ) )
-        {
-            return EOF;
-        }
-
-        current = current->next;
-    }
-
-    if ( ( rc = unlink( pathname ) ) == -1 )
-    {
-        /* The 1:1 mapping in _PDCLIB_config.h ensures this works. */
-        *_PDCLIB_errno_func() = errno;
-    }
-
-    return rc;
+	DUX_TODO(-1);
+//    int rc;
+//    struct _PDCLIB_file_t * current = _PDCLIB_filelist;
+//
+//    while ( current != NULL )
+//    {
+//        if ( ( current->filename != NULL ) && ( strcmp( current->filename, pathname ) == 0 ) )
+//        {
+//            return EOF;
+//        }
+//
+//        current = current->next;
+//    }
+//
+//    if ( ( rc = unlink( pathname ) ) == -1 )
+//    {
+//        /* The 1:1 mapping in _PDCLIB_config.h ensures this works. */
+//        *_PDCLIB_errno_func() = errno;
+//    }
+//
+//    return rc;
 }
 
 #endif

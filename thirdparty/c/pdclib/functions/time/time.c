@@ -10,12 +10,15 @@
 
 #include "pdclib/_PDCLIB_defguard.h"
 
-#include "sys/time.h"
+//#include "sys/time.h"
 
 /* See comments in _PDCLIB_config.h on the semantics of time_t. */
 
 time_t time( time_t * timer )
 {
+	*timer = 0;
+	DUX_TODO(-1);
+	/*
     struct timeval tv;
 
     if ( gettimeofday( &tv, NULL ) == 0 )
@@ -29,6 +32,7 @@ time_t time( time_t * timer )
     }
 
     return -1;
+	*/
 }
 
 #endif

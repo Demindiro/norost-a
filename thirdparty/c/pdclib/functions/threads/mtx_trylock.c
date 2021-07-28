@@ -1,4 +1,4 @@
-/* mtx_timedlock( mtx_t *, const struct timespec * )
+/* mtx_trylock( mtx_t * )
 
    This file is part of the Public Domain C Library (PDCLib).
    Permission is granted to use, modify, and / or redistribute at will.
@@ -8,28 +8,28 @@
 
 #include <threads.h>
 
-#include "/usr/include/errno.h"
+#include <errno.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Implicitly casting the first parameters. */
-extern int pthread_mutex_timedlock( mtx_t *, const struct timespec * );
+/* Implicity casting the parameter. */
+extern int pthread_mutex_trylock( mtx_t * );
 
 #ifdef __cplusplus
 }
 #endif
 
-int mtx_timedlock( mtx_t * _PDCLIB_restrict mtx, const struct timespec * _PDCLIB_restrict ts )
+int mtx_trylock( mtx_t * mtx )
 {
-    switch ( pthread_mutex_timedlock( mtx, ts ) )
+    switch ( pthread_mutex_trylock( mtx ) )
     {
         case 0:
             return thrd_success;
 
-        case ETIMEDOUT:
-            return thrd_timedout;
+        case EBUSY:
+            return thrd_busy;
 
         default:
             return thrd_error;
