@@ -1,4 +1,6 @@
 output/
-binutils-*
-gcc-*
+binutils-*/
+gcc-*/
+binutils-*.tar.xz
+gcc-*.tar.xz
 build/

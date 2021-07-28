@@ -1,5 +1,5 @@
 OUTPUT = $(shell pwd)/output
-TARGET = riscv64-unknown-elf
+TARGET = riscv64-dux-elf
 BUILD  = build
 PREFIX = $(OUTPUT)
 
@@ -60,15 +60,28 @@ gcc-$(GCC_VERSION).tar.xz:
 
 binutils-$(BINUTILS_VERSION): binutils-$(BINUTILS_VERSION).tar.xz
 	tar xJvf $<
+	cd $@ && patch -p1 < ../patch/binutils-$(BINUTILS_VERSION).diff
 
 gcc-$(GCC_VERSION): gcc-$(GCC_VERSION).tar.xz
 	tar xJvf $<
+	cd $@ && patch -p1 < ../patch/gcc-$(GCC_VERSION).diff
 
 $(OUTPUT):
 	mkdir -p $@
 
 $(BUILD)/%:
 	mkdir -p $@
+
+
+create-patches:
+	tar xJvf binutils-$(BINUTILS_VERSION).tar.xz -C /tmp
+	diff -ru /tmp/binutils-$(BINUTILS_VERSION) binutils-$(BINUTILS_VERSION) | grep -v ^O > patch/binutils-$(BINUTILS_VERSION).diff
+	diff -ruN /tmp/binutils-$(BINUTILS_VERSION)/ld/emulparams binutils-$(BINUTILS_VERSION)/ld/emulparams >> patch/binutils-$(BINUTILS_VERSION).diff || true
+	rm -r /tmp/binutils-$(BINUTILS_VERSION)
+	tar xJvf gcc-$(GCC_VERSION).tar.xz -C /tmp
+	diff -ru /tmp/gcc-$(GCC_VERSION) gcc-$(GCC_VERSION) --exclude='configure' | grep -v ^O > patch/gcc-$(GCC_VERSION).diff
+	diff -ruN /tmp/gcc-$(GCC_VERSION)/gcc/config gcc-$(GCC_VERSION)/gcc/config >> patch/gcc-$(GCC_VERSION).diff || true
+	rm -r /tmp/gcc-$(GCC_VERSION)
 
 
 clean: clean-build clean-unpacked clean-archives
