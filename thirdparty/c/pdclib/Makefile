@@ -3,7 +3,7 @@ OUTPUT = output
 
 CC = ../../tools/gcc/output/bin/riscv64-unknown-elf-gcc
 
-OBJECTS = $(shell for n in `find functions -type f -name '*.c' ! -name "*malloc.c" -printf "%P\n"`; do echo "$(BUILD)/$${n%.c}.o"; done)
+OBJECTS = $(shell for n in `find functions -type f -name '*.c' -printf "%P\n"`; do echo "$(BUILD)/$${n%.c}.o"; done)
 DIRECTORIES = $(shell for n in `find functions -type d -printf "%P\n"`; do if [ $$n ]; then echo "$(BUILD)/$$n"; fi; done)
 INCLUDE = -Iinclude -Iinclude/pdclib
 DEFINES = -D_PDCLIB_BUILD -D_PDCLIB_STATIC_DEFINE
