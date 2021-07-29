@@ -13,10 +13,6 @@ typedef void FILE;
 #define stdout ((void *)1)
 #define stderr ((void *)2)
 
-int puts(const char *str) {
-	return 0;
-}
-
 int printf(const char *, ...);
 
 int fprintf(FILE *, const char *, ...);

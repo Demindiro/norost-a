@@ -1,6 +1,6 @@
 diff -ru '--exclude=configure' /tmp/gcc-11.1.0/config.sub gcc-11.1.0/config.sub
 --- /tmp/gcc-11.1.0/config.sub	2021-04-27 12:00:12.000000000 +0200
-+++ gcc-11.1.0/config.sub	2021-07-29 07:23:46.007318532 +0200
++++ gcc-11.1.0/config.sub	2021-07-29 21:19:41.917981014 +0200
 @@ -1733,6 +1733,8 @@
  		;;
  	none)
@@ -12,7 +12,7 @@ diff -ru '--exclude=configure' /tmp/gcc-11.1.0/config.sub gcc-11.1.0/config.sub
  		exit 1
 diff -ru '--exclude=configure' /tmp/gcc-11.1.0/fixincludes/mkfixinc.sh gcc-11.1.0/fixincludes/mkfixinc.sh
 --- /tmp/gcc-11.1.0/fixincludes/mkfixinc.sh	2021-04-27 12:00:12.000000000 +0200
-+++ gcc-11.1.0/fixincludes/mkfixinc.sh	2021-07-29 07:23:46.007318532 +0200
++++ gcc-11.1.0/fixincludes/mkfixinc.sh	2021-07-29 21:19:41.917981014 +0200
 @@ -11,6 +11,7 @@
  
  # Check for special fix rules for particular targets
@@ -23,8 +23,8 @@ diff -ru '--exclude=configure' /tmp/gcc-11.1.0/fixincludes/mkfixinc.sh gcc-11.1.
      x86_64-*-mingw32* | \
 diff -ru '--exclude=configure' /tmp/gcc-11.1.0/gcc/config.gcc gcc-11.1.0/gcc/config.gcc
 --- /tmp/gcc-11.1.0/gcc/config.gcc	2021-04-27 12:00:13.000000000 +0200
-+++ gcc-11.1.0/gcc/config.gcc	2021-07-29 07:23:46.007318532 +0200
-@@ -771,6 +771,12 @@
++++ gcc-11.1.0/gcc/config.gcc	2021-07-29 22:05:12.143955923 +0200
+@@ -771,6 +771,13 @@
    tmake_file="${tmake_file} t-dragonfly"
    target_has_targetdm=yes
    ;;
@@ -33,11 +33,12 @@ diff -ru '--exclude=configure' /tmp/gcc-11.1.0/gcc/config.gcc gcc-11.1.0/gcc/con
 +  gnu_ld=yes
 +  default_use_cxa_atexit=yes
 +  use_gcc_stdint=wrap
++  native_system_header_dir=/include
 +  ;;
  *-*-freebsd*)
    # This is the generic ELF configuration of FreeBSD.  Later
    # machine-specific sections may refine and add to this
-@@ -2466,6 +2472,11 @@
+@@ -2466,6 +2473,11 @@
  	cxx_target_objs="${cxx_target_objs} microblaze-c.o"
  	tmake_file="${tmake_file} microblaze/t-microblaze"
          ;;
@@ -51,7 +52,7 @@ diff -ru '--exclude=configure' /tmp/gcc-11.1.0/gcc/config.gcc gcc-11.1.0/gcc/con
  	case "x${enable_multilib}" in
 diff -ru '--exclude=configure' /tmp/gcc-11.1.0/libgcc/config.host gcc-11.1.0/libgcc/config.host
 --- /tmp/gcc-11.1.0/libgcc/config.host	2021-04-27 12:00:15.000000000 +0200
-+++ gcc-11.1.0/libgcc/config.host	2021-07-29 07:23:46.007318532 +0200
++++ gcc-11.1.0/libgcc/config.host	2021-07-29 21:19:41.917981014 +0200
 @@ -222,6 +222,10 @@
    tmake_file="$tmake_file t-slibgcc t-slibgcc-gld t-slibgcc-elf-ver"
    extra_parts="crtbegin.o crtend.o crtbeginS.o crtendS.o"
@@ -65,7 +66,7 @@ diff -ru '--exclude=configure' /tmp/gcc-11.1.0/libgcc/config.host gcc-11.1.0/lib
    # machine-specific sections may refine and add to this
 diff -ru '--exclude=configure' /tmp/gcc-11.1.0/libstdc++-v3/crossconfig.m4 gcc-11.1.0/libstdc++-v3/crossconfig.m4
 --- /tmp/gcc-11.1.0/libstdc++-v3/crossconfig.m4	2021-04-27 12:00:16.000000000 +0200
-+++ gcc-11.1.0/libstdc++-v3/crossconfig.m4	2021-07-29 07:23:46.007318532 +0200
++++ gcc-11.1.0/libstdc++-v3/crossconfig.m4	2021-07-29 21:19:41.917981014 +0200
 @@ -88,6 +88,13 @@
      AC_DEFINE(HAVE_HYPOT)
      ;;
@@ -82,8 +83,8 @@ diff -ru '--exclude=configure' /tmp/gcc-11.1.0/libstdc++-v3/crossconfig.m4 gcc-1
      AC_SUBST(SECTION_FLAGS) 
 diff -ruN /tmp/gcc-11.1.0/gcc/config/dux.h gcc-11.1.0/gcc/config/dux.h
 --- /tmp/gcc-11.1.0/gcc/config/dux.h	1970-01-01 01:00:00.000000000 +0100
-+++ gcc-11.1.0/gcc/config/dux.h	2021-07-29 08:09:40.164924834 +0200
-@@ -0,0 +1,26 @@
++++ gcc-11.1.0/gcc/config/dux.h	2021-07-29 21:57:24.366349404 +0200
+@@ -0,0 +1,29 @@
 +#undef TARGET_DUX
 +#define TARGET_DUX
 + 
@@ -110,3 +111,6 @@ diff -ruN /tmp/gcc-11.1.0/gcc/config/dux.h gcc-11.1.0/gcc/config/dux.h
 +
 +#undef PID_TYPE
 +#define PID_TYPE "int"
++
++#undef NATIVE_SYSTEM_HEADER_DIR
++#define NATIVE_SYSTEM_HEADER_DIR "/include"

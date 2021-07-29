@@ -1,24 +1,17 @@
-OUTPUT = $(shell pwd)/output
-TARGET = riscv64-pc-dux
-BUILD  = build
-PREFIX = $(OUTPUT)
+include ../../../common.mk
 
-TARGET = riscv64-pc-dux
+OUTPUT = $(shell pwd)/output
+BUILD  = build
 
 JOBS ?= $(shell nproc)
 
 BINUTILS_VERSION = 2.37
 GCC_VERSION      = 11.1.0
 
-GCC_PATH = $(OUTPUT)/bin:$(PATH)
-
-SYSROOT     = $(shell pwd)/../../../sysroot/$(TARGET)
 LIB_DIR     = $(SYSROOT)/lib
 INCLUDE_DIR = $(SYSROOT)/include
 
-
 default: gcc
-
 
 install-dependencies-debian:
 	sudo apt install \
@@ -36,36 +29,34 @@ binutils: binutils-$(BINUTILS_VERSION) $(BUILD)/binutils
 	cd $(BUILD)/binutils && \
 		../../binutils-$(BINUTILS_VERSION)/configure \
 		--target="$(TARGET)" \
-		--prefix="$(PREFIX)" \
+		--prefix="$(OUTPUT)" \
 		--with-sysroot="$(SYSROOT)" \
 		--disable-nls \
 		--disable-werror
 	make -j$(JOBS) -C $(BUILD)/binutils
 	make -j$(JOBS) -C $(BUILD)/binutils install
 
-gcc: binutils gcc-$(GCC_VERSION) $(BUILD)/gcc
+gcc: binutils gcc-$(GCC_VERSION) $(BUILD)/gcc | $(INCLUDE_DIR)
 	cd $(BUILD)/gcc && \
-		PATH="$(GCC_PATH)" ../../gcc-$(GCC_VERSION)/configure \
+		../../gcc-$(GCC_VERSION)/configure \
 		--target="$(TARGET)" \
-		--prefix="$(PREFIX)" \
+		--prefix="$(OUTPUT)" \
 		--disable-nls \
 		--enable-languages=c \
 		--libdir="$(LIB_DIR)" \
 		--includedir="$(INCLUDE_DIR)" \
 		--with-arch=rv64imafdc \
 		--program-prefix=$(TARGET)- \
-		--build=x86_64-linux-gnu \
-		--host=x86_64-linux-gnu \
 		--target=$(TARGET) \
 		--with-sysroot="$(SYSROOT)" \
-		--with-as=$(PREFIX)/bin/$(TARGET)-as \
-		--with-ld=$(PREFIX)/bin/$(TARGET)-ld \
-		--with-build-time-tools=$(PREFIX)/bin \
+		--with-as=$(OUTPUT)/bin/$(TARGET)-as \
+		--with-ld=$(OUTPUT)/bin/$(TARGET)-ld \
+		--with-build-time-tools=$(OUTPUT)/bin \
 		--libexecdir=$(LIB_DIR)
-	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc all-gcc
-	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc all-target-libgcc
-	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc install-gcc
-	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc install-target-libgcc
+	make -j$(JOBS) -C $(BUILD)/gcc all-gcc
+	make -j$(JOBS) -C $(BUILD)/gcc all-target-libgcc
+	make -j$(JOBS) -C $(BUILD)/gcc install-gcc
+	make -j$(JOBS) -C $(BUILD)/gcc install-target-libgcc
 
 
 binutils-$(BINUTILS_VERSION).tar.xz:
@@ -83,12 +74,11 @@ gcc-$(GCC_VERSION): gcc-$(GCC_VERSION).tar.xz
 	tar xJvf $<
 	cd $@ && patch -p1 < ../patch/gcc-$(GCC_VERSION).diff
 
-$(OUTPUT):
+$(OUTPUT) $(INCLUDE_DIR):
 	mkdir -p $@
 
 $(BUILD)/%:
 	mkdir -p $@
-
 
 create-patches:
 	tar xJvf binutils-$(BINUTILS_VERSION).tar.xz -C /tmp
@@ -101,7 +91,7 @@ create-patches:
 	rm -r /tmp/gcc-$(GCC_VERSION)
 
 
-clean: clean-build clean-unpacked clean-archives
+clean: clean-build clean-unpacked
 
 clean-build:
 	rm -rf $(BUILD)

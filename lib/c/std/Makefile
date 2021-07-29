@@ -1,7 +1,4 @@
-TOOLS_DIR ?= ../../../thirdparty/tools/gcc/output/bin
-PREFIX    ?= riscv64-pc-dux
-TARGET    ?= $(PREFIX)
-SYSROOT   ?= ../../../sysroot
+include ../../../common.mk
 
 INCLUDE  = -Iinclude
 INCLUDE += -I../dux/include
@@ -9,9 +6,9 @@ INCLUDE += -I../kernel/include
 INCLUDE += -I../errno/include
 
 CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3 -fPIC
-CC        = $(TOOLS_DIR)/$(PREFIX)-gcc
-AR        = $(TOOLS_DIR)/$(PREFIX)-ar
-AS        = $(TOOLS_DIR)/$(PREFIX)-as
+CC        = $(TOOLS_DIR)/$(TARGET)-gcc
+AR        = $(TOOLS_DIR)/$(TARGET)-ar
+AS        = $(TOOLS_DIR)/$(TARGET)-as
 
 HEADERS  = $(shell find include -type f -name '*.h')
 SOURCES  = $(shell find src -type f -name '*.c')
@@ -21,7 +18,7 @@ DIRECTORIES = $(shell for n in `find src -type d -printf "%P\n"`; do if [ $$n ];
 HEADER_DIRS = $(patsubst %,$(OUTPUT)/%,$(shell for f in $(HEADERS); do echo "$${f%/*}"; done | sort | uniq))
 
 OUTPUT = $(SYSROOT)/$(TARGET)
-BUILD  = build/$(PREFIX)
+BUILD  = build/$(TARGET)
 
 STATIC_LIBS = ../dux/output/dux.a
 
@@ -42,18 +39,16 @@ clean:
 	for f in $(HEADERS) $(SOURCES); do rm -f "$$f~"; done
 	rm -rf $(BUILD)
 
-clean-all: clean
-	rm -rf $(OUTPUT)
-
 
 # Targets
 
-$(OUTPUT)/lib/crt0.o: src/crt0/$(PREFIX).s | $(OUTPUT)/lib
+$(OUTPUT)/lib/crt0.o: src/crt0/$(TARGET).s | $(OUTPUT)/lib
 	$(AS) $< -o $@
 
-$(OUTPUT)/lib/libc.a: $(OBJECTS) $(STATIC_LIBS) | $(OUTPUT)/lib
-	$(AR) rcT $@ $^
-	printf 'create $@\naddlib $@\nsave\nend' | $(AR) -M
+$(OUTPUT)/lib/libc.a: $(OBJECTS) | $(STATIC_LIBS) $(OUTPUT)/lib
+	rm -f $@
+	$(AR) rc $@ $^
+	printf 'create $@\naddlib $@\naddlib $(STATIC_LIBS)\nsave\nend' | $(AR) -M
 
 $(OUTPUT)/include/%.h: include/%.h | $(HEADER_DIRS)
 	cp $< $@
@@ -64,11 +59,5 @@ $(BUILD)/%.o: src/%.c | $(DIRECTORIES)
 ../dux/output/dux.a:
 	make -C ../dux
 
-$(BUILD):
-	mkdir -p $@
-
-$(OUTPUT)/%:
-	mkdir -p $@
-
-$(DIRECTORIES):
+$(BUILD) $(DIRECTORIES) $(HEADER_DIRS):
 	mkdir -p $@
