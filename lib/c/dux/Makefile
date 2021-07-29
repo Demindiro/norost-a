@@ -1,10 +1,10 @@
 TOOLS_DIR ?= ../../../thirdparty/tools/gcc/output/bin
-PREFIX    ?= riscv64-unknown-elf
+PREFIX    ?= riscv64-pc-dux
 
 INCLUDE  = -Iinclude
 INCLUDE += -I../kernel/include
 
-CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3
+CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3 -fPIC
 CC        = $(TOOLS_DIR)/$(PREFIX)-gcc
 AR        = $(TOOLS_DIR)/$(PREFIX)-ar
 
@@ -38,3 +38,6 @@ format:
 clean:
 	for f in $(HEADERS) $(SOURCES); do rm -f "$$f~"; done
 	rm -rf $(BUILD)
+
+clean-all: clean
+	rm -rf $(OUTPUT)

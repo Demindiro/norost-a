@@ -1,14 +1,20 @@
 OUTPUT = $(shell pwd)/output
-TARGET = riscv64-dux-elf
+TARGET = riscv64-pc-dux
 BUILD  = build
 PREFIX = $(OUTPUT)
 
-JOBS ?= 4
+TARGET = riscv64-pc-dux
+
+JOBS ?= $(shell nproc)
 
 BINUTILS_VERSION = 2.37
 GCC_VERSION      = 11.1.0
 
 GCC_PATH = $(OUTPUT)/bin:$(PATH)
+
+SYSROOT     = $(shell pwd)/../../../sysroot/$(TARGET)
+LIB_DIR     = $(SYSROOT)/lib
+INCLUDE_DIR = $(SYSROOT)/include
 
 
 default: gcc
@@ -31,7 +37,7 @@ binutils: binutils-$(BINUTILS_VERSION) $(BUILD)/binutils
 		../../binutils-$(BINUTILS_VERSION)/configure \
 		--target="$(TARGET)" \
 		--prefix="$(PREFIX)" \
-		--with-sysroot \
+		--with-sysroot="$(SYSROOT)" \
 		--disable-nls \
 		--disable-werror
 	make -j$(JOBS) -C $(BUILD)/binutils
@@ -44,7 +50,18 @@ gcc: binutils gcc-$(GCC_VERSION) $(BUILD)/gcc
 		--prefix="$(PREFIX)" \
 		--disable-nls \
 		--enable-languages=c \
-		#--without-headers
+		--libdir="$(LIB_DIR)" \
+		--includedir="$(INCLUDE_DIR)" \
+		--with-arch=rv64imafdc \
+		--program-prefix=$(TARGET)- \
+		--build=x86_64-linux-gnu \
+		--host=x86_64-linux-gnu \
+		--target=$(TARGET) \
+		--with-sysroot="$(SYSROOT)" \
+		--with-as=$(PREFIX)/bin/$(TARGET)-as \
+		--with-ld=$(PREFIX)/bin/$(TARGET)-ld \
+		--with-build-time-tools=$(PREFIX)/bin \
+		--libexecdir=$(LIB_DIR)
 	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc all-gcc
 	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc all-target-libgcc
 	PATH="$(GCC_PATH)" make -j$(JOBS) -C $(BUILD)/gcc install-gcc
@@ -96,3 +113,8 @@ clean-archives:
 clean-unpacked:
 	rm -rf gcc-$(GCC_VERSION)
 	rm -rf binutils-$(BINUTILS_VERSION)
+
+clean-all: clean
+	rm -rf $(OUTPUT)
+
+clean-all-local: clean-build clean-unpacked

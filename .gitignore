@@ -3,5 +3,8 @@ drive.bin
 *.dtb
 *.dts
 *.cpio
-
+/sysroot
 *~
+*.a
+*.o
+*.so

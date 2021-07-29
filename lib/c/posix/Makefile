@@ -1,27 +1,31 @@
 TOOLS_DIR ?= ../../../thirdparty/tools/gcc/output/bin
-PREFIX    ?= riscv64-unknown-elf
+PREFIX    ?= riscv64-pc-dux
+TARGET    ?= $(PREFIX)
 
 INCLUDE  = -Iinclude
 INCLUDE += -I../dux/include
 INCLUDE += -I../kernel/include
 INCLUDE += -I../errno/include
-#INCLUDE += -I../../../thirdparty/tools/gcc/output/lib/gcc/riscv64-unknown-elf/11.1.0/include/
 
-#DEFINES  = -D_GCC_WRAP_STDINT_H
-
-CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3
+CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3 -fPIC
 CC        = $(TOOLS_DIR)/$(PREFIX)-gcc
 AR        = $(TOOLS_DIR)/$(PREFIX)-ar
+AS        = $(TOOLS_DIR)/$(PREFIX)-as
 
 HEADERS  = $(shell find include -type f -name '*.h')
 SOURCES  = $(shell find src -type f -name '*.c')
 OBJECTS  = $(shell for f in `find src -type f -name '*.c' -printf "%P\n"`; do echo "$(BUILD)/$${f%.c}.o"; done)
 DIRECTORIES = $(shell for n in `find src -type d -printf "%P\n"`; do if [ $$n ]; then echo "$(BUILD)/$$n"; fi; done)
 
-OUTPUT = output
-BUILD  = build
+OUTPUT = output/$(PREFIX)
+BUILD  = build/$(PREFIX)
 
 STATIC_LIBS = ../dux/output/dux.a
+
+build: $(OUTPUT)/crt0.o $(OUTPUT)/posix.a
+
+$(OUTPUT)/crt0.o: src/crt0/$(PREFIX).s | $(OUTPUT)
+	$(AS) $< -o $@
 
 $(OUTPUT)/posix.a: $(OBJECTS) $(STATIC_LIBS) | $(OUTPUT)
 	$(AR) rcT $@ $^
@@ -34,10 +38,10 @@ $(BUILD)/%.o: src/%.c | $(DIRECTORIES)
 	make -C ../dux
 
 $(BUILD):
-	mkdir $@
+	mkdir -p $@
 
 $(OUTPUT):
-	mkdir $@
+	mkdir -p $@
 
 $(DIRECTORIES):
 	mkdir -p $@
