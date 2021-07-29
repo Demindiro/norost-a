@@ -1,9 +1,16 @@
-=============
-POSIX wrapper
-=============
+========================
+Standard library wrapper
+========================
 
-This library implement some of the POSIX functions on top of the kernel's
-system calls. It is not intended to fully implement the standard, it merely
+This library implements the standard C runtime as well as some other common
+functionality from POSIX.
+
+
+POSIX compatibility
+~~~~~~~~~~~~~~~~~~~
+
+While this library implement some of the POSIX functions on top of the kernel's
+system calls, It is not intended to fully implement the standard. It merely
 makes it easier to port existing applications.
 
 The implementation is based on ``glibc`` documentation. I'd reference the
