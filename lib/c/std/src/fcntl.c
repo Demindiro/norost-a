@@ -1,45 +1,18 @@
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/uio.h>
 #include "common.h"
 #include "dux.h"
-#include "fcntl.h"
 #include "kernel.h"
-#include "errno.h"
 
 ssize_t write(int fd, const void *buf, size_t count)
 {
-
-	const char *in = buf;
-	char *out = universal_buffer;
-
-	count = count < universal_buffer_size ? count : universal_buffer_size;
-	for (size_t i = 0; i < count; i++) {
-		out[i] = in[i];
-	}
-
-	struct kernel_client_request_entry *cre =
-	    dux_reserve_client_request_entry();
-	if (cre == NULL) {
-		return EAGAIN;
-	}
-
-	cre->priority = 0;
-	cre->flags = 0;
-	cre->file_handle = fd;
-	cre->offset = 0;
-	cre->data.page = universal_buffer;
-	cre->length = count;
-	asm volatile ("fence");
-	cre->opcode = IO_WRITE;
-	kernel_io_wait(0, 0);
-
-	/*
-	   struct kernel_client_completion_entry *cce = &completion_queue[completion_index];
-	   completion_index++;
-	   completion_index &= request_mask;
-
-	   return cce->status;
-	 */
-
-	return 0;
+	struct iovec iov = {
+		// Discarding const is fine as writev doesn't write to buf
+		.iov_base = (void *)buf,
+		.iov_len = count,
+	};
+	return writev(fd, &iov, 1);
 }
 
 ssize_t read(int fd, void *buf, size_t count)

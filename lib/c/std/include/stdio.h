@@ -8,10 +8,25 @@ enum {
 	SEEK_SET,
 };
 
-typedef void FILE;
+typedef struct __FILE {
+	int _fd;
+} FILE;
 
-#define stdout ((void *)1)
-#define stderr ((void *)2)
+extern FILE *stdin;
+extern FILE *stdout;
+extern FILE *stderr;
+
+
+int fputc(int c, FILE *stream);
+
+int fputs(const char *s, FILE *stream);
+
+#define putc fputc
+
+int putchar(int c);
+
+int puts(const char *s);
+
 
 int printf(const char *, ...);
 

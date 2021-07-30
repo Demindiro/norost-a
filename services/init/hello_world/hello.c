@@ -1,6 +1,9 @@
-#include <fcntl.h>
+// FIXME we shouldn't be doing this
+#undef __STDC_HOSTED__
+
+#include <stdio.h>
 
 int main() {
-	write(0, "Hello, world!\n", 14);
+	puts("Hello, world!");
 	return 0;
 }

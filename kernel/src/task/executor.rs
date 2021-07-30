@@ -23,21 +23,25 @@ static mut NEXT_ID: usize = 1;
 impl Executor<'_> {
 	/// Suspend the current task (if any) and begin executing another task.
 	pub fn next(&self) -> ! {
+
 		// TODO lol, lmao
-		let id = unsafe { NEXT_ID };
-		let id = if id > 0 {
-			unsafe { NEXT_ID = 0 };
-			0
-		} else {
-			unsafe { NEXT_ID = id + 1 };
-			id + 1
-		};
-		let task = if let Ok(task) = group::Group::get(0).expect("No root group").task(id) {
-			task
-		} else {
-			panic!("No task with ID {}", id);
-		};
-		task.execute()
+
+		let group = group::Group::get(0).expect("No root group");
+
+		loop {
+			let id = unsafe { NEXT_ID };
+			let id = if id > 256 {
+				unsafe { NEXT_ID = 0 };
+				0
+			} else {
+				unsafe { NEXT_ID = id + 1 };
+				id + 1
+			};
+
+			if let Ok(task) = group.task(id) {
+				task.execute()
+			};
+		}
 	}
 
 	/// Process I/O of the current task

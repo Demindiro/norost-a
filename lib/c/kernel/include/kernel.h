@@ -123,10 +123,19 @@ SYSCALL_1(kernel_mem_get_flags, 5, void * /* address */)
 
 SYSCALL_2(kernel_mem_set_flags, 6, void * /* address */, size_t /* count */)
 
+SYSCALL_2(kernel_sys_log, 15, const char * /* address */, size_t /* length */)
+
 #undef SYSCALL_4
 #undef SYSCALL_3
 #undef SYSCALL_2
 #undef SYSCALL_1
 #undef SYSCALL_0
+
+/**
+ * Convienence macro that expands to kernel_sys_log. Intended for use with literals.
+ *
+ * If the string is not a literal, call kernel_sys_log directly instead.
+ */
+#define KERNEL_LOG(msg) kernel_sys_log(msg, sizeof(msg) - 1)
 
 #endif

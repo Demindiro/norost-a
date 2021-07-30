@@ -17,7 +17,7 @@ DIRECTORIES = $(shell for n in `find src -type d -printf "%P\n"`; do if [ $$n ];
 
 HEADER_DIRS = $(patsubst %,$(OUTPUT)/%,$(shell for f in $(HEADERS); do echo "$${f%/*}"; done | sort | uniq))
 
-OUTPUT = $(SYSROOT)/$(TARGET)
+OUTPUT = $(SYSROOT)
 BUILD  = build/$(TARGET)
 
 STATIC_LIBS = ../dux/output/dux.a

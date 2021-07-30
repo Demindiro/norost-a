@@ -1,1 +1,1 @@
-target/riscv64gc-unknown-none-elf/release/multi_process
+services/init/hello_world/build/init
