@@ -177,6 +177,7 @@ trap_handler:
 	# Panic if sscratch is zero, which means we failed sometime after early boot
 	beqz	x31, trap_early_handler
 
+	# Save registers
 	sd		x1, 1 * REGBYTES (x31)
 	sd		x2, 2 * REGBYTES (x31)
 	sd		x3, 3 * REGBYTES (x31)
@@ -208,6 +209,13 @@ trap_handler:
 	sd		x27, 27 * REGBYTES (x31)
 	sd		x28, 28 * REGBYTES (x31)
 	sd		x29, 29 * REGBYTES (x31)
+	# Save program counter
+	# We increase the counter by 4 bytes as ecall is also 4 bytes long
+	# & we don't want to execute it again.
+	csrr	t0, sepc
+	addi	t0, t0, 4
+	sd		t0, 0 * REGBYTES (x31)
+
 	# Set pointer to task struct argument
 	mv		a6, x31
 	# An untested attempt at catering to pipelining
