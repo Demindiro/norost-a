@@ -12,9 +12,9 @@
 // FIXME this is temporary as we currently rely on GCC's stddef, which doesn't have ssize_t
 typedef signed long ssize_t;
 
-static FILE _stdin = {._fd = 0 };
-static FILE _stdout = {._fd = 0 };
-static FILE _stderr = {._fd = 0 };
+static FILE _stdin = { ._address = -1, ._fd = 0 };
+static FILE _stdout = { ._address = -1, ._fd = 1 };
+static FILE _stderr = { ._address = -1, ._fd = 2 };
 
 FILE *stdin = &_stdin;
 FILE *stdout = &_stdout;
@@ -154,21 +154,21 @@ int vfprintf(FILE *stream, const char *format, va_list args) {
 		}
 
 		// Get a request entry
-		struct kernel_client_request_entry *cre = NULL;
-		while (cre == NULL) {
+		struct kernel_ipc_packet *pkt = NULL;
+		while (pkt == NULL) {
 			kernel_io_wait(0, 0);
-			cre = dux_reserve_client_request_entry();
+			pkt = dux_reserve_transmit_entry();
 		}
 
 		// Fill out the request entry
-		cre->priority = 0;
-		cre->flags = 0;
-		cre->file_handle = stream->_fd;
-		cre->offset = total_written;
-		cre->data.page = universal_buffer;
-		cre->length = ptr - out;
+		pkt->priority = 0;
+		pkt->flags = 0;
+		pkt->address = stream->_address;
+		//pkt->offset = total_written;
+		pkt->data.raw = universal_buffer;
+		pkt->length = ptr - out;
 		asm volatile ("fence");
-		cre->opcode = IO_WRITE;
+		pkt->opcode = IO_WRITE;
 
 		// TODO check if the request was processed successfully
 		/*

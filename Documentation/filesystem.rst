@@ -27,77 +27,44 @@ To keep copying to a minimum, memory pages of the client/server task are
 mapped into that of the server/client task. When a task is done with a range
 of memory pages it must free them themselves.
 
+To communicate, a task uses two ring buffers with identical size:
 
-Client tasks
-''''''''''''
+* A *transmit queue* (TXQ)
 
-To send requests, a task uses two ring buffers with identical size:
-
-* A *request queue* (CRQ)
-
-* A *completion queue* (CCQ)
+* A *receive queue* (RXQ)
 
 The size of both queues are always a power of 2 so that wrapping the index
 can be performed with a bitwise ``and`` operation.
 
 
-A CRQ entry is a struct with the following fields:
+Transmit queue
+''''''''''''''
 
-* An ``u8`` ``opcode`` field, which describes the operation to be performed.
+A TXQ entry is a struct with the following fields:
+
+* A ``u8`` ``opcode`` field, which describes the operation to be performed.
   If this field is ``0``, it marks the end of entries to be processed.
 
-* An ``u8`` ``priority`` field.
+* A ``u8`` ``priority`` field.
 
-* An ``u16`` ``flags`` field.
+* A ``u16`` ``flags`` field.
 
-* An ``u32`` ``file_handle`` field, which describes the object to perform
-  the operation on.
+* A ``u32`` ``id`` field, which can be used to keep track of requests.
 
-* An ``usize`` ``offset`` field.
+* A ``tid`` ``address`` field, which describes the task that should receive
+  the request.
 
-* A ``data`` field, which is a union of;
-
-  * A ``*mut mem_page`` or ``*const mem_page`` ``buffer`` field.
-
-  * A ``*const small_str`` field.
-
-* An ``usize`` ``length`` field.
-
-* An ``usize`` ``userdata`` field, which can be used to keep track of
-  requests.
-
-The structure is 64 bytes large on 64-bit and 32 bytes large on 32-bit
-systems.
-
-
-When a request has finished, an entry will be added to the CCQ which has
-the following fields:
-
-* A ``data`` field, which is a union of;
-
-  * A ``*mut mem_page`` or ``*const mem_page`` ``buffer`` field, which may
-    be ``null`` depending on the operation.
-
-  * An ``u32`` ``file_handle``.
-
-* An ``usize`` ``length`` field indicating the actual amount of data read or
+* A ``usize`` ``length`` field, which describes the amount of data to be read or
   written.
 
-* An ``u32`` ``status`` code indicating whether the operation has succeeded
-  or an error occured. The exact value of ``status`` depends on the operation.
+* A ``data`` field, which is a pointer to an arbitrary blob of data. The
+  format of the data depends on the flags.
 
-* An ``usize`` ``userdata`` field, which is identical to that of the
-  corresponding request.
+The fields must be in the given order and be properly aligned.
 
-This structure is 32 bytes large on 64-bit and 16 bytes on 32-bit systems.
+To send data, the operation goes as follows:
 
-The kernel does not check whether a completion entry has been processed by
-the task. It is up to the task to prevent overwriting existing entries.
-
-
-To send a request, the operation goes as follows:
-
-1. Write out the request **without** the ``opcode``.
+1. Write out the structure **without** the ``opcode``.
 
 2. Execute a memory fence.
 
@@ -107,105 +74,14 @@ The memory fence is necessary so that the ``opcode`` won't be written until
 all the fields of the RQ entry have been written out.
 
 
-New entries can be detected by any application-specific method. Using ``0``
-for the ``userdata`` field to indicate empty entries is the conventional
-approach.
+Receive queue
+'''''''''''''
 
+An RXQ entry is identical to a TXQ entry except that ``address`` corresponds
+to that of the sending task instead of the receiving task.
 
-Server tasks
-''''''''''''
-
-To receive requests, a task uses two ring buffers with identical size:
-
-* A *request queue* (SRQ)
-
-* A *completion queue* (SCQ)
-
-The size of both queues are always a power of 2 so that wrapping the
-index can be performed with a bitwise ``and`` operation.
-
-Each queue begins with both the ``head`` and ``tail`` which are both
-``usize`` s. The entries come after these two fields.
-
-
-An SRQ entry has the following fields:
-
-* An ``u8`` ``opcode`` field, which describes the operation to be performed.
-  If it is ``0``, the entry is empty.
-
-* An ``u8`` ``priority`` field.
-
-* An ``u16`` ``flags`` field.
-
-* A ``object`` field, which is a union of;
-
-  * An ``usize`` ``file_handle`` field, which describes the object to perform
-  the operation on.
-
-  * A ``*const small_str`` ``name`` field.
-
-  * A ``*const small_[u8]`` ``uuid`` field.
-
-* An ``usize`` ``offset`` field.
-
-* A ``data`` field, which is a union of;
-
-  * A ``*mut mem_page`` or ``*const mem_page`` ``buffer`` field.
-
-  * A ``*const small_str`` field.
-
-* An ``usize`` ``length`` field.
-
-* An ``usize`` ``id`` field, which can be used to keep track of requests.
-  This field is never ``0``.
-
-The structure is 64 bytes large on 64-bit and 32 bytes large on 32-bit
-systems.
-
-It is identical to the requesting process' CRQ entry bar the ``userdata``
-field, which is excluded and replaced with an ``id`` field to prevent info
-leaks and simplify the kernel implementation.
-
-
-A SCQ entry has the following fields:
-
-* A ``data`` field, which is a union of;
-
-  * A ``*mut mem_page`` or ``*const mem_page`` ``buffer`` field, which may
-    be ``null`` depending on the operation.
-
-  * An ``usize`` ``file_handle``.
-
-* An ``usize`` ``length`` field indicating the actual amount of data read or
-  written.
-
-* An ``u32`` ``status`` code indicating whether the operation has succeeded
-  or an error occured. The exact value of ``status`` depends on the operation.
-
-* An ``usize`` ``id`` field, which is identical to that of the
-  corresponding request.
-
-
-This structure is 32 bytes large on 64-bit and 16 bytes on 32-bit systems.
-
-Again, it is largely identical to that of the requesting task's CCQ entry
-bar the ``userdata`` / ``id`` field.
-
-A ``0`` ``id`` field means the entry is empty.
-
-
-To send a response, the operation goes as follows:
-
-1. Write out the entry **without** the ``id`` field.
-
-2. Execute a memory fence.
-
-3. Write out the ``id`` field.
-
-The memory fence is necessary so that the ``tail`` won't be updated until
-all the fields of the OQ entry have been written out.
-
-
+To send a response, a TXQ structure is filled out with the ``id`` and
+``address`` matching that of the RXQ structure.
 
 
 Operations

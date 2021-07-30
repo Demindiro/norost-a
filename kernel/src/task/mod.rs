@@ -19,15 +19,16 @@
 
 mod executor;
 mod group;
+mod ipc;
 
 pub use executor::Executor;
 pub use group::Group;
 
+use ipc::RingIndex;
+
 use crate::arch::vms::{self, VirtualMemorySystem, RWX};
 use crate::arch::{self, Map, Page};
 use crate::memory::{self, AllocateError};
-use core::mem;
-use core::num::NonZeroU8;
 use core::ptr::NonNull;
 use core::sync::atomic;
 
@@ -45,12 +46,6 @@ pub struct Task(NonNull<TaskData>);
 struct SharedState {
 	/// Mapping of virtual memory.
 	virtual_memory: arch::VMS,
-}
-
-/// Structure representing an index and mask in a ring buffer.
-struct RingIndex {
-	mask: u16,
-	index: u16,
 }
 
 /// A single task.
@@ -89,73 +84,6 @@ pub struct TaskData {
 	server_completion_index: RingIndex,
 	/// The ID of this task.
 	id: u32,
-}
-
-union ClientRequestEntryData {
-	pages: Option<NonNull<Page>>,
-	#[allow(dead_code)]
-	name: *const u8,
-	#[allow(dead_code)]
-	uuid: *const u8,
-}
-
-/// A client request entry.
-#[repr(align(64))]
-#[repr(C)]
-struct ClientRequestEntry {
-	opcode: Option<NonZeroU8>,
-	priority: i8,
-	flags: u16,
-	file_handle: u32,
-	offset: usize,
-	data: ClientRequestEntryData,
-	length: usize,
-	userdata: usize,
-}
-
-union ClientCompletionEntryData {
-	#[allow(dead_code)]
-	pages: Option<NonNull<Page>>,
-	#[allow(dead_code)]
-	file_handle: usize,
-}
-
-/// A client completion entry.
-#[repr(align(32))]
-#[repr(C)]
-#[allow(dead_code)]
-struct ClientCompletionEntry {
-	data: ClientCompletionEntryData,
-	length: usize,
-	status: u32,
-	userdata: usize,
-}
-
-const _SIZE_CHECK_CRE: usize = 0 - (64 - mem::size_of::<ClientRequestEntry>());
-const _SIZE_CHECK_CCE: usize = 0 - (32 - mem::size_of::<ClientCompletionEntry>());
-
-impl Default for RingIndex {
-	fn default() -> Self {
-		Self { mask: 0, index: 0 }
-	}
-}
-
-impl RingIndex {
-	#[inline(always)]
-	fn set_mask(&mut self, mask: u8) {
-		let mask = (1 << mask) - 1;
-		self.index &= mask;
-		self.mask = mask;
-	}
-
-	fn increment(&mut self) {
-		self.index += 1;
-		self.index &= self.mask;
-	}
-
-	fn get(&self) -> usize {
-		self.index.into()
-	}
 }
 
 const STACK_ADDRESS: Page = memory::reserved::HART_STACKS.start;
@@ -202,33 +130,6 @@ impl Task {
 	/// Set the program counter of this task to the given address.
 	pub fn set_pc(&self, address: *const ()) {
 		self.inner().register_state.set_pc(address);
-	}
-
-	/// Process I/O entries and begin executing the next task.
-	pub fn process_io(&self) {
-		if let Some(cq) = self.inner().client_request_queue {
-			arch::set_supervisor_userpage_access(true);
-			let mut cq = cq
-				.cast::<[ClientRequestEntry; Page::SIZE / mem::size_of::<ClientRequestEntry>()]>();
-			let cq = unsafe { cq.as_mut() };
-			let cqi = &mut self.inner().client_request_index;
-			loop {
-				let cq = &mut cq[cqi.get()];
-				if let Some(_op) = cq.opcode {
-					// Just assume write for now.
-					let s = unsafe { cq.data.pages.unwrap().cast() };
-					let s = unsafe { core::slice::from_raw_parts(s.as_ptr(), cq.length) };
-					let s = unsafe { core::str::from_utf8_unchecked(s) };
-					use core::fmt::Write;
-					write!(crate::log::Log, "{}", s).unwrap();
-					cq.opcode = None;
-				} else {
-					break;
-				}
-				cqi.increment();
-			}
-			arch::set_supervisor_userpage_access(false);
-		}
 	}
 
 	/// Begin executing this task.

@@ -3,9 +3,6 @@
 
 #include <stddef.h>
 
-//typedef size_t pid_t;
-typedef int pid_t;
-
-typedef size_t intptr_t;
+typedef size_t pid_t;
 
 #endif

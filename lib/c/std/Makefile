@@ -2,7 +2,6 @@ include ../../../common.mk
 
 INCLUDE  = -Iinclude
 INCLUDE += -I../dux/include
-INCLUDE += -I../kernel/include
 INCLUDE += -I../errno/include
 
 CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3 -fPIC -Wall

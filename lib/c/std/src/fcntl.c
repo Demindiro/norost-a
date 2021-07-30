@@ -19,17 +19,17 @@ ssize_t read(int fd, void *buf, size_t count)
 {
 	count = count < universal_buffer_size ? count : universal_buffer_size;
 
-	struct kernel_client_request_entry *cre =
-	    dux_reserve_client_request_entry();
+	struct kernel_ipc_packet *cre =
+	    dux_reserve_transmit_entry();
 	if (cre == NULL) {
 		return EAGAIN;
 	}
 
 	cre->priority = 0;
 	cre->flags = 0;
-	cre->file_handle = fd;
-	cre->offset = 0;
-	cre->data.page = universal_buffer;
+	//cre->file_handle = fd; // FIXME
+	//cre->offset = 0;
+	cre->data.raw = universal_buffer;
 	cre->length = count;
 	asm volatile ("fence");
 	cre->opcode = IO_READ;

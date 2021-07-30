@@ -34,8 +34,8 @@ pub const TABLE_LEN: usize = 16;
 #[export_name = "syscall_table"]
 pub static TABLE: [Syscall; TABLE_LEN] = [
 	sys::io_wait,                // 0
-	sys::io_resize_requester,    // 1
-	sys::io_resize_responder,    // 2
+	sys::io_set_queues,          // 1
+	sys::placeholder,            // 2
 	sys::mem_alloc,              // 3
 	sys::mem_dealloc,            // 4
 	sys::mem_get_flags,          // 5
@@ -191,22 +191,22 @@ mod sys {
 	}
 
 	sys! {
-		/// Resize the task's requester buffers to be able to hold the given amount of entries.
-		[task] io_resize_requester(request_queue, request_size, completion_queue, completion_size) {
+		/// Resize the task's IPC buffers to be able to hold the given amount of entries.
+		[task] io_set_queues(transmit_queue, transmit_size, receive_queue, receive_size) {
 			logcall!(
-				"io_resize_requester 0x{:x}, {}, 0x{:x}, {}",
-				request_queue,
-				request_size,
-				completion_queue,
-				completion_size,
+				"io_resize_transmiter 0x{:x}, {}, 0x{:x}, {}",
+				transmit_queue,
+				transmit_size,
+				receive_queue,
+				receive_size,
 			);
-			let a = if request_queue == 0 {
+			let a = if transmit_queue == 0 {
 				None
 			} else {
-				let rq = NonNull::new(request_queue as *mut _);
-				let rs = request_size as u8;
-				let cq = NonNull::new(completion_queue as *mut _);
-				let cs = completion_size as u8;
+				let rq = NonNull::new(transmit_queue as *mut _);
+				let rs = transmit_size as u8;
+				let cq = NonNull::new(receive_queue as *mut _);
+				let cs = receive_size as u8;
 				let r = rq.and_then(|rq| cq.map(|cq| ((rq, rs), (cq, cs))));
 				if r.is_none() {
 					return Return(Status::NullArgument, 0);
@@ -215,13 +215,6 @@ mod sys {
 			};
 			task.set_client_buffers(a);
 			Return(Status::Ok, 0)
-		}
-	}
-
-	sys! {
-		/// Resize the task's requester buffers to be able to hold the given amount of entries.
-		[_] io_resize_responder() {
-			todo!();
 		}
 	}
 

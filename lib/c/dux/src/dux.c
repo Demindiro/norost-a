@@ -25,21 +25,13 @@ static struct memory_map *reserved_ranges;
 static size_t reserved_count;
 static size_t reserved_capacity;
 
-static struct kernel_client_request_entry *crq;
-static size_t crq_mask;
-static size_t crq_index;
+static struct kernel_ipc_packet *txq;
+static size_t txq_mask;
+static size_t txq_index;
 
-static struct kernel_client_completion_entry *ccq;
-static size_t ccq_mask;
-static size_t ccq_index;
-
-static struct kernel_server_request_entry *srq;
-static size_t srq_mask;
-static size_t srq_index;
-
-static struct kernel_server_completion_entry *scq_queue;
-static size_t scq_mask;
-static size_t scq_index;
+static struct kernel_ipc_packet *rxq;
+static size_t rxq_mask;
+static size_t rxq_index;
 
 
 /**
@@ -85,9 +77,9 @@ void __dux_init(void)
 		// FIXME handle errors properly
 		for (;;) {}
 	}
-	crq = (struct kernel_client_request_entry *)dret.address;
-	crq_mask = (PAGE_SIZE / sizeof(struct kernel_server_request_entry)) - 1;
-	crq_index = 0;
+	txq = (struct kernel_ipc_packet *)dret.address;
+	txq_mask = (PAGE_SIZE / sizeof(struct kernel_ipc_packet)) - 1;
+	txq_index = 0;
 
 	dret = dux_reserve_pages(NULL, 8);
 	if (dret.status != 0) {
@@ -99,12 +91,12 @@ void __dux_init(void)
 		// FIXME handle errors properly
 		for (;;) {}
 	}
-	ccq = (struct kernel_client_completion_entry *)dret.address;
-	ccq_mask = (PAGE_SIZE / sizeof(struct kernel_server_completion_entry)) - 1;
-	ccq_index = 0;
+	rxq = (struct kernel_ipc_packet *)dret.address;
+	rxq_mask = (PAGE_SIZE / sizeof(struct kernel_ipc_packet)) - 1;
+	rxq_index = 0;
 
 	// Register the queues to the kernel
-	kret = kernel_io_set_client_buffers(crq, 0, ccq, 0);
+	kret = kernel_io_set_queues(txq, 0, rxq, 0);
 	if (kret.status != 0) {
 		// FIXME handle errors properly
 		for (;;) {}
@@ -172,6 +164,6 @@ struct dux_reserve_pages dux_reserve_pages(void *address, size_t count) {
 	}
 }
 
-struct kernel_client_request_entry *dux_reserve_client_request_entry(void) {
-	return crq;
+struct kernel_ipc_packet *dux_reserve_transmit_entry(void) {
+	return txq;
 }

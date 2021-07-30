@@ -18,8 +18,8 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 	while (1) {
 
 		// Get a request entry
-		struct kernel_client_request_entry *cre =
-		    dux_reserve_client_request_entry();
+		struct kernel_ipc_packet *cre =
+		    dux_reserve_transmit_entry();
 		if (cre == NULL) {
 			// If we didn't write any data yet, tell the caller to try again
 			// Otherwise, return the amount of data written
@@ -59,9 +59,9 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 		// Fill out the request entry
 		cre->priority = 0;
 		cre->flags = 0;
-		cre->file_handle = fd;
-		cre->offset = total_written;
-		cre->data.page = universal_buffer;
+		//cre->address = fd; // FIXME
+		//cre->offset = total_written;
+		cre->data.raw = universal_buffer;
 		cre->length = copied;
 		asm volatile ("fence");
 		cre->opcode = IO_WRITE;

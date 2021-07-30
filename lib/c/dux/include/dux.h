@@ -20,13 +20,7 @@ struct dux_reserve_pages {
  * Returns a pointer to an empty client request entry. Returns NULL if none
  * are available.
  */
-struct kernel_client_request_entry *dux_reserve_client_request_entry(void);
-
-/**
- * Returns a pointer to an empty server response entry. Returns NULL if none
- * are available.
- */
-struct kernel_server_request_entry *dux_reserve_server_request_entry(void);
+struct kernel_ipc_packet *dux_reserve_transmit_entry(void);
 
 /**
  * Reserves a range of memory pages. If the address is NULL, the best fitting address is used and

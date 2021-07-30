@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #define IO_NONE   (0)
 #define IO_READ   (1)
@@ -21,41 +22,18 @@ typedef struct kernel_return {
 } kernel_return_t;
 
 /**
- * Structure used by client tasks to send I/O requests.
+ * Structure used for ipc.
  */
-struct kernel_client_request_entry {
+struct kernel_ipc_packet {
 	uint8_t opcode;
 	int8_t priority;
 	uint16_t flags;
-	uint32_t file_handle;
-	size_t offset;
-	union {
-		void *page;
-		uint8_t *const filename;
-	} data;
+	uint32_t id;
+	pid_t address;
 	size_t length;
-	size_t userdata;
-};
-
-/**
- * Structure received by client tasks for I/O completion events.
- */
-struct kernel_client_completion_entry {
 	union {
-		void *page;
-		uint32_t file_handle;
+		void *raw;
 	} data;
-	size_t length;
-	uint32_t status;
-	size_t userdata;
-};
-
-struct kernel_server_request_entry {
-	size_t TODO;
-};
-
-struct kernel_server_completion_entry {
-	size_t TODO;
 };
 
 #define SYSCALL(...) \
@@ -109,10 +87,7 @@ struct kernel_server_completion_entry {
 
 SYSCALL_2(kernel_io_wait, 0, uint16_t /* flags */, uint64_t /* time */)
 
-SYSCALL_4(kernel_io_set_client_buffers, 1, void * /* requests */, size_t /* requests_size */,
-	void * /* completions */, size_t /* completion_sizes */)
-
-SYSCALL_4(kernel_io_set_server_buffers, 2, void * /* requests */, size_t /* requests_size */,
+SYSCALL_4(kernel_io_set_queues, 1, void * /* requests */, size_t /* requests_size */,
 	void * /* completions */, size_t /* completion_sizes */)
 
 SYSCALL_3(kernel_mem_alloc, 3, void * /* address */, size_t /* count */, uint8_t /* flags */)

@@ -3,12 +3,14 @@
 
 #include <stddef.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 enum {
 	SEEK_SET,
 };
 
 typedef struct __FILE {
+	pid_t _address;
 	int _fd;
 } FILE;
 
