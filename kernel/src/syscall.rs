@@ -119,6 +119,15 @@ mod sys {
 		})
 	}
 
+	macro_rules! logcall {
+		($($args:expr),+ $(,)?) => {
+			#[cfg(feature = "log-syscalls")]
+			log!($($args),+);
+			#[cfg(not(feature = "log-syscalls"))]
+			let _ = ($($args),+);
+		};
+	}
+
 	/// Macro to reduce the typing work for each syscall
 	macro_rules! sys {
 		{
@@ -173,7 +182,7 @@ mod sys {
 	sys! {
 		/// Waits for one or all I/O events to complete
 		[_] io_wait(flags, time) {
-			log!("io_wait 0b{:b}, {}", flags, time);
+			logcall!("io_wait 0b{:b}, {}", flags, time);
 			// FIXME actually wait for I/O
 			//unsafe { crate::arch::trap_next_task(task); }
 			// FIXME lol, lmao
@@ -184,7 +193,7 @@ mod sys {
 	sys! {
 		/// Resize the task's requester buffers to be able to hold the given amount of entries.
 		[task] io_resize_requester(request_queue, request_size, completion_queue, completion_size) {
-			log!(
+			logcall!(
 				"io_resize_requester 0x{:x}, {}, 0x{:x}, {}",
 				request_queue,
 				request_size,
@@ -219,7 +228,7 @@ mod sys {
 	sys! {
 		/// Allocates a range of private or shared pages for the current task.
 		[task] mem_alloc(address, count, flags) {
-			log!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
+			logcall!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
 			match arch::Page::try_from(address as *mut ()) {
 				Ok(address) => match decode_rwx_flags(flags) {
 					Ok(rwx) => {
@@ -260,7 +269,7 @@ mod sys {
 
 	sys! {
 		[_] mem_physical_addresses(address, store, count) {
-			log!("mem_physical_addresses 0x{:x}, 0x{:x}, {}", address, store, count);
+			logcall!("mem_physical_addresses 0x{:x}, 0x{:x}, {}", address, store, count);
 			if address & arch::PAGE_MASK != 0 {
 				return Return(Status::BadAlignment, 0);
 			}
@@ -275,7 +284,7 @@ mod sys {
 
 	sys! {
 		[_] task_spawn(mappings, mappings_count, program_counter, stack_pointer) {
-			log!("task_spawn 0x{:x}, {}, 0x{:x}, 0x{:x}", mappings, mappings_count, program_counter, stack_pointer);
+			logcall!("task_spawn 0x{:x}, {}, 0x{:x}, 0x{:x}", mappings, mappings_count, program_counter, stack_pointer);
 			let mappings = unsafe { core::slice::from_raw_parts(mappings as *const Mapping, mappings_count) };
 			use crate::task::*;
 			let vms = arch::VMS::new().unwrap();
@@ -308,7 +317,7 @@ mod sys {
 
 	sys! {
 		[_] dev_dma_alloc(address, size, _flags) {
-			log!("dev_dma_alloc 0x{:x}, {}, 0b{:b}", address, size, _flags);
+			logcall!("dev_dma_alloc 0x{:x}, {}, 0b{:b}", address, size, _flags);
 			assert_ne!(size, 0, "TODO just return an error doof");
 			// FIXME this should be in the PMM
 			let mut ppns = [None, None, None, None, None, None, None, None];
@@ -340,7 +349,7 @@ mod sys {
 
 	sys! {
 		[_] sys_platform_info(address, _max_count) {
-			log!("sys_platform_info 0x{:x}, {}", address, _max_count);
+			logcall!("sys_platform_info 0x{:x}, {}", address, _max_count);
 			use crate::{PLATFORM_INFO_SIZE, PLATFORM_INFO_PHYS_PTR};
 			if let Some(a) = NonNull::new(address as *mut arch::Page) {
 				if let Ok(a) = arch::Page::new(a) {
@@ -363,7 +372,7 @@ mod sys {
 
 	sys! {
 		[_] sys_direct_alloc(address, ppn, count, _flags) {
-			log!("sys_direct_alloc 0x{:x}, 0x{:x}, {}, 0b{:b}", address, ppn << arch::PAGE_BITS, count, _flags);
+			logcall!("sys_direct_alloc 0x{:x}, 0x{:x}, {}, 0b{:b}", address, ppn << arch::PAGE_BITS, count, _flags);
 			if let Some(addr) = NonNull::new(address as *mut ()) {
 				if let Ok(addr) = arch::Page::new(addr) {
 					if let Ok(ppn) = PPNBox::try_from(ppn) {
@@ -435,7 +444,7 @@ mod sys {
 	sys! {
 		/// Placeholder so that I don't need to update TABLE_LEN constantly.
 		[_] placeholder() {
-			log!("placeholder");
+			logcall!("placeholder");
 			Return(Status::InvalidCall, 0)
 		}
 	}

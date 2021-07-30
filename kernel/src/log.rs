@@ -18,6 +18,7 @@ impl fmt::Write for Log {
 #[macro_export]
 macro_rules! log {
 	($($args:tt)*) => {{
+		#[allow(unused_imports)]
 		use core::fmt::Write;
 		writeln!($crate::log::Log, $($args)*).unwrap();
 	}}

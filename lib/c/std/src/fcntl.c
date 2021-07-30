@@ -36,23 +36,24 @@ ssize_t read(int fd, void *buf, size_t count)
 	kernel_io_wait(0, 0);
 
 	/*
-	struct kernel_client_completion_entry *cce =
-	    &completion_queue[completion_index];
+	   struct kernel_client_completion_entry *cce =
+	   &completion_queue[completion_index];
 
-	const char *in = cce->data.page;
-	char *out = buf;
-	// This is necessary since the server may be bugged and have written more data than requested.
-	count = cce->length < count ? cce->length : count;
-	for (size_t i = 0; i < count; i++) {
-		out[i] = in[i];
-	}
+	   const char *in = cce->data.page;
+	   char *out = buf;
+	   // This is necessary since the server may be bugged and have written more data than requested.
+	   count = cce->length < count ? cce->length : count;
+	   for (size_t i = 0; i < count; i++) {
+	   out[i] = in[i];
+	   }
 
-	return count;
-	*/
+	   return count;
+	 */
 
 	return 0;
 }
 
-int close(int fd) {
+int close(int fd)
+{
 	return 0;
 }

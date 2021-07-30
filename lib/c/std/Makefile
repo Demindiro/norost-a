@@ -5,7 +5,7 @@ INCLUDE += -I../dux/include
 INCLUDE += -I../kernel/include
 INCLUDE += -I../errno/include
 
-CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3 -fPIC
+CC_ARGS   = -nostartfiles -nostdlib -ffreestanding -O3 -fPIC -Wall
 CC        = $(TOOLS_DIR)/$(TARGET)-gcc
 AR        = $(TOOLS_DIR)/$(TARGET)-ar
 AS        = $(TOOLS_DIR)/$(TARGET)-as

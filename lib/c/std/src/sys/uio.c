@@ -19,7 +19,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 
 		// Get a request entry
 		struct kernel_client_request_entry *cre =
-			dux_reserve_client_request_entry();
+		    dux_reserve_client_request_entry();
 		if (cre == NULL) {
 			// If we didn't write any data yet, tell the caller to try again
 			// Otherwise, return the amount of data written
@@ -29,29 +29,31 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 				return total_written;
 			}
 		}
-
 		// Copy data until the buffer is full or no data is left
 		size_t copied = 0;
 		{
-			for ( ; iov_offset < iov_count; iov_offset++) {
+			for (; iov_offset < iov_count; iov_offset++) {
 				const char *in = iov[iov_offset].iov_base;
-				for ( ; iov_base_offset < iov[iov_offset].iov_len; iov_base_offset++) {
+				for (;
+				     iov_base_offset < iov[iov_offset].iov_len;
+				     iov_base_offset++) {
 					if (copied < universal_buffer_size) {
-						out[copied++] = in[iov_base_offset];
+						out[copied++] =
+						    in[iov_base_offset];
 					} else {
 						goto buffer_full;
 					}
 				}
 				iov_base_offset = 0;
 			}
-		buffer_full:;
+ buffer_full:		;
 		}
 
 		// If we didn't write any data, return
 		if (copied == 0) {
 			return total_written;
 		}
-		
+
 		total_written += copied;
 
 		// Fill out the request entry

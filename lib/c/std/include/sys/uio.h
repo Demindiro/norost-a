@@ -7,7 +7,7 @@
 #define ssize_t signed long
 
 struct iovec {
-	void  *iov_base;
+	void *iov_base;
 	size_t iov_len;
 };
 

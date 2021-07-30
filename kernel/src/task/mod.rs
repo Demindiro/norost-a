@@ -219,7 +219,8 @@ impl Task {
 					let s = unsafe { cq.data.pages.unwrap().cast() };
 					let s = unsafe { core::slice::from_raw_parts(s.as_ptr(), cq.length) };
 					let s = unsafe { core::str::from_utf8_unchecked(s) };
-					log!("{}", s);
+					use core::fmt::Write;
+					write!(crate::log::Log, "{}", s).unwrap();
 					cq.opcode = None;
 				} else {
 					break;

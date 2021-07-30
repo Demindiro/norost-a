@@ -16,10 +16,9 @@ extern FILE *stdin;
 extern FILE *stdout;
 extern FILE *stderr;
 
+int fputc(int c, FILE * stream);
 
-int fputc(int c, FILE *stream);
-
-int fputs(const char *s, FILE *stream);
+int fputs(const char *s, FILE * stream);
 
 #define putc fputc
 
@@ -27,6 +26,15 @@ int putchar(int c);
 
 int puts(const char *s);
 
+int fgetc(FILE * stream);
+
+char *fgets(char *s, int size, FILE * stream);
+
+int getc(FILE * stream);
+
+int getchar(void);
+
+int ungetc(int c, FILE * stream);
 
 int printf(const char *, ...);
 
