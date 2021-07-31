@@ -1,1 +1,1 @@
-sysroot/riscv64-pc-dux/bin/minish
+target/riscv64gc-unknown-none-elf/release/b0

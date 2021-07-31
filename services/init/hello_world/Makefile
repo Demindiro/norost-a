@@ -1,19 +1,23 @@
 include ../../../common.mk
 
+NAME       = hello_world
+OUTPUT_DIR = $(SYSROOT)/bin
+OUTPUT     = $(OUTPUT_DIR)/$(NAME)
+
 READELF_ARGS?=-a
 OBJDUMP_ARGS?=-S
 
-build/init: hello.c | build/
+$(OUTPUT): hello.c | $(OUTPUT_DIR)
 	$(CC) -O3 $< -o $@
 
-build/:
-	mkdir build/
+$(OUTPUT_DIR):
+	mkdir -p $@
 
 readelf:
-	$(READELF) $(READELF_ARGS) build/init
+	$(READELF) $(READELF_ARGS) $(OUTPUT)
 
 objdump:
-	$(OBJDUMP) $(OBJDUMP_ARGS) build/init
+	$(OBJDUMP) $(OBJDUMP_ARGS) $(OUTPUT)
 
 clean:
 	rm -rf build/

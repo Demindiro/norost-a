@@ -58,6 +58,8 @@ impl super::Task {
 	/// Process I/O entries and begin executing the next task.
 	pub fn process_io(&self) {
 		if let Some(cq) = self.inner().client_request_queue {
+			use crate::arch::vms::VirtualMemorySystem;
+			self.inner().shared_state.virtual_memory.activate(); // TODO do this beforehand and once only
 			arch::set_supervisor_userpage_access(true);
 			let mut cq = cq.cast::<[Packet; Page::SIZE / mem::size_of::<Packet>()]>();
 			let cq = unsafe { cq.as_mut() };

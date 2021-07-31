@@ -286,12 +286,12 @@ mod sys {
 				match map.typ {
 					// Share mapping from current process.
 					0 => {
-						let rwx = decode_rwx_flags(map.flags.into());
-						log!("  share_map  {:p} -> {:p} ({:?})", map.self_address, map.task_address, rwx);
+						let rwx = decode_rwx_flags(map.flags.into()).unwrap();
+						logcall!("  share_map  {:p} -> {:p} ({:?})", map.self_address, map.task_address, rwx);
 						vms.share(
 							arch::Page::try_from(map.task_address).unwrap(),
 							arch::Page::try_from(map.self_address).unwrap(),
-							RWX::RWX, // TODO
+							rwx,
 							vms::Accessibility::UserLocal,
 						).unwrap()
 					}

@@ -8,6 +8,7 @@ members = [
 	"lib/rust/virtio",
 	"services/init/hello_world_virtio",
 	"services/init/multi_process",
+	"services/init/b0",
 ]
 
 [profile.dev]

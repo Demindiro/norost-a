@@ -1,10 +1,10 @@
 /// Structure used to save register state
 #[repr(C)]
 pub struct RegisterState {
+	/// The program counter state.
+	pub pc: usize,
 	/// All integer registers except `x0`
 	x: [usize; 31],
-	/// The program counter state.
-	pc: usize,
 	// /// All FP registers
 	//f: [usize; 32],
 }
