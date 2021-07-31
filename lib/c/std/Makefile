@@ -19,15 +19,12 @@ HEADER_DIRS = $(patsubst %,$(OUTPUT)/%,$(shell for f in $(HEADERS); do echo "$${
 OUTPUT = $(SYSROOT)
 BUILD  = build/$(TARGET)
 
-STATIC_LIBS = ../dux/output/dux.a
-
-
 
 # Commands
 
 default: install-headers build
 
-build: $(OUTPUT)/lib/crt0.o $(OUTPUT)/lib/libc.a
+build: $(OUTPUT)/lib/crt0.o $(OUTPUT)/lib/libc.a $(OUTPUT)/lib/libdux.a
 
 install-headers: $(patsubst %,$(OUTPUT)/%,$(HEADERS))
 
@@ -44,10 +41,13 @@ clean:
 $(OUTPUT)/lib/crt0.o: src/crt0/$(TARGET).s | $(OUTPUT)/lib
 	$(AS) $< -o $@
 
-$(OUTPUT)/lib/libc.a: $(OBJECTS) | $(STATIC_LIBS) $(OUTPUT)/lib
+$(OUTPUT)/lib/libc.a: $(OBJECTS) | $(OUTPUT)/lib
 	rm -f $@
 	$(AR) rc $@ $^
-	printf 'create $@\naddlib $@\naddlib $(STATIC_LIBS)\nsave\nend' | $(AR) -M
+
+$(OUTPUT)/lib/libdux.a: $(BUILD)/dux.o | $(OUTPUT)/lib
+	rm -f $@
+	$(AR) rc $@ $^
 
 $(OUTPUT)/include/%.h: include/%.h | $(HEADER_DIRS)
 	cp $< $@

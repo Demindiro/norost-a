@@ -3,7 +3,9 @@ Standard library wrapper
 ========================
 
 This library implements the standard C runtime as well as some other common
-functionality from POSIX.
+functionality from POSIX. Additionaly, it provides the Dux library, which
+implements cross-language common functionality and a header file for the kernel
+API.
 
 
 POSIX compatibility
