@@ -56,7 +56,7 @@ fn main() {
     let mut mappings =
         unsafe { core::mem::MaybeUninit::<[kernel::TaskSpawnMapping; 8]>::zeroed().assume_init() };
     let mut i = 0;
-	let mut pc = 0;
+    let mut pc = 0;
 
     for bin in BINARIES.iter() {
         let _ = writeln!(kernel::SysLog, "  {:p}", bin);
@@ -99,23 +99,43 @@ fn main() {
                 virt_a += 0x1000;
             }
         }
-		pc = elf.header.pt2.entry_point() as usize;
+        pc = elf.header.pt2.entry_point() as usize;
     }
 
     let _ = writeln!(kernel::SysLog, "Spawning task");
 
-    let kernel::Return { status, value } = unsafe {
-        kernel::task_spawn(
-            mappings.as_ptr(),
-			i,
-            pc as *const _,
-            core::ptr::null(),
-        )
-    };
+    let kernel::Return { status, value: id } =
+        unsafe { kernel::task_spawn(mappings.as_ptr(), i, pc as *const _, core::ptr::null()) };
 
     assert_eq!(status, 0, "Failed to spawn task");
 
-    let _ = writeln!(kernel::SysLog, "Spawned task with ID {}", value);
+    let _ = writeln!(kernel::SysLog, "Spawned task with ID {}", id);
+
+	let _ = unsafe { kernel::io_wait(0, 0) };
+
+    // Dummy write some stuff to the spawned task
+    unsafe {
+		let addr = 0xff00_0000 as *mut kernel::Page;
+        let kernel::Return { status, .. } = kernel::mem_alloc(addr, 2, 0b11);
+        assert_eq!(status, 0);
+		let raw = addr.add(1).cast::<u8>();
+		let addr = addr.cast();
+        let kernel::Return { status, .. } = kernel::io_set_queues(addr, 1, addr.add(1), 1);
+        assert_eq!(status, 0);
+		let s = "echo Hello, MiniSH! I am Init!\n";
+		for (i, c) in s.bytes().enumerate() {
+			*raw.add(i) = c;
+		}
+		addr.write(kernel::ipc::Packet {
+			opcode: Some(kernel::ipc::Op::Write.into()),
+			priority: 0,
+			flags: 0,
+			id: 0,
+			address: id,
+			data: kernel::ipc::Data { raw },
+			length: s.len(),
+		});
+    }
 
     loop {
         unsafe { kernel::io_wait(0, 0) };

@@ -64,7 +64,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 		cre->data.raw = universal_buffer;
 		cre->length = copied;
 		asm volatile ("fence");
-		cre->opcode = IO_WRITE;
+		cre->opcode = KERNEL_IPC_OP_WRITE;
 
 		// Flush the queue
 		kernel_io_wait(0, 0);

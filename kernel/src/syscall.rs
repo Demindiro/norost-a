@@ -194,7 +194,7 @@ mod sys {
 		/// Resize the task's IPC buffers to be able to hold the given amount of entries.
 		[task] io_set_queues(transmit_queue, transmit_size, receive_queue, receive_size) {
 			logcall!(
-				"io_resize_transmiter 0x{:x}, {}, 0x{:x}, {}",
+				"io_set_queues 0x{:x}, {}, 0x{:x}, {}",
 				transmit_queue,
 				transmit_size,
 				receive_queue,
@@ -213,7 +213,7 @@ mod sys {
 				}
 				r
 			};
-			task.set_client_buffers(a);
+			task.set_queues(a);
 			Return(Status::Ok, 0)
 		}
 	}
@@ -394,6 +394,7 @@ mod sys {
 	sys! {
 		/// Put a message in the kernel's stdout. Intended for low-level debugging.
 		[_] sys_log(address, length) {
+			logcall!("sys_log 0x{:x}, {}", address, length);
 			// Replace any non-valid UTF-8 characters
 			struct BrokenStr<'a>(&'a [u8]);
 

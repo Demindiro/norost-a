@@ -95,6 +95,9 @@ void __dux_init(void)
 	rxq_mask = (PAGE_SIZE / sizeof(struct kernel_ipc_packet)) - 1;
 	rxq_index = 0;
 
+	// Set an address to which pages can be mapped to.
+	rxq->data.raw = (void *)0x660000;
+
 	// Register the queues to the kernel
 	kret = kernel_io_set_queues(txq, 0, rxq, 0);
 	if (kret.status != 0) {
@@ -166,4 +169,8 @@ struct dux_reserve_pages dux_reserve_pages(void *address, size_t count) {
 
 struct kernel_ipc_packet *dux_reserve_transmit_entry(void) {
 	return txq;
+}
+
+struct kernel_ipc_packet *dux_get_receive_entry(void) {
+	return rxq;
 }

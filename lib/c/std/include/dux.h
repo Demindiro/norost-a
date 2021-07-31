@@ -23,6 +23,11 @@ struct dux_reserve_pages {
 struct kernel_ipc_packet *dux_reserve_transmit_entry(void);
 
 /**
+ * Return a pointer to the current receive entry. Returns NULL if there is no receive queue.
+ */
+struct kernel_ipc_packet *dux_get_receive_entry(void);
+
+/**
  * Reserves a range of memory pages. If the address is NULL, the best fitting address is used and
  * returned. If the range cannot be reserved, NULL is returned.
  */

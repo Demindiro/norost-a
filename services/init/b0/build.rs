@@ -36,7 +36,10 @@ fn main() {
 	"
     )
     .unwrap();
-    for line in list.split('\n').filter(|s| !s.is_empty() && &s[0..1] != "#") {
+    for line in list
+        .split('\n')
+        .filter(|s| !s.is_empty() && &s[0..1] != "#")
+    {
         let path = if &line[0..1] != "/" {
             format!("{}/{}/{}", base_dir, BASE_DIR, line)
         } else {

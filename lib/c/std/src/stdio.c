@@ -43,10 +43,6 @@ int fputs(const char *s, FILE * stream)
 		 .iov_base = (void *)s,
 		 .iov_len = strlen(s),
 		 },
-		{
-		 .iov_base = "\n",
-		 .iov_len = 1,
-		 },
 	};
 
 	ssize_t ret = writev(stream->_fd, iov, 2);
@@ -67,7 +63,27 @@ int putchar(int c)
 
 int puts(const char *s)
 {
-	return fputs(s, stdout);
+	struct iovec iov[2] = {
+		{
+		 // Discarding const is fine as writev won't write to this.
+		 .iov_base = (void *)s,
+		 .iov_len = strlen(s),
+		 },
+		{
+		 .iov_base = "\n",
+		 .iov_len = 1,
+		 },
+	};
+
+	ssize_t ret = writev(stdout->_fd, iov, 2);
+
+	if (ret >= 0) {
+		// ret just has to be a "non-negative number". ssize_t may overflow int so just set it
+		// to 0.
+		ret = 0;
+	}
+
+	return ret;
 }
 
 int fgetc(FILE * stream) {
@@ -75,7 +91,23 @@ int fgetc(FILE * stream) {
 }
 
 char *fgets(char *s, int size, FILE * stream) {
-	return NULL;
+	if (size == 0) {
+		// Paraphrasing man page: "returns NULL while no characters have been read"
+		return NULL;
+	}
+	struct kernel_ipc_packet *rxe = dux_get_receive_entry();
+	while (rxe->opcode == 0) {
+		kernel_io_wait(0, 0);
+	}
+	char *ptr = s;
+	char *data = rxe->data.raw;
+	char *end = data + rxe->length;
+	while (data != end) {
+		*ptr++ = *data++;
+	}
+	*ptr = 0;
+	rxe->opcode = 0;
+	return s;
 }
 
 int getc(FILE * stream) {
@@ -168,7 +200,7 @@ int vfprintf(FILE *stream, const char *format, va_list args) {
 		pkt->data.raw = universal_buffer;
 		pkt->length = ptr - out;
 		asm volatile ("fence");
-		pkt->opcode = IO_WRITE;
+		pkt->opcode = KERNEL_IPC_OP_WRITE;
 
 		// TODO check if the request was processed successfully
 		/*

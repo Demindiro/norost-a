@@ -5,10 +5,6 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define IO_NONE   (0)
-#define IO_READ   (1)
-#define IO_WRITE  (2)
-
 #define PROT_READ  (0x1)
 #define PROT_WRITE (0x2)
 #define PROT_EXEC  (0x4)
@@ -34,6 +30,15 @@ struct kernel_ipc_packet {
 	union {
 		void *raw;
 	} data;
+};
+
+/**
+ * Valid IPC operations
+ */
+enum {
+	KERNEL_IPC_OP_NONE  = 0,
+	KERNEL_IPC_OP_READ  = 1,
+	KERNEL_IPC_OP_WRITE = 2,
 };
 
 #define SYSCALL(...) \

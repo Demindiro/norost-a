@@ -16,7 +16,7 @@ symlink:
 
 # Targets
 
-$(OUTPUT): src/main.c | $(OUTPUT_DIR)
+$(OUTPUT): src/main.c | $(OUTPUT_DIR) $(SYSROOT)/lib/libc.a
 	$(CC) $^ -o $(OUTPUT) $(CC_ARGS)
 
 $(OUTPUT_DIR):

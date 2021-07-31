@@ -32,10 +32,6 @@ use crate::memory::{self, AllocateError};
 use core::ptr::NonNull;
 use core::sync::atomic;
 
-/// A global counter for assigning Task IDs.
-// TODO handle wrap around + try to keep TIDs low
-static TASK_ID_COUNTER: atomic::AtomicU32 = atomic::AtomicU32::new(0);
-
 /// A wrapper around a task pointer.
 #[derive(Clone)]
 #[repr(C)]
@@ -66,24 +62,14 @@ pub struct TaskData {
 	/// The shared state of this task.
 	// TODO should be reference counted.
 	shared_state: SharedState,
-	/// The virtual address of the client request buffer.
-	client_request_queue: Option<NonNull<Page>>,
-	/// The virtual address of the client completion buffer.
-	client_completion_queue: Option<NonNull<Page>>,
-	/// The virtual address of the server request buffer.
-	server_request_queue: Option<NonNull<Page>>,
-	/// The virtual address of the server completion buffer.
-	server_completion_queue: Option<NonNull<Page>>,
-	/// The index of the next entry to be processed in the client request buffer.
-	client_request_index: RingIndex,
-	/// The index of the next entry to be processed in the client completion buffer.
-	client_completion_index: RingIndex,
-	/// The index of the next entry to be processed in the server request buffer.
-	server_request_index: RingIndex,
-	/// The index of the next entry to be processed in the server completion buffer.
-	server_completion_index: RingIndex,
-	/// The ID of this task.
-	id: u32,
+	/// The address of the transmit queue.
+	transmit_queue: Option<NonNull<Page>>,
+	/// The address of the receive queue.
+	receive_queue: Option<NonNull<Page>>,
+	/// The index of the next entry to be processed in the transmit queue.
+	transmit_index: RingIndex,
+	/// The index of the next entry to be processed in the receive queue.
+	receive_index: RingIndex,
 }
 
 const STACK_ADDRESS: Page = memory::reserved::HART_STACKS.start;
@@ -109,18 +95,13 @@ impl Task {
 			task.0.as_ptr().write(TaskData {
 				register_state: Default::default(),
 				stack: STACK_ADDRESS.next().unwrap(),
-				id: TASK_ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed),
 				shared_state: SharedState {
 					virtual_memory: vms,
 				},
-				client_request_queue: None,
-				client_completion_queue: None,
-				server_request_queue: None,
-				server_completion_queue: None,
-				client_request_index: RingIndex::default(),
-				client_completion_index: RingIndex::default(),
-				server_request_index: RingIndex::default(),
-				server_completion_index: RingIndex::default(),
+				transmit_queue: None,
+				receive_queue: None,
+				transmit_index: RingIndex::default(),
+				receive_index: RingIndex::default(),
 			});
 		}
 		unsafe { TASK_DATA_ADDRESS = TASK_DATA_ADDRESS.next().unwrap() };
@@ -161,16 +142,16 @@ impl Task {
 		//self.inner().shared_state.virtual_memory.deallocate(address, count)
 	}
 
-	/// Set the task client request and completion buffer pointers and sizes.
-	pub fn set_client_buffers(&self, buffers: Option<((NonNull<Page>, u8), (NonNull<Page>, u8))>) {
-		if let Some(((rb, rbs), (cb, cbs))) = buffers {
-			self.inner().client_request_index.set_mask(rbs);
-			self.inner().client_completion_index.set_mask(cbs);
-			self.inner().client_request_queue = Some(rb);
-			self.inner().client_completion_queue = Some(cb);
+	/// Set the task transmit & receive queue pointers and sizes.
+	pub fn set_queues(&self, buffers: Option<((NonNull<Page>, u8), (NonNull<Page>, u8))>) {
+		if let Some(((txq, txs), (rxq, rxs))) = buffers {
+			self.inner().transmit_index.set_mask(txs);
+			self.inner().receive_index.set_mask(rxs);
+			self.inner().transmit_queue = Some(txq);
+			self.inner().receive_queue = Some(rxq);
 		} else {
-			self.inner().client_request_queue = None;
-			self.inner().client_completion_queue = None;
+			self.inner().transmit_queue = None;
+			self.inner().receive_queue = None;
 		}
 	}
 

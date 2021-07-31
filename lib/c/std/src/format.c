@@ -3,11 +3,13 @@
 #include "format.h"
 
 /**
- * Inserts the given null-terminated string.
+ * Inserts the given null-terminated string or inserts '(null)' if value is NULL.
  *
  * Returns NULL if the buffer isn't large enough.
  */
 static inline char *format_str(const char *value, char *str, size_t size, size_t max) {
+	value = value ? value : "(null)";
+
 	while (*value != '\0') {
 		if (max-- == 0) {
 			return str;
@@ -252,6 +254,7 @@ const char *__std_determine_format(const char *input,
 		break;
 	case 's':
 		type->specifier = STD_FORMAT_STRING;
+		type->type = STD_FORMAT_TYPE_NONE;
 		break;
 	case 'p':
 		type->specifier = STD_FORMAT_POINTER;
@@ -330,7 +333,7 @@ char *__std_format(char *out, size_t size, struct std_format_type *type, va_list
 	case STD_FORMAT_CHAR:
 		return format_str("(todo)", out, size, -1);
 	case STD_FORMAT_STRING:
-		return format_str("(todo)", out, size, -1);
+		return format_str(va_arg(*args, const char *), out, size, -1);
 	case STD_FORMAT_POINTER:
 		return ((out = format_str("0x", out, size, -1)) != NULL)
 			? format_unsigned_int(val, out, size - 2, 16, type->modifiers)

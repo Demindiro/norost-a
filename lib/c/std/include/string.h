@@ -11,4 +11,10 @@ extern void strcat(char *, const char *);
 
 extern char *strchr(const char *, int);
 
+extern char *strtok(char *str, const char *delim);
+
+extern int strcmp(const char *a, const char *b);
+
+extern int strncmp(const char *a, const char *b, size_t n);
+
 #endif
