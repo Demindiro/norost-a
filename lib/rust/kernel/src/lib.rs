@@ -125,3 +125,12 @@ impl fmt::Write for SysLog {
         }
     }
 }
+
+/// A macro that acts similar to println but sends output to the kernel log.
+#[macro_export]
+macro_rules! sys_log {
+	($($arg:tt)*) => {{
+		use core::fmt::Write;
+		let _ = writeln!($crate::SysLog, $($arg)*);
+	}};
+}
