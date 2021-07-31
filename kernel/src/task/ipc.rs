@@ -85,7 +85,8 @@ impl From<Op> for NonZeroU8 {
 		NonZeroU8::new(match op {
 			Op::Read => 1,
 			Op::Write => 2,
-		}).unwrap()
+		})
+		.unwrap()
 	}
 }
 
@@ -104,27 +105,31 @@ impl super::Task {
 				if let Some(op) = cq.opcode {
 					let op = Op::try_from(op).unwrap();
 					match op {
-						Op::Read => {
-						},
+						Op::Read => {}
 						Op::Write => {
 							use core::fmt::Write;
 							if cq.address == usize::MAX {
 								// FIXME this is a temporary workaround for not having a "video" driver task
-								let s = unsafe { core::slice::from_raw_parts(cq.data.raw, cq.length) };
+								let s =
+									unsafe { core::slice::from_raw_parts(cq.data.raw, cq.length) };
 								let s = unsafe { core::str::from_utf8_unchecked(s) };
 								write!(crate::log::Log, "{}", s).unwrap();
 								cq.opcode = None;
 							} else {
 								writeln!(crate::log::Log, "Sending packet to {}", cq.address);
 								let bits = mem::size_of::<usize>() * 4;
-								let (group, task) = (cq.address >> bits, cq.address & (1 << bits) - 1);
+								let (group, task) =
+									(cq.address >> bits, cq.address & (1 << bits) - 1);
 								let task = Group::get(group).unwrap().task(task).unwrap();
 								let pkt = cq.clone();
 								drop(cq);
 								// FIXME this is terribly inefficient
-								task.inner().shared_state.virtual_memory.activate(); 
+								task.inner().shared_state.virtual_memory.activate();
 								let rxq = task.inner().receive_queue.unwrap();
-								let rxq = unsafe { rxq.cast::<[Packet; Page::SIZE / mem::size_of::<Packet>()]>().as_mut() };
+								let rxq = unsafe {
+									rxq.cast::<[Packet; Page::SIZE / mem::size_of::<Packet>()]>()
+										.as_mut()
+								};
 								unsafe {
 									assert_ne!(rxq[0].data.raw, core::ptr::null_mut());
 								}
@@ -133,7 +138,16 @@ impl super::Task {
 								let addr = unsafe { Page::from_pointer(rxq[0].data.raw).unwrap() };
 								// FIXME ditto
 								self.inner().shared_state.virtual_memory.activate();
-								task.inner().shared_state.virtual_memory.share(addr, unsafe { Page::from_pointer(pkt.data.raw).unwrap() }, arch::vms::RWX::R, arch::vms::Accessibility::UserLocal).unwrap();
+								task.inner()
+									.shared_state
+									.virtual_memory
+									.share(
+										addr,
+										unsafe { Page::from_pointer(pkt.data.raw).unwrap() },
+										arch::vms::RWX::R,
+										arch::vms::Accessibility::UserLocal,
+									)
+									.unwrap();
 							}
 						}
 					}

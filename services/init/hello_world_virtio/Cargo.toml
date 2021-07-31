@@ -4,10 +4,11 @@ version = "0.1.0"
 authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 device_tree = { path = "../../../lib/rust/device_tree/" }
 kernel = { path = "../../../lib/rust/kernel/", package = "syscalls" }
 pci = { path = "../../../lib/rust/pci/" }
 virtio = { path = "../../../lib/rust/virtio/" }
+
+[features]
+dump-dtb = []

@@ -17,8 +17,8 @@ pub const PROT_EXEC: u8 = 0x4;
 /// Structure returned by system calls.
 #[repr(C)]
 pub struct Return {
-    pub status: usize,
-    pub value: usize,
+	pub status: usize,
+	pub value: usize,
 }
 
 pub mod ipc {
@@ -55,17 +55,18 @@ pub mod ipc {
 			NonZeroU8::new(match op {
 				Op::Read => 1,
 				Op::Write => 2,
-			}).unwrap()
+			})
+			.unwrap()
 		}
 	}
 }
 
 #[repr(C)]
 pub struct TaskSpawnMapping {
-    pub task_address: *mut Page,
-    pub typ: u8,
-    pub flags: u8,
-    pub self_address: *mut Page,
+	pub task_address: *mut Page,
+	pub typ: u8,
+	pub flags: u8,
+	pub self_address: *mut Page,
 }
 
 #[macro_use]
@@ -75,42 +76,49 @@ mod riscv;
 pub use riscv::*;
 
 syscall!(io_wait, 0, flags: u8, time: u64);
-syscall!(io_set_queues, 1, transmit_queue: *mut ipc::Packet, transmit_size: usize, receive_queue: *mut ipc::Packet, receive_size: usize);
+syscall!(
+	io_set_queues,
+	1,
+	transmit_queue: *mut ipc::Packet,
+	transmit_size: usize,
+	receive_queue: *mut ipc::Packet,
+	receive_size: usize
+);
 
 syscall!(mem_alloc, 3, address: *mut Page, size: usize, flags: u8);
 syscall!(
-    mem_physical_address,
-    7,
-    address: *const Page,
-    store: *mut usize,
-    count: usize
+	mem_physical_address,
+	7,
+	address: *const Page,
+	store: *mut usize,
+	count: usize
 );
 
 syscall!(
-    task_spawn,
-    11,
-    mappings: *const TaskSpawnMapping,
-    mappings_count: usize,
-    program_counter: *const ffi::c_void,
-    stack_pointer: *const ffi::c_void
+	task_spawn,
+	11,
+	mappings: *const TaskSpawnMapping,
+	mappings_count: usize,
+	program_counter: *const ffi::c_void,
+	stack_pointer: *const ffi::c_void
 );
 
 syscall!(
-    dev_dma_alloc,
-    12,
-    address: *mut Page,
-    size: usize,
-    flags: u8
+	dev_dma_alloc,
+	12,
+	address: *mut Page,
+	size: usize,
+	flags: u8
 );
 
 syscall!(sys_platform_info, 13, address: *mut Page, max_count: usize);
 syscall!(
-    sys_direct_alloc,
-    14,
-    address: *mut Page,
-    start_page: usize,
-    count: usize,
-    flags: u8
+	sys_direct_alloc,
+	14,
+	address: *mut Page,
+	start_page: usize,
+	count: usize,
+	flags: u8
 );
 syscall!(sys_log, 15, string: *const u8, length: usize);
 
@@ -118,12 +126,12 @@ syscall!(sys_log, 15, string: *const u8, length: usize);
 pub struct SysLog;
 
 impl fmt::Write for SysLog {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        unsafe {
-            let ret = sys_log(s as *const _ as *const _, s.len());
-            (ret.status == 0).then(|| ()).ok_or(fmt::Error)
-        }
-    }
+	fn write_str(&mut self, s: &str) -> fmt::Result {
+		unsafe {
+			let ret = sys_log(s as *const _ as *const _, s.len());
+			(ret.status == 0).then(|| ()).ok_or(fmt::Error)
+		}
+	}
 }
 
 /// A macro that acts similar to println but sends output to the kernel log.
