@@ -19,6 +19,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 }
 
 mod console;
+mod device_tree;
 mod rtbegin;
 mod uart;
 
@@ -29,10 +30,8 @@ use xmas_elf::ElfFile;
 
 #[export_name = "main"]
 fn main() {
-
-	sys_log!("Scanning bus");
-	le
-
+	sys_log!("Mapping devices");
+	device_tree::map_devices();
 
 	sys_log!("Creating console");
 	{
@@ -40,11 +39,7 @@ fn main() {
 		let _ = write!(kernel::SysLog, "INIT >> ");
 	}
 
-	let uart = core::ptr::NonNull::new(0x10000000 as *mut _).unwrap();
-
-	let _ = unsafe { kernel::sys_direct_alloc(uart.as_ptr(), uart.as_ptr() as usize >> 12, 1, 0b011) };
-
-	let mut console = unsafe { console::Console::new(uart.cast()) };
+	let mut console = unsafe { console::Console::new(device_tree::UART_ADDRESS.cast()) };
 	let mut buf = [0; 256];
 	let mut i = 0;
 	loop {

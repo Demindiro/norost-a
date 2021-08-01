@@ -70,92 +70,24 @@ fn dump_dtb(dtb: &device_tree::DeviceTree) {
 		);
 	}
 
-	fn print_node(level: usize, mut node: device_tree::Node) {
-		writeln!(kernel::SysLog, "{0:>1$}{2} {{", "", level * 2, node.name);
-		while let Some(property) = node.next_property() {
-			if property.value.len() > 0
-				&& property.value[..property.value.len() - 1]
-					.iter()
-					// Everything between ' ' and '~' is human-readable
-					.all(|&c| b' ' <= c && c <= b'~')
-				&& property.value.last().unwrap() == &0
-			{
-				// SAFETY: The string is a valid null-terminated string
-				let s = unsafe {
-					core::str::from_utf8_unchecked(&property.value[..property.value.len() - 1])
-				};
-				writeln!(
-					kernel::SysLog,
-					"{0:>1$}{2} = {3:?}",
-					"",
-					level * 2 + 2,
-					property.name,
-					s
-				);
-			} else {
-				writeln!(
-					kernel::SysLog,
-					"{0:>1$}{2} = {3:02x?}",
-					"",
-					level * 2 + 2,
-					property.name,
-					&property.value
-				);
-			}
-		}
-		while let Some(node) = node.next_child_node() {
-			print_node(level + 1, node);
-		}
-		writeln!(kernel::SysLog, "{0:>1$}}}", "", level * 2);
-	}
-	let mut interpreter = dtb.interpreter();
-	while let Some(mut node) = interpreter.next_node() {
-		print_node(1, node);
-	}
+	kernel::sys_log!("{:#?}", dtb);
 }
 
 fn map_pci(dtb: device_tree::DeviceTree) {
-	let mut int = dtb.interpreter();
-
-	let mut address_cells = 0;
-	let mut size_cells = 0;
-
-	while let Some(mut node) = int.next_node() {
-		while let Some(p) = node.next_property() {
-			match p.name {
-				"#address-cells" => {
-					let num = p.value.try_into().expect("Malformed #address-cells");
-					address_cells = u32::from_be_bytes(num);
-				}
-				"#size-cells" => {
-					let num = p.value.try_into().expect("Malformed #size-cells");
-					size_cells = u32::from_be_bytes(num);
-				}
-				_ => (),
-			}
-		}
-
-		while let Some(mut node) = node.next_child_node() {
-			if node.name == "soc" {
-				while let Some(p) = node.next_property() {}
-				while let Some(mut node) = node.next_child_node() {
+	if let Ok(node) = dtb.root() {
+		for node in node.children() {
+			if node.name == b"soc" {
+				for node in node.children() {
 					let mut compatible = false;
 					let mut ranges = None;
 					let mut reg = None;
-					let mut child_address_cells = address_cells;
-					let mut child_size_cells = size_cells;
-					while let Some(p) = node.next_property() {
+					let mut child_address_cells = None;
+					for p in node.properties() {
 						match p.name {
-							"compatible" => compatible = p.value == b"pci-host-ecam-generic\0",
-							"ranges" => ranges = Some(p.value),
-							"reg" => reg = Some(p.value),
-							"#address-cells" => {
-								child_address_cells =
-									u32::from_be_bytes(p.value.try_into().unwrap())
-							}
-							"#size-cells" => {
-								child_size_cells = u32::from_be_bytes(p.value.try_into().unwrap())
-							}
+							b"compatible" => compatible = p.value == b"pci-host-ecam-generic\0",
+							b"ranges" => ranges = Some(p.value),
+							b"reg" => reg = Some(p.value),
+							b"#address-cells" => child_address_cells = Some(u32::from_be_bytes(p.value.try_into().unwrap())),
 							_ => (),
 						}
 					}
@@ -168,7 +100,7 @@ fn map_pci(dtb: device_tree::DeviceTree) {
 					// Map reg
 					let addr = PCI_ADDRESS;
 					let reg = reg.expect("No reg property");
-					let (start, reg): (usize, _) = match address_cells {
+					let (start, reg): (usize, _) = match node.address_cells {
 						1 => (
 							u32::from_be_bytes(reg[..4].try_into().unwrap())
 								.try_into()
@@ -183,7 +115,7 @@ fn map_pci(dtb: device_tree::DeviceTree) {
 						),
 						_ => panic!("Address cell size too large"),
 					};
-					let size: usize = match size_cells {
+					let size: usize = match node.size_cells {
 						1 => u32::from_be_bytes(reg.try_into().unwrap())
 							.try_into()
 							.unwrap(),
@@ -199,9 +131,9 @@ fn map_pci(dtb: device_tree::DeviceTree) {
 					// Map MMIO
 					let addr = PCI_ADDRESS_MMIO;
 					let ranges = &ranges.unwrap()
-						[(child_address_cells + address_cells + size_cells) as usize * 4..];
-					let r = &ranges[child_address_cells as usize * 4..];
-					let (start, r): (usize, _) = match address_cells {
+						[(child_address_cells.unwrap() + node.address_cells + node.size_cells) as usize * 4..];
+					let r = &ranges[child_address_cells.unwrap() as usize * 4..];
+					let (start, r): (usize, _) = match node.address_cells {
 						1 => (
 							u32::from_be_bytes(r[..4].try_into().unwrap())
 								.try_into()
@@ -216,7 +148,7 @@ fn map_pci(dtb: device_tree::DeviceTree) {
 						),
 						_ => panic!("Address cell size too large"),
 					};
-					let (size, r): (usize, _) = match size_cells {
+					let (size, r): (usize, _) = match node.size_cells {
 						1 => (
 							u32::from_be_bytes(r[..4].try_into().unwrap())
 								.try_into()
@@ -249,7 +181,8 @@ fn main() {
 	writeln!(kernel::SysLog, "ergijoregiogreojr");
 
 	unsafe {
-		let d = device_tree::DeviceTree::parse_dtb(PLATFORM_INFO.as_ptr().cast()).unwrap();
+		let d = core::slice::from_raw_parts(PLATFORM_INFO.as_ptr().cast(), 4096 / 4 * value);
+		let d = device_tree::DeviceTree::parse(d).unwrap();
 		#[cfg(feature = "dump-dtb")]
 		dump_dtb(&d);
 		map_pci(d);

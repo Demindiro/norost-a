@@ -12,25 +12,41 @@
 //!
 //! [dt spec]: https://github.com/devicetree-org/devicetree-specification/releases/download/v0.3/devicetree-specification-v0.3.pdf
 
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 
-// TODO we should add range checks just in case a manufacturer screws up their DTB.
-
+use core::convert::{TryFrom, TryInto};
+use core::fmt;
+use core::mem;
 use core::slice;
 use simple_endian::{u32be, u64be};
 
 /// A structure representing a device tree.
-pub struct DeviceTree {
-	/// The header of the DTB
-	header: &'static Header,
+pub struct DeviceTree<'a> {
+	data: &'a [u32],
 }
 
 /// An enum representing possible errors that can occur while parsing
 /// a DTB.
 #[derive(Debug)]
-pub enum ParseDTBError {
+pub enum ParseError {
+	/// There is too little data in the DTB to be possibly valid.
+	TooShort,
 	/// The magic doesn't match (i.e. it isn't `0xdOOdfeed`)
 	BadMagic(u32),
+}
+
+#[derive(Debug)]
+pub enum ParseNodeError {
+	/// A different interpreter token was expected
+	UnexpectedToken,
+	/// The name was not null-terminated.
+	UnterminatedName,
+	/// An offset was out of bounds.
+	OutOfBounds,
+	/// The DTB is too short / truncated.
+	TooShort,
+	/// The value of a `#...-cells` isn't 32 bits large.
+	BadCellsValue,
 }
 
 /// A representation of the header field of the DTB format.
@@ -67,68 +83,59 @@ pub struct ReservedMemoryRegion {
 }
 
 /// A structure representing the "strings block" of the DTB.
-struct StringsBlock {
-	_data: [u8; 0],
-}
-
-/// An interpreter to parse the tree inside the [`StructureBlock`].
-pub struct Interpreter {
-	/// The current pointer in the StructureBlock that is being parsed.
-	pc: *const u32be,
-	/// The address of the [`StringsBlock`]
-	strings: &'static StringsBlock,
-	/// The total amount of nodes parsed.
-	node_count: usize,
-	/// Whether TOKEN_END was encountered.
-	finished: bool,
+struct StringsBlock<'a> {
+	data: &'a [u8],
 }
 
 /// A structure representing a single node in the DTB
-pub struct Node<'interpreter> {
-	/// The state of the interpreter
-	interpreter: &'interpreter mut Interpreter,
-	/// The name of the node
-	pub name: &'static str,
-	/// The iteration state of this node.
-	state: NodeState,
-}
-
-/// Enum indicating the enumeration state of a Node
-enum NodeState {
-	/// There are still properties left to iterate
-	Properties,
-	/// There are still child nodes left to iterate
-	ChildNodes,
-	/// There is nothing left to iterate
-	Empty,
+pub struct Node<'a, 'b: 'a> {
+	/// The DTB that is being parsed.
+	dtb: &'a DeviceTree<'b>,
+	/// The name of the node.
+	pub name: &'b [u8],
+	/// The value of `#address-cells` at this level.
+	pub address_cells: u32,
+	/// The value of `#size-cells` at this level.
+	pub size_cells: u32,
+	/// The value of `#interrupt-cells` at this level.
+	pub interrupt_cells: u32,
+	/// An index to the start of the properties list.
+	properties: u32,
+	/// An index to the start of the nodes list.
+	children: u32,
 }
 
 /// A structure representing a property of a node in the DTB
-pub struct Property {
+pub struct Property<'a> {
 	/// The value of the property.
-	pub value: &'static [u8],
+	pub value: &'a [u8],
 	/// The name of the property.
-	pub name: &'static str,
+	pub name: &'a [u8],
 }
 
-impl DeviceTree {
+impl<'a> DeviceTree<'a> {
 	/// The magic value that must be present in every valid DTB.
 	const MAGIC: u32 = 0xd00dfeed;
 
-	/// Parse the DTB located at the given address.
-	///
-	/// ## Safety
-	///
-	/// The address must be valid and may never be deallocated.
-	// TODO change *const u8 to NonNull
-	pub unsafe fn parse_dtb(address: *const u8) -> Result<Self, ParseDTBError> {
-		let header = &*(address as *const Header);
+	/// Parse the DTB data.
+	pub fn parse(data: &'a [u32]) -> Result<Self, ParseError> {
+		let byte_len = data.len() * mem::size_of::<u32>();
+		(byte_len >= mem::size_of::<Header>())
+			.then(|| ())
+			.ok_or(ParseError::TooShort)?;
 
-		if header.magic != Self::MAGIC.into() {
-			return Err(ParseDTBError::BadMagic(header.magic.into()));
-		}
+		// SAFETY: the address is properly aligned & large enough to fit the entire header.
+		let header = unsafe { &*(data as *const _ as *const Header) };
 
-		Ok(Self { header })
+		(byte_len >= u32::from(header.total_size).try_into().unwrap())
+			.then(|| ())
+			.ok_or(ParseError::TooShort)?;
+
+		(header.magic == Self::MAGIC.into())
+			.then(|| ())
+			.ok_or(ParseError::BadMagic(header.magic.into()))?;
+
+		Ok(Self { data })
 	}
 
 	/// A iterator over all reserved memory regions.
@@ -158,241 +165,367 @@ impl DeviceTree {
 
 		// SAFETY: The DTB is valid
 		let rmr = unsafe {
-			(self.header as *const _ as *const u8)
-				.add(u32::from(self.header.offset_memory_reservation_block) as usize)
+			(self.data as *const _ as *const u8)
+				.add(u32::from(self.header().offset_memory_reservation_block) as usize)
 				.cast()
 		};
 
 		Iter { rmr }
 	}
 
-	/// Returns a new interpreter
-	pub fn interpreter(&self) -> Interpreter {
-		// SAFETY: The DTB is valid
-		let pc = unsafe {
-			(self.header as *const _ as *const u8)
-				.add(u32::from(self.header.offset_structure_block) as usize)
-				.cast()
-		};
-		// SAFETY: The DTB is valid
-		let strings = unsafe {
-			&*(self.header as *const _ as *const u8)
-				.add(u32::from(self.header.offset_strings_block) as usize)
-				.cast()
-		};
-		let (node_count, finished) = (0, false);
-		Interpreter {
-			pc,
-			strings,
-			node_count,
-			finished,
-		}
+	/// Return the root node.
+	pub fn root(&self) -> Result<Node, ParseNodeError> {
+		Node::new(
+			self,
+			u32::from(self.header().offset_structure_block)
+				/ u32::try_from(mem::size_of::<u32>()).unwrap(),
+			2, // If missing, we should assume 2 for address-cells.
+			1, // Ditto
+			0, // No idea about this one. 0 seems like a sane default?
+		)
+		.map(|n| n.0)
 	}
 
 	/// Return the total size of the FDT
 	pub fn total_size(&self) -> usize {
-		u32::from(self.header.total_size) as usize
+		u32::from(self.header().total_size) as usize
+	}
+
+	/// Return a reference to the strings block
+	fn strings(&self) -> StringsBlock<'a> {
+		let h = self.header();
+		// SAFETY: The DTB is valid
+		let data = unsafe {
+			let ptr = (self.data as *const _ as *const u8)
+				.add(u32::from(h.offset_strings_block).try_into().unwrap());
+			slice::from_raw_parts(ptr, u32::from(h.size_strings_block).try_into().unwrap())
+		};
+		StringsBlock { data }
+	}
+
+	/// Return a reference to the header
+	fn header(&self) -> &'a Header {
+		// SAFETY: the DTB is valid and properly aligned.
+		unsafe { &*(self.data as *const [u32] as *const Header) }
+	}
+
+	/// Return an `u32` at the given position
+	fn get(&self, position: u32) -> Option<u32> {
+		self.data
+			.get(usize::try_from(position).unwrap())
+			.copied()
+			.map(u32::from_be)
 	}
 }
 
-impl StringsBlock {
+impl fmt::Debug for DeviceTree<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		// TODO print reserved memory areas too
+		self.root().fmt(f)
+	}
+}
+
+impl<'a> StringsBlock<'a> {
 	/// Returns the string at the given offset
-	fn into<'a>(&'a self, offset: u32) -> &'a str {
-		// SAFETY: The offset is in range.
-		unsafe {
-			let ptr = (self as *const _ as *const u8).add(offset as usize);
-			cstr_to_str(ptr).expect("String isn't valid UTF-8")
-		}
+	fn get(&self, offset: u32) -> Option<&'a [u8]> {
+		self.data
+			.get(offset.try_into().unwrap()..)
+			.map(cstr_to_str)
+			.flatten()
 	}
 }
 
-impl Interpreter {
+impl<'a, 'b> Node<'a, 'b> {
 	const TOKEN_BEGIN_NODE: u32 = 0x1;
 	const TOKEN_END_NODE: u32 = 0x2;
 	const TOKEN_PROP: u32 = 0x3;
 	const TOKEN_NOP: u32 = 0x4;
 	const TOKEN_END: u32 = 0x9;
 
-	/// Returns the next node
-	pub fn next_node(&mut self) -> Option<Node> {
-		self.step_node()
-	}
+	/// Parse a node in a tree.
+	fn new(
+		dtb: &'a DeviceTree<'b>,
+		mut offset: u32,
+		address_cells: u32,
+		size_cells: u32,
+		interrupt_cells: u32,
+	) -> Result<(Self, u32), ParseNodeError> {
+		// Ensure this is indeed the start of a node
+		(dtb.get(offset) == Some(Self::TOKEN_BEGIN_NODE))
+			.then(|| ())
+			.ok_or(ParseNodeError::UnexpectedToken)?;
+		offset += 1;
 
-	/// Return the current token
-	fn current(&self) -> u32 {
-		// SAFETY: the token tree is valid and the pointer is aligned
-		unsafe { *self.pc }.into()
-	}
+		// Parse name
+		let name = cstr_to_str(&dtb.data[offset.try_into().unwrap()..])
+			.ok_or(ParseNodeError::UnterminatedName)?;
+		let align = name.len() + 1; // Include null terminator
+		let mask = mem::align_of::<u32>() - 1;
+		offset += u32::try_from((align + mask) / mem::size_of::<u32>()).unwrap();
 
-	/// Advances the program counter by the given number of steps
-	// TODO check if the PC is still in range
-	fn advance(&mut self, steps: u32) {
-		// SAFETY: the pointer remains within the structure block
-		// or right at the end of it.
-		self.pc = unsafe { self.pc.add(steps as usize) };
-	}
+		let properties = offset;
+		// Parse properties
+		Self::is_token_valid(dtb, offset).unwrap();
 
-	/// Return the current token and advance the program counter
-	fn step(&mut self) -> u32 {
-		let tk = self.current();
-		self.advance(1);
-		tk
-	}
+		while dtb.get(offset) == Some(Self::TOKEN_PROP) {
+			offset += 1;
 
-	/// Rewinds the program counter by the given number of steps
-	fn rewind(&mut self, steps: u32) {
-		// SAFETY: the pointer remains within the structure block
-		// or right at the end of it.
-		self.pc = unsafe { self.pc.sub(steps as usize) };
-	}
+			let len = dtb.get(offset).ok_or(ParseNodeError::TooShort)?;
+			offset += 1;
 
-	/// Skip `TOKEN_NOP` until `TOKEN_BEGIN_NODE` is encountered, then return the [`Node`].
-	///
-	/// Returns `None` if `TOKEN_END` is encountered.
-	///
-	/// ## Panics
-	///
-	/// `TOKEN_PROP` or `TOKEN_END_NODE` is encountered.
-	fn step_node(&mut self) -> Option<Node> {
-		// SAFETY: the token tree is valid and the pointer is aligned
-		loop {
-			match self.step() {
-				Self::TOKEN_BEGIN_NODE => {
-					let ptr = self.pc as *const u8;
-					// SAFETY: ptr points to a null-terminated byte string
-					let name = unsafe { cstr_to_str(ptr).expect("Invalid UTF-8 node name") };
-					let align = name.len() as u32 + 1; // Include null terminator
-					let align = (align + 3) & !3;
-					self.advance(align / 4);
-					break Some(Node {
-						interpreter: self,
-						name,
-						state: NodeState::Properties,
-					});
-				}
-				Self::TOKEN_END_NODE => {
-					self.node_count += 1;
-					break None;
-				}
-				Self::TOKEN_PROP => panic!("Unexpected TOKEN_PROP"),
-				Self::TOKEN_NOP => (),
-				Self::TOKEN_END => {
-					self.finished = true;
-					break None;
-				}
-				_ => panic!("Invalid token in DTB"),
+			let name = dtb.get(offset).ok_or(ParseNodeError::TooShort)?;
+			let name = dtb.strings().get(name).ok_or(ParseNodeError::OutOfBounds)?;
+			offset += 1;
+
+			let size = u32::try_from(mem::align_of::<u32>()).unwrap();
+
+			match name {
+				b"#address-cells" | b"#size-cells" | b"#interrupt-cells" => (size == 4)
+					.then(|| ())
+					.ok_or(ParseNodeError::BadCellsValue)?,
+				_ => (),
 			}
+
+			offset += (len + size - 1) / size;
+		}
+
+		let children = offset;
+		while Self::TOKEN_END_NODE != dtb.get(offset).ok_or(ParseNodeError::TooShort)? {
+			// The size of the cells doesn't matter right now, so just pass 0
+			let (_, offt) = Self::new(dtb, offset, 0, 0, 0)?;
+			offset = offt;
+		}
+
+		(dtb.get(offset) == Some(Self::TOKEN_END_NODE))
+			.then(|| ())
+			.ok_or(ParseNodeError::UnexpectedToken)?;
+		offset += 1;
+
+		Ok((
+			Self {
+				dtb,
+				name,
+				properties,
+				children,
+				address_cells,
+				size_cells,
+				interrupt_cells,
+			},
+			offset,
+		))
+	}
+
+	/// Return an iterator over all the properties of this node
+	pub fn properties(&self) -> impl Iterator<Item = Property<'b>> + fmt::Debug + '_ {
+		struct Iter<'a, 'b: 'a> {
+			dtb: &'a DeviceTree<'b>,
+			offset: u32,
+		}
+
+		impl<'a, 'b> Iterator for Iter<'a, 'b> {
+			type Item = Property<'b>;
+
+			fn next(&mut self) -> Option<Self::Item> {
+				#[cfg(debug_assertions)]
+				Node::is_token_valid(self.dtb, self.offset).expect("invalid token");
+				(self.dtb.get(self.offset) == Some(Node::TOKEN_PROP)).then(|| {
+					self.offset += 1;
+
+					let len = self.dtb.get(self.offset).unwrap();
+					self.offset += 1;
+
+					let name = self.dtb.get(self.offset).unwrap();
+					let name = self.dtb.strings().get(name).unwrap();
+					self.offset += 1;
+
+					let value = &self.dtb.data[self.offset.try_into().unwrap()..];
+					let value = unsafe {
+						slice::from_raw_parts(
+							value as *const _ as *const _,
+							value.len() * mem::size_of::<u32>(),
+						)
+					};
+					let value = &value[..len.try_into().unwrap()];
+					let size = u32::try_from(mem::align_of::<u32>()).unwrap();
+					self.offset += (u32::try_from(len).unwrap() + size - 1) / size;
+
+					Property { name, value }
+				})
+			}
+		}
+
+		impl fmt::Debug for Iter<'_, '_> {
+			fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+				let &Iter { dtb, offset } = self;
+				let iter = Self { dtb, offset };
+				f.debug_list().entries(iter).finish()
+			}
+		}
+
+		Iter {
+			dtb: self.dtb,
+			offset: self.properties,
 		}
 	}
 
-	/// Skip `TOKEN_NOP` until `TOKEN_PROP` is encountered, then return the [`Property`].
-	///
-	/// Returns `None` if `TOKEN_END` or `TOKEN_BEGIN_NODE` is encountered.
-	///
-	/// ## Panics
-	///
-	/// `TOKEN_END_NODE` is encountered.
-	fn step_property(&mut self) -> Option<Property> {
-		loop {
-			match self.step() {
-				Self::TOKEN_BEGIN_NODE => {
-					self.rewind(1);
-					break None;
-				}
-				Self::TOKEN_END_NODE => {
-					// next_node() will consume the token
-					self.rewind(1);
-					break None;
-				}
-				Self::TOKEN_PROP => {
-					let len = self.step();
-					let name = self.step();
-					let name = self.strings.into(name);
-					let ptr = self.pc as *const u8;
-					// SAFETY: the pointer and length are valid.
-					let value = unsafe { slice::from_raw_parts(ptr, len as usize) };
-					let align = (len + 3) & !3;
-					self.advance(align / 4);
-					break Some(Property { name, value });
-				}
-				Self::TOKEN_NOP => (),
-				Self::TOKEN_END => {
-					self.finished = true;
-					break None;
-				}
-				_tk => panic!("Invalid token in DTB"),
+	/// Return an iterator over all the children of this node
+	pub fn children(&self) -> impl Iterator<Item = Node<'a, 'b>> + fmt::Debug + '_ {
+		struct Iter<'a, 'b: 'a> {
+			dtb: &'a DeviceTree<'b>,
+			offset: u32,
+			address_cells: u32,
+			size_cells: u32,
+			interrupt_cells: u32,
+		}
+
+		impl<'a, 'b> Iterator for Iter<'a, 'b> {
+			type Item = Node<'a, 'b>;
+
+			fn next(&mut self) -> Option<Self::Item> {
+				#[cfg(debug_assertions)]
+				Node::is_token_valid(self.dtb, self.offset).expect("invalid token");
+				(self.dtb.get(self.offset) == Some(Node::TOKEN_BEGIN_NODE)).then(|| {
+					let (node, offt) = Node::new(
+						self.dtb,
+						self.offset,
+						self.address_cells,
+						self.size_cells,
+						self.interrupt_cells,
+					)
+					.unwrap();
+					self.offset = offt;
+					node
+				})
 			}
 		}
-	}
 
-	/// Returns the total amount of nodes this interpreter iterated over. Returns `None` if it
-	/// hasn't finished yet.
-	pub fn node_count(&self) -> Option<usize> {
-		self.finished.then(|| self.node_count)
-	}
+		impl fmt::Debug for Iter<'_, '_> {
+			fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+				let &Iter {
+					dtb,
+					offset,
+					address_cells,
+					size_cells,
+					interrupt_cells,
+				} = self;
+				let iter = Self {
+					dtb,
+					offset,
+					address_cells,
+					size_cells,
+					interrupt_cells,
+				};
+				f.debug_list().entries(iter).finish()
+			}
+		}
 
-	/// Iterate until the end
-	pub fn finish(&mut self) {
-		while !self.finished {
-			match self.step() {
-				Self::TOKEN_END_NODE => self.node_count += 1,
-				Self::TOKEN_END => self.finished = true,
+		// Properties the direct descendants inherit
+		let (mut address_cells, mut size_cells, mut interrupt_cells) = (2, 1, 0);
+
+		for p in self.properties() {
+			match p.name {
+				b"#address-cells" => {
+					address_cells = u32::from_be_bytes(p.value.try_into().unwrap());
+				}
+				b"#size-cells" => {
+					size_cells = u32::from_be_bytes(p.value.try_into().unwrap());
+				}
+				b"#interrupt-cells" => {
+					interrupt_cells = u32::from_be_bytes(p.value.try_into().unwrap());
+				}
 				_ => (),
 			}
 		}
-	}
-}
 
-impl Node<'_> {
-	/// Returns the next property of this node.
-	pub fn next_property(&mut self) -> Option<Property> {
-		if let NodeState::Properties = self.state {
-			if let Some(p) = self.interpreter.step_property() {
-				Some(p)
-			} else {
-				self.state = NodeState::ChildNodes;
-				None
-			}
-		} else {
-			None
+		Iter {
+			dtb: self.dtb,
+			offset: self.children,
+			address_cells,
+			size_cells,
+			interrupt_cells,
 		}
 	}
 
-	/// Returns the next child node of this node.
-	pub fn next_child_node(&mut self) -> Option<Node> {
-		if let NodeState::ChildNodes = self.state {
-			if let Some(n) = self.interpreter.step_node() {
-				Some(n)
+	/// Checks if a token is valid.
+	fn is_token_valid(dtb: &DeviceTree<'_>, offset: u32) -> Result<u32, Option<u32>> {
+		dtb.get(offset)
+			.map(|v| match v {
+				Node::TOKEN_BEGIN_NODE
+				| Node::TOKEN_END_NODE
+				| Node::TOKEN_PROP
+				| Node::TOKEN_NOP
+				| Node::TOKEN_END => Ok(v),
+				_ => Err(Some(v)),
+			})
+			.unwrap_or(Err(None))
+	}
+}
+
+impl fmt::Debug for Node<'_, '_> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut map = f.debug_map();
+		if let Ok(name) = core::str::from_utf8(self.name) {
+			map.entry(&"name", &name);
+		} else {
+			map.entry(&"name", &self.name);
+		}
+		map.entry(&"address_cells", &self.address_cells);
+		map.entry(&"size_cells", &self.size_cells);
+		map.entry(&"interrupt_cells", &self.interrupt_cells);
+		map.entry(&"properties", &self.properties());
+		map.entry(&"children", &self.children());
+		map.finish()
+	}
+}
+
+impl fmt::Debug for Property<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if let Ok(name) = core::str::from_utf8(self.name) {
+			if let Ok(value) = core::str::from_utf8(self.value) {
+				write!(f, "{:?}: {:?}", name, value)
 			} else {
-				self.state = NodeState::Empty;
-				None
+				write!(f, "{:?}: {:?}", name, self.value)
 			}
 		} else {
-			None
+			write!(f, "{:?}: {:?}", self.name, self.value)
 		}
 	}
 }
 
-impl Drop for Node<'_> {
-	/// Ensure that the interpreter skips any unread fields of this node.
-	fn drop(&mut self) {
-		while self.next_property().is_some() {}
-		while self.next_child_node().is_some() {}
-	}
+/// Converts a null-terminated C string to a Rust `[u8]`.
+fn cstr_to_str<T>(s: &[T]) -> Option<&[u8]> {
+	let len = s.len() * mem::size_of::<T>();
+	// SAFETY: the alignment & length are valid
+	let s = unsafe { slice::from_raw_parts(s as *const _ as *const _, len) };
+	s.iter().position(|c| *c == 0).map(|l| &s[..l])
 }
 
-/// Converts a null-terminated C string to a Rust `str`.
-///
-/// ## SAFETY
-///
-/// The pointer must remain valid for as long as the returned `str`
-pub unsafe fn cstr_to_str<'a>(cstr: *const u8) -> Result<&'a str, core::str::Utf8Error> {
-	let mut len = 0;
-	// SAFETY: the pointer remains withing a valid range
-	while *cstr.add(len) != 0 {
-		len += 1;
+#[cfg(test)]
+mod test {
+
+	use super::*;
+
+	/// Structure used to trick include_bytes! into aligning the array properly.
+	#[repr(align(4))]
+	struct Align<const S: usize>([u8; S]);
+
+	impl<const S: usize> Align<S> {
+		fn as_u32(&self) -> &[u32] {
+			assert_eq!(
+				self.0.len() % mem::align_of::<u32>(),
+				0,
+				"Data is not a multiple of 4"
+			);
+			unsafe {
+				slice::from_raw_parts(self.0.as_ptr().cast(), self.0.len() / mem::size_of::<u32>())
+			}
+		}
 	}
-	// SAFETY: The pointer and length are both valid
-	let s = slice::from_raw_parts(cstr, len);
-	core::str::from_utf8(s)
+
+	#[test]
+	fn qemu_system_riscv64() {
+		let data = Align(*include_bytes!("../test/qemu_system_riscv64.dtb"));
+		dbg!(DeviceTree::parse(data.as_u32()).unwrap().root().unwrap());
+		panic!();
+	}
 }
