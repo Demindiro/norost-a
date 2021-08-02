@@ -87,7 +87,10 @@ fn map_pci(dtb: device_tree::DeviceTree) {
 							b"compatible" => compatible = p.value == b"pci-host-ecam-generic\0",
 							b"ranges" => ranges = Some(p.value),
 							b"reg" => reg = Some(p.value),
-							b"#address-cells" => child_address_cells = Some(u32::from_be_bytes(p.value.try_into().unwrap())),
+							b"#address-cells" => {
+								child_address_cells =
+									Some(u32::from_be_bytes(p.value.try_into().unwrap()))
+							}
 							_ => (),
 						}
 					}
@@ -130,8 +133,9 @@ fn map_pci(dtb: device_tree::DeviceTree) {
 
 					// Map MMIO
 					let addr = PCI_ADDRESS_MMIO;
-					let ranges = &ranges.unwrap()
-						[(child_address_cells.unwrap() + node.address_cells + node.size_cells) as usize * 4..];
+					let ranges = &ranges.unwrap()[(child_address_cells.unwrap()
+						+ node.address_cells + node.size_cells)
+						as usize * 4..];
 					let r = &ranges[child_address_cells.unwrap() as usize * 4..];
 					let (start, r): (usize, _) = match node.address_cells {
 						1 => (

@@ -33,6 +33,9 @@ static struct kernel_ipc_packet *rxq;
 static size_t rxq_mask;
 static size_t rxq_index;
 
+static struct kernel_free_range *free_ranges;
+static size_t free_ranges_size;
+
 
 /**
  * Initializes the library. This should be the first function called in crt0.
@@ -95,11 +98,24 @@ void __dux_init(void)
 	rxq_mask = (PAGE_SIZE / sizeof(struct kernel_ipc_packet)) - 1;
 	rxq_index = 0;
 
-	// Set an address to which pages can be mapped to.
-	rxq->data.raw = (void *)0x660000;
+	dret = dux_reserve_pages(NULL, 8);
+	if (dret.status != 0) {
+		// FIXME handle errors properly
+		for (;;) {}
+	}
+	kret = kernel_mem_alloc(dret.address, 1, PROT_READ | PROT_WRITE);
+	if (kret.status != 0) {
+		// FIXME handle errors properly
+		for (;;) {}
+	}
+	free_ranges = (struct kernel_free_range *)dret.address;
+	free_ranges_size = 1;
+	// Set a range to which pages can be mapped to.
+	free_ranges[0].address = (void *)0x660000;
+	free_ranges[0].count = 1;
 
 	// Register the queues to the kernel
-	kret = kernel_io_set_queues(txq, 0, rxq, 0);
+	kret = kernel_io_set_queues(txq, 0, rxq, 0, free_ranges, free_ranges_size);
 	if (kret.status != 0) {
 		// FIXME handle errors properly
 		for (;;) {}
@@ -173,4 +189,11 @@ struct kernel_ipc_packet *dux_reserve_transmit_entry(void) {
 
 struct kernel_ipc_packet *dux_get_receive_entry(void) {
 	return rxq;
+}
+
+int dux_add_free_range(void *page, size_t count) {
+	// FIXME
+	free_ranges[0].address = page;
+	free_ranges[0].count = count;
+	return 0;
 }

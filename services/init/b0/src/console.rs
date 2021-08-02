@@ -20,6 +20,28 @@ impl Console {
 			uart: uart::UART::new(address),
 		}
 	}
+
+	pub fn read(&mut self, buf: &mut [u8]) -> usize {
+		let mut i = 0;
+		while let Some(c) = self.uart.read() {
+			if let Some(w) = buf.get_mut(i) {
+				*w = c;
+				i += 1;
+			} else {
+				break;
+			}
+		}
+		i
+	}
+
+	pub fn write(&mut self, buf: &[u8]) -> usize {
+		for (i, c) in buf.iter().copied().enumerate() {
+			if self.uart.write(c).is_err() {
+				return i;
+			}
+		}
+		return buf.len();
+	}
 }
 
 impl fmt::Write for Console {

@@ -22,7 +22,9 @@ pub struct Return {
 }
 
 pub mod ipc {
+	use super::Page;
 	use core::num::NonZeroU8;
+	use core::ptr::NonNull;
 
 	/// Union of all possible data types that can be pointed to in a packet's `data` field.
 	///
@@ -59,6 +61,12 @@ pub mod ipc {
 			.unwrap()
 		}
 	}
+
+	#[repr(C)]
+	pub struct FreePage {
+		pub address: Option<NonNull<Page>>,
+		pub count: usize,
+	}
 }
 
 #[repr(C)]
@@ -82,10 +90,13 @@ syscall!(
 	transmit_queue: *mut ipc::Packet,
 	transmit_size: usize,
 	receive_queue: *mut ipc::Packet,
-	receive_size: usize
+	receive_size: usize,
+	free_pages: *mut ipc::FreePage,
+	free_pages_size: usize
 );
 
 syscall!(mem_alloc, 3, address: *mut Page, size: usize, flags: u8);
+syscall!(mem_dealloc, 4, address: *mut Page, size: usize);
 syscall!(
 	mem_physical_address,
 	7,

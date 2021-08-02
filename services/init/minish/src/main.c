@@ -5,6 +5,8 @@
 #define VERSION_MIN 0
 #define VERSION_REV 1
 
+#undef __STDC_HOSTED__
+#include <kernel.h>
 int main() {
 
 	printf("MiniSH %d.%d.%d\n", VERSION_MAJ, VERSION_MIN, VERSION_REV);
@@ -25,33 +27,42 @@ int main() {
 				return 0;
 			}
 
-			// Echo the input
-			fputs(ptr, stdout);
-
 			// Check for special characters such as backspace, newline ... and adjust input accordingly.
 			for (char *p = in; *p != '\0'; p++) {
 				if (*p == '\n') {
 					// Discard the newline & break to begin parsing input
 					*p = 0;
 					goto parse_input;
-				}
-				if (*p == 8) { // Backspace
-					// Remove the backspace and the previous character by shifting the remaining
-					// input to the left
-					char *w = in < p - 1 ? in : p - 1;
-					char *r = p + 1;
-					while (*r != '\0') {
-						*w++ = *r++;
+				} else if (*p == 8 || *p == 127) { // Backspace or delete
+					if (p == in) {
+						*p = '\0';
+					} else {
+						// Remove the backspace and the previous character by shifting the remaining
+						// input to the left
+						char *w = p - 1;
+						char *r = p + 1;
+						while (*r != '\0') {
+							*w++ = *r++;
+						}
+						*w = '\0';
+						p--;
 					}
+					p--;
 				}
+				ptr = p + 1;
 			}
+
+			// Clear the input & write out
+			printf("\r\33[2K>> %s", in);
 		}
 
 	parse_input:
+		// Clear the input & write out
+		printf("\r\33[2K>> %s\n", in);
+
 		const char *cmd = strtok(in, " ");
 		if (cmd == NULL) {
 			// Don't do anything
-			puts("");
 		} else if (strcmp(cmd, "echo") == 0) {
 			const char *arg = strtok(NULL, " ");
 			if (arg != NULL) {

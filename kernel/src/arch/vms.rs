@@ -81,6 +81,13 @@ where
 		accessibility: Accessibility,
 	) -> Result<(), AddError>;
 
+	/// Allocate the given range of pages.
+	fn deallocate(
+		&mut self,
+		virtual_address: Page,
+		count: usize,
+	) -> Result<(), ()>;
+
 	/// Add a single page mapping to a specific VMS.
 	fn add_to(
 		&self,

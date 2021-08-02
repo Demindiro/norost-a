@@ -17,9 +17,10 @@
 //! highest level. This does sacrifice some security but there is not much that can be done about
 //! it.
 
+pub mod ipc;
+
 mod executor;
 mod group;
-mod ipc;
 
 pub use executor::Executor;
 pub use group::Group;
@@ -62,14 +63,8 @@ pub struct TaskData {
 	/// The shared state of this task.
 	// TODO should be reference counted.
 	shared_state: SharedState,
-	/// The address of the transmit queue.
-	transmit_queue: Option<NonNull<Page>>,
-	/// The address of the receive queue.
-	receive_queue: Option<NonNull<Page>>,
-	/// The index of the next entry to be processed in the transmit queue.
-	transmit_index: RingIndex,
-	/// The index of the next entry to be processed in the receive queue.
-	receive_index: RingIndex,
+	/// IPC state to communicate with other tasks.
+	ipc: Option<ipc::IPC>,
 }
 
 const STACK_ADDRESS: Page = memory::reserved::HART_STACKS.start;
@@ -98,10 +93,7 @@ impl Task {
 				shared_state: SharedState {
 					virtual_memory: vms,
 				},
-				transmit_queue: None,
-				receive_queue: None,
-				transmit_index: RingIndex::default(),
-				receive_index: RingIndex::default(),
+				ipc: None,
 			});
 		}
 		unsafe { TASK_DATA_ADDRESS = TASK_DATA_ADDRESS.next().unwrap() };
@@ -136,23 +128,17 @@ impl Task {
 	}
 
 	/// Deallocate memory
-	pub fn deallocate_memory(&self, address: NonNull<arch::Page>, count: usize) -> Result<(), ()> {
+	pub fn deallocate_memory(&self, address: Page, count: usize) -> Result<(), ()> {
 		let _ = (address, count);
-		todo!()
-		//self.inner().shared_state.virtual_memory.deallocate(address, count)
+		self.inner().shared_state.virtual_memory.deallocate(address, count)
 	}
 
 	/// Set the task transmit & receive queue pointers and sizes.
-	pub fn set_queues(&self, buffers: Option<((NonNull<Page>, u8), (NonNull<Page>, u8))>) {
-		if let Some(((txq, txs), (rxq, rxs))) = buffers {
-			self.inner().transmit_index.set_mask(txs);
-			self.inner().receive_index.set_mask(rxs);
-			self.inner().transmit_queue = Some(txq);
-			self.inner().receive_queue = Some(rxq);
-		} else {
-			self.inner().transmit_queue = None;
-			self.inner().receive_queue = None;
-		}
+	pub fn set_queues(
+		&self,
+		buffers: Option<ipc::IPC>,
+	) {
+		self.inner().ipc = buffers;
 	}
 
 	fn inner<'a>(&'a self) -> &'a mut TaskData {

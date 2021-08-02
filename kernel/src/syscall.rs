@@ -192,13 +192,15 @@ mod sys {
 
 	sys! {
 		/// Resize the task's IPC buffers to be able to hold the given amount of entries.
-		[task] io_set_queues(transmit_queue, transmit_size, receive_queue, receive_size) {
+		[task] io_set_queues(transmit_queue, transmit_size, receive_queue, receive_size, free_pages, free_pages_size) {
 			logcall!(
-				"io_set_queues 0x{:x}, {}, 0x{:x}, {}",
+				"io_set_queues 0x{:x}, {}, 0x{:x}, {}, 0x{:x}, {}",
 				transmit_queue,
 				transmit_size,
 				receive_queue,
 				receive_size,
+				free_pages,
+				free_pages_size,
 			);
 			let a = if transmit_queue == 0 {
 				None
@@ -207,7 +209,9 @@ mod sys {
 				let rs = transmit_size as u8;
 				let cq = NonNull::new(receive_queue as *mut _);
 				let cs = receive_size as u8;
-				let r = rq.and_then(|rq| cq.map(|cq| ((rq, rs), (cq, cs))));
+				let fp = NonNull::new(free_pages as *mut _);
+				let fs = free_pages_size;
+				let r = rq.and_then(|rq| cq.and_then(|cq| fp.map(|fp| crate::task::ipc::IPC::new(rq, rs, cq, cs, fp, fs))));
 				if r.is_none() {
 					return Return(Status::NullArgument, 0);
 				}
@@ -239,9 +243,10 @@ mod sys {
 	sys! {
 		/// Frees a range of pages of the current task.
 		[task] mem_dealloc(address, count) {
-			let address = match NonNull::new(address as *mut _) {
-				Some(a) => a,
-				None => return Return(Status::NullArgument, 0),
+			let address = match Page::from_usize(address) {
+				Ok(a) => a,
+				Err(arch::page::FromPointerError::Null) => return Return(Status::NullArgument, 0),
+				Err(arch::page::FromPointerError::BadAlignment) => return Return(Status::BadAlignment, 0),
 			};
 			task.deallocate_memory(address, count).unwrap();
 			Return(Status::Ok, 0)

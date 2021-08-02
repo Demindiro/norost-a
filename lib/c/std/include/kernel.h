@@ -41,6 +41,14 @@ enum {
 	KERNEL_IPC_OP_WRITE = 2,
 };
 
+/**
+ * Structure used to indicate IPC ranges where pages can be mapped into.
+ */
+struct kernel_free_range {
+	void *address;
+	size_t count;
+};
+
 #define SYSCALL(...) \
 	__asm__ __volatile__ ( \
 		"ecall\n\t" \
@@ -51,6 +59,27 @@ enum {
 	kernel_return_t r = { a0, a1 }; \
 	return r;
 
+#define SYSCALL_6(__name, __code, __a0, __a1, __a2, __a3, __a4, __a5) \
+	static inline kernel_return_t __name(__a0 a, __a1 b, __a2 c, __a3 d, __a4 e, __a5 f) { \
+		register size_t a7 __asm__("a7") = __code; \
+		register size_t a0 __asm__("a0") = (size_t)a; \
+		register size_t a1 __asm__("a1") = (size_t)b; \
+		register size_t a2 __asm__("a2") = (size_t)c; \
+		register size_t a3 __asm__("a3") = (size_t)d; \
+		register size_t a4 __asm__("a4") = (size_t)e; \
+		register size_t a5 __asm__("a5") = (size_t)f; \
+		SYSCALL("r"(a7), "0"(a0), "1"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a5)) \
+	}
+#define SYSCALL_5(__name, __code, __a0, __a1, __a2, __a3, __a4) \
+	static inline kernel_return_t __name(__a0 a, __a1 b, __a2 c, __a3 d, __a4 e) { \
+		register size_t a7 __asm__("a7") = __code; \
+		register size_t a0 __asm__("a0") = (size_t)a; \
+		register size_t a1 __asm__("a1") = (size_t)b; \
+		register size_t a2 __asm__("a2") = (size_t)c; \
+		register size_t a3 __asm__("a3") = (size_t)d; \
+		register size_t a4 __asm__("a4") = (size_t)e; \
+		SYSCALL("r"(a7), "0"(a0), "1"(a1), "r"(a2), "r"(a3), "r"(a4)) \
+	}
 #define SYSCALL_4(__name, __code, __a0, __a1, __a2, __a3) \
 	static inline kernel_return_t __name(__a0 a, __a1 b, __a2 c, __a3 d) { \
 		register size_t a7 __asm__("a7") = __code; \
@@ -92,8 +121,9 @@ enum {
 
 SYSCALL_2(kernel_io_wait, 0, uint16_t /* flags */, uint64_t /* time */)
 
-SYSCALL_4(kernel_io_set_queues, 1, void * /* requests */, size_t /* requests_size */,
-	void * /* completions */, size_t /* completion_sizes */)
+SYSCALL_6(kernel_io_set_queues, 1, void * /* requests */, size_t /* requests_size */,
+	void * /* completions */, size_t /* completion_sizes */,
+	void * /* free_pages */, size_t /* free_pages_size */)
 
 SYSCALL_3(kernel_mem_alloc, 3, void * /* address */, size_t /* count */, uint8_t /* flags */)
 

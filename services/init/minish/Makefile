@@ -20,4 +20,4 @@ $(OUTPUT): src/main.c | $(OUTPUT_DIR) $(SYSROOT)/lib/libc.a
 	$(CC) $^ -o $(OUTPUT) $(CC_ARGS)
 
 $(OUTPUT_DIR):
-	mkdir $@
+	mkdir -p $@

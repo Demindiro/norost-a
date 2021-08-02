@@ -59,7 +59,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 		// Fill out the request entry
 		cre->priority = 0;
 		cre->flags = 0;
-		//cre->address = fd; // FIXME
+		cre->address = 0;
 		//cre->offset = total_written;
 		cre->data.raw = universal_buffer;
 		cre->length = copied;
@@ -68,6 +68,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 
 		// Flush the queue
 		kernel_io_wait(0, 0);
+		kernel_io_wait(0, 0); // FIXME
 
 		// TODO check if the request was processed successfully
 		/*

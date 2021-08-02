@@ -32,7 +32,7 @@ ssize_t read(int fd, void *buf, size_t count)
 	cre->data.raw = universal_buffer;
 	cre->length = count;
 	asm volatile ("fence");
-	cre->opcode = IO_READ;
+	cre->opcode = KERNEL_IPC_OP_READ;
 	kernel_io_wait(0, 0);
 
 	/*

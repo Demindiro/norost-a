@@ -42,7 +42,7 @@ fn main() {
 	let mut console = unsafe { console::Console::new(device_tree::UART_ADDRESS.cast()) };
 	let mut buf = [0; 256];
 	let mut i = 0;
-	loop {
+	while false {
 		if let Some(c) = console.uart.read() {
 			// TODO why tf does QEMU send a CR to us instead of LF?
 			if c == b'\r' {
@@ -139,30 +139,55 @@ fn main() {
 	let _ = unsafe { kernel::io_wait(0, 0) };
 
 	// Dummy write some stuff to the spawned task
-	unsafe {
+	let (txq, rxq, free_pages, raw) = unsafe {
 		let addr = 0xff00_0000 as *mut kernel::Page;
 		let kernel::Return { status, .. } = kernel::mem_alloc(addr, 2, 0b11);
 		assert_eq!(status, 0);
 		let raw = addr.add(1).cast::<u8>();
-		let addr = addr.cast();
-		let kernel::Return { status, .. } = kernel::io_set_queues(addr, 1, addr.add(1), 1);
+		let addr = addr.cast::<kernel::ipc::Packet>();
+		let kernel::Return { status, .. } = kernel::io_set_queues(addr, 0, addr.add(1), 0, addr.add(2).cast(), 1);
 		assert_eq!(status, 0);
-		let s = "echo Hello, MiniSH! I am Init!\n";
-		for (i, c) in s.bytes().enumerate() {
-			*raw.add(i) = c;
-		}
-		addr.write(kernel::ipc::Packet {
-			opcode: Some(kernel::ipc::Op::Write.into()),
-			priority: 0,
-			flags: 0,
-			id: 0,
-			address: id,
-			data: kernel::ipc::Data { raw },
-			length: s.len(),
-		});
-	}
+		unsafe { (&mut *addr, &mut *addr.add(1), &mut *addr.add(2).cast::<kernel::ipc::FreePage>(), raw) }
+	};
+
+	*free_pages = kernel::ipc::FreePage {
+		address: core::ptr::NonNull::new(0x66_0000 as *mut _),
+		count: 1,
+	};
 
 	loop {
+		// Read data from UART & send it to child process
+		let mut buf = [0; 256];
+		let read = console.read(&mut buf);
+		let buf = &buf[..read];
+
+		for (i, b) in buf.iter().copied().enumerate() {
+			// UART pls
+			unsafe { *raw.add(i) = if b == b'\r' { b'\n' } else { b } };
+		}
+
+		if buf.len() > 0 {
+			*txq = kernel::ipc::Packet {
+				opcode: Some(kernel::ipc::Op::Write.into()),
+				priority: 0,
+				flags: 0,
+				id: 0,
+				address: id,
+				data: unsafe { kernel::ipc::Data { raw } },
+				length: buf.len(),
+			};
+		}
+
+		// Read received data & write it to UART
+		if let Some(op) = rxq.opcode {
+			let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
+			console.write(data);
+			rxq.opcode = None;
+			let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
+			free_pages.address = core::ptr::NonNull::new(data.as_ptr() as *mut _);
+			free_pages.count += 1;
+		}
+
 		unsafe { kernel::io_wait(0, 0) };
 	}
 }

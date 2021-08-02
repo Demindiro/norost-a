@@ -5,6 +5,7 @@ use crate::arch::{self, Page};
 use core::convert::TryFrom;
 use core::mem;
 use core::num::NonZeroU8;
+use core::ptr::NonNull;
 
 /// Structure representing an index and mask in a ring buffer.
 pub struct RingIndex {
@@ -13,6 +14,13 @@ pub struct RingIndex {
 }
 
 impl RingIndex {
+	pub fn new(bits: u8) -> Self {
+		Self {
+			mask: (1 << bits) - 1,
+			index: 0,
+		}
+	}
+
 	#[inline(always)]
 	pub fn set_mask(&mut self, mask: u8) {
 		let mask = (1 << mask) - 1;
@@ -65,9 +73,6 @@ enum Op {
 	Write = 2,
 }
 
-#[derive(Debug)]
-struct InvalidOp;
-
 impl TryFrom<NonZeroU8> for Op {
 	type Error = InvalidOp;
 
@@ -90,73 +95,123 @@ impl From<Op> for NonZeroU8 {
 	}
 }
 
-impl super::Task {
-	/// Process I/O entries and begin executing the next task.
-	pub fn process_io(&self) {
-		if let Some(cq) = self.inner().transmit_queue {
-			use crate::arch::vms::VirtualMemorySystem;
-			self.inner().shared_state.virtual_memory.activate(); // TODO do this beforehand and once only
-			arch::set_supervisor_userpage_access(true);
-			let mut cq = cq.cast::<[Packet; Page::SIZE / mem::size_of::<Packet>()]>();
-			let cq = unsafe { cq.as_mut() };
-			let cqi = &mut self.inner().transmit_index;
-			loop {
-				let cq = &mut cq[cqi.get()];
-				if let Some(op) = cq.opcode {
-					let op = Op::try_from(op).unwrap();
-					match op {
-						Op::Read => {}
-						Op::Write => {
-							use core::fmt::Write;
-							if cq.address == usize::MAX {
-								// FIXME this is a temporary workaround for not having a "video" driver task
-								let s =
-									unsafe { core::slice::from_raw_parts(cq.data.raw, cq.length) };
-								let s = unsafe { core::str::from_utf8_unchecked(s) };
-								write!(crate::log::Log, "{}", s).unwrap();
-								cq.opcode = None;
-							} else {
-								writeln!(crate::log::Log, "Sending packet to {}", cq.address);
-								let bits = mem::size_of::<usize>() * 4;
-								let (group, task) =
-									(cq.address >> bits, cq.address & (1 << bits) - 1);
-								let task = Group::get(group).unwrap().task(task).unwrap();
-								let pkt = cq.clone();
-								drop(cq);
-								// FIXME this is terribly inefficient
-								task.inner().shared_state.virtual_memory.activate();
-								let rxq = task.inner().receive_queue.unwrap();
-								let rxq = unsafe {
-									rxq.cast::<[Packet; Page::SIZE / mem::size_of::<Packet>()]>()
-										.as_mut()
-								};
-								unsafe {
-									assert_ne!(rxq[0].data.raw, core::ptr::null_mut());
-								}
-								rxq[0].opcode = Some(op.into());
-								rxq[0].length = pkt.length;
-								let addr = unsafe { Page::from_pointer(rxq[0].data.raw).unwrap() };
-								// FIXME ditto
-								self.inner().shared_state.virtual_memory.activate();
-								task.inner()
-									.shared_state
-									.virtual_memory
-									.share(
-										addr,
-										unsafe { Page::from_pointer(pkt.data.raw).unwrap() },
-										arch::vms::RWX::R,
-										arch::vms::Accessibility::UserLocal,
-									)
-									.unwrap();
-							}
-						}
-					}
-				} else {
-					break;
-				}
-				cqi.increment();
-			}
-			arch::set_supervisor_userpage_access(false);
+#[derive(Debug)]
+struct InvalidOp;
+
+/// A structure used for handling IPC.
+pub struct IPC {
+	/// The address of the transmit queue.
+	transmit_queue: NonNull<Packet>,
+	/// The index of the next entry to be processed in the transmit queue.
+	transmit_index: RingIndex,
+	/// The address of the receive queue.
+	receive_queue: NonNull<Packet>,
+	/// The index of the next entry to be processed in the receive queue.
+	receive_index: RingIndex,
+	/// A list of address that can be freely mapped for IPC.
+	free_pages: NonNull<FreePage>,
+	/// The maximum amount of free pages.
+	max_free_pages: usize,
+}
+
+impl IPC {
+	/// Create a new IPC structure.
+	pub fn new(
+		transmit_queue: NonNull<Packet>,
+		transmit_queue_bits: u8,
+		receive_queue: NonNull<Packet>,
+		receive_queue_bits: u8,
+		free_pages: NonNull<FreePage>,
+		free_pages_size: usize,
+	) -> Self {
+		let transmit_index = RingIndex::new(transmit_queue_bits);
+		let receive_index = RingIndex::new(receive_queue_bits);
+		let max_free_pages = free_pages_size;
+		Self {
+			transmit_queue,
+			transmit_index,
+			receive_queue,
+			receive_index,
+			free_pages,
+			max_free_pages,
 		}
+	}
+
+	/// Process IPC packets to be transmitted.
+	pub fn process_packets(&mut self, slf_task: &super::Task) {
+		use crate::arch::vms::VirtualMemorySystem;
+		slf_task.inner().shared_state.virtual_memory.activate(); // TODO do this beforehand and once only
+		arch::set_supervisor_userpage_access(true);
+		let cqi = &mut self.transmit_index;
+		loop {
+			let cq = unsafe { &mut *self.transmit_queue.as_ptr().add(cqi.get()) };
+			if let Some(op) = cq.opcode {
+				let op = Op::try_from(op).unwrap();
+				match op {
+					Op::Read => {}
+					Op::Write => {
+						let bits = mem::size_of::<usize>() * 4;
+						let (group, task) = (cq.address >> bits, cq.address & (1 << bits) - 1);
+						let task = Group::get(group).unwrap().task(task).unwrap();
+						cq.opcode = None;
+						let pkt = cq.clone();
+						drop(cq);
+						// FIXME this is terribly inefficient
+						task.inner().shared_state.virtual_memory.activate();
+						let task_ipc = task.inner().ipc.as_mut().unwrap();
+						let rxq = unsafe { &mut *task_ipc.receive_queue.as_ptr().add(0) };
+						let addr = task_ipc.pop_free_range(1 /* FIXME */).expect("no free ranges");
+						rxq.opcode = Some(op.into());
+						rxq.length = pkt.length;
+						unsafe { rxq.data.raw = addr.as_ptr() };
+						// FIXME ditto
+						slf_task.inner().shared_state.virtual_memory.activate();
+						task.inner()
+							.shared_state
+							.virtual_memory
+							.share(
+								addr,
+								unsafe { Page::from_pointer(pkt.data.raw).unwrap() },
+								arch::vms::RWX::R,
+								arch::vms::Accessibility::UserLocal,
+							)
+							.unwrap();
+					}
+				}
+			} else {
+				break;
+			}
+			cqi.increment();
+		}
+		arch::set_supervisor_userpage_access(false);
+	}
+
+	/// Pop an address range from the free ranges list.
+	fn pop_free_range(&mut self, size: usize) -> Option<Page> {
+		let free_pages =
+			unsafe { core::slice::from_raw_parts_mut(self.free_pages.as_ptr(), self.max_free_pages) };
+		for fp in free_pages.iter_mut() {
+			if let Some(addr) = fp.address {
+				if let Some(remaining) = fp.count.checked_sub(size) {
+					fp.count = remaining;
+					return Page::new(addr).ok().and_then(|p| p.skip(remaining));
+				}
+			}
+		}
+		None
+	}
+}
+
+/// A single free page.
+#[repr(C)]
+pub struct FreePage {
+	address: Option<NonNull<()>>,
+	count: usize,
+}
+
+impl super::Task {
+	/// Process IPC packets to be transmitted.
+	pub fn process_io(&self) {
+		self.inner().ipc.as_mut().map(|ipc| ipc.process_packets(self));
 	}
 }

@@ -12,9 +12,9 @@
 // FIXME this is temporary as we currently rely on GCC's stddef, which doesn't have ssize_t
 typedef signed long ssize_t;
 
-static FILE _stdin = { ._address = -1, ._fd = 0 };
-static FILE _stdout = { ._address = -1, ._fd = 1 };
-static FILE _stderr = { ._address = -1, ._fd = 2 };
+static FILE _stdin = { ._address = 0, ._fd = 0 };
+static FILE _stdout = { ._address = 0, ._fd = 1 };
+static FILE _stderr = { ._address = 0, ._fd = 2 };
 
 FILE *stdin = &_stdin;
 FILE *stdout = &_stdout;
@@ -37,23 +37,7 @@ int fputc(int c, FILE * stream)
 
 int fputs(const char *s, FILE * stream)
 {
-	struct iovec iov[2] = {
-		{
-		 // Discarding const is fine as writev won't write to this.
-		 .iov_base = (void *)s,
-		 .iov_len = strlen(s),
-		 },
-	};
-
-	ssize_t ret = writev(stream->_fd, iov, 2);
-
-	if (ret >= 0) {
-		// ret just has to be a "non-negative number". ssize_t may overflow int so just set it
-		// to 0.
-		ret = 0;
-	}
-
-	return ret;
+	return fwrite(s, strlen(s), 1, stream);
 }
 
 int putchar(int c)
@@ -106,6 +90,8 @@ char *fgets(char *s, int size, FILE * stream) {
 		*ptr++ = *data++;
 	}
 	*ptr = 0;
+	kernel_mem_dealloc(rxe->data.raw, 1);
+	dux_add_free_range(rxe->data.raw, 1); // FIXME do this properly.
 	rxe->opcode = 0;
 	return s;
 }
@@ -120,6 +106,26 @@ int getchar(void) {
 
 int ungetc(int c, FILE * stream) {
 	return ENOSYS;
+}
+
+int fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
+	struct iovec iov[1] = {
+		{
+		 // Discarding const is fine as writev won't write to this.
+		 .iov_base = (void *)ptr,
+		 .iov_len = size * count,
+		 },
+	};
+
+	ssize_t ret = writev(stream->_fd, iov, 1);
+
+	if (ret >= 0) {
+		// ret just has to be a "non-negative number". ssize_t may overflow int so just set it
+		// to 0.
+		ret = 0;
+	}
+
+	return ret;
 }
 
 int printf(const char *format, ...) {
@@ -143,9 +149,6 @@ int vfprintf(FILE *stream, const char *format, va_list args) {
 	int total_written = 0;
 
 	const char *c = format;
-
-	for (size_t i = 0; i < 20; i++)
-		out[i] = '@';
 
 	while (*c != '\0') {
 		// Fill out data
@@ -216,6 +219,8 @@ int vfprintf(FILE *stream, const char *format, va_list args) {
 
 	// Flush the queue
 	kernel_io_wait(0, 0);
+	kernel_io_wait(0, 0); // FIXME hacky workaround to ensure the receiving task prints the
+	                      // data before we overwrite it again
 
 	// TODO return the correct amount of bytes written
 	return total_written;

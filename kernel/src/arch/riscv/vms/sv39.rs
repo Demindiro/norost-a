@@ -592,6 +592,21 @@ impl VirtualMemorySystem for Sv39 {
 		Ok(())
 	}
 
+	/// Deallocate the given range of pages.
+	fn deallocate(
+		&mut self,
+		virtual_address: Page,
+		count: usize,
+	) -> Result<(), ()> {
+		let mut va = virtual_address;
+		// FIXME deallocate pages on failure.
+		for _ in 0..count {
+			Self::remove(va);
+			va = va.next().unwrap();
+		}
+		Ok(())
+	}
+
 	/// Add a single page mapping.
 	fn add(
 		address: Page,
