@@ -1,11 +1,79 @@
 #undef __STDC_HOSTED__
+// Note: this header is not part of the standard library, but there is
+// no other way to iterate directories.
+#include <dirent.h>
 #include <kernel.h>
 #include <stdio.h>
 #include <string.h>
 
 #define VERSION_MAJ 0
 #define VERSION_MIN 0
-#define VERSION_REV 1
+#define VERSION_REV 2
+
+#define ARG_SEPARATORS " \t"
+
+static const char *next_cmd(char *line) {
+	for (;;) {
+		const char *s = strtok(line, ARG_SEPARATORS);
+		line = NULL;
+		if (s == NULL) {
+			return NULL;
+		}
+		if (s[0] != '\0') {
+			return s;
+		}
+	}
+}
+
+static const char *next_arg() {
+	for (;;) {
+		const char *s = strtok(NULL, ARG_SEPARATORS);
+		if (s == NULL) {
+			return NULL;
+		}
+		if (s[0] != '\0') {
+			return s;
+		}
+	}
+}
+
+static void echo() {
+	const char *arg = next_arg();
+	if (arg != NULL) {
+		fputs(arg, stdout);
+		for (arg = next_arg(); arg != NULL; arg = next_arg()) {
+			printf(" %s", arg);
+		}
+	}
+	puts("");
+}
+
+static void help() {
+	printf(
+		"Commands:\n"
+		"  echo   [args]\n"
+		"  help\n"
+		"  list   [path]\n"
+		"  read   <path> [offset [len]]\n"
+		"  write  <path> [offset [len]]\n"
+	);
+}
+
+static void list() {
+	DIR *dir = opendir(".");
+	for (struct dirent *ent = readdir(dir); ent != NULL; ent = readdir(dir)) {
+		// d_name is guaranteed to be 0 terminated
+		puts(ent->d_name);
+	}
+}
+
+static void _read() {
+	puts("TODO");
+}
+
+static void _write() {
+	puts("TODO");
+}
 
 int main() {
 
@@ -60,20 +128,21 @@ int main() {
 		// Clear the input & write out
 		printf("\r\33[2K>> %s\n", in);
 
-		const char *cmd = strtok(in, " ");
+#define CMD2(name, fn) else if (strcmp(cmd, #name) == 0) { fn(); }
+#define CMD(fn) CMD2(fn, fn)
+		const char *cmd = next_cmd(in);
 		if (cmd == NULL) {
 			// Don't do anything
-		} else if (strcmp(cmd, "echo") == 0) {
-			const char *arg = strtok(NULL, " ");
-			if (arg != NULL) {
-				fputs(arg, stdout);
-				for (arg = strtok(NULL, " "); arg != NULL; arg = strtok(NULL, " ")) {
-					printf(" %s", arg);
-				}
-			}
-			puts("");
-		} else {
+		}
+		CMD(echo)
+		CMD(help)
+		CMD(list)
+		CMD2(read, _read)
+		CMD2(write, _write)
+		else {
 			printf("Unrecognized command '%s'\n", cmd);
 		}
+#undef CMD
+#undef CMD2
 	}
 }

@@ -3,11 +3,15 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
 
 #define PROT_READ  (0x1)
 #define PROT_WRITE (0x2)
 #define PROT_EXEC  (0x4)
+
+/**
+ * The type of a task / process identifier
+ */
+typedef size_t pid_t;
 
 /**
  * An UUID, which is always 128 bits large.

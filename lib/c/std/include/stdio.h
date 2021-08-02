@@ -56,9 +56,9 @@ void setbuf(FILE *, char *);
 
 void fclose(FILE *);
 
-int fread(void *, size_t, size_t, FILE *);
+size_t fread(void *, size_t, size_t, FILE *);
 
-int fwrite(const void *, size_t, size_t, FILE *);
+size_t fwrite(const void *, size_t, size_t, FILE *);
 
 int sprintf(char *, const char *, ...);
 

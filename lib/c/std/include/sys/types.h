@@ -2,7 +2,8 @@
 #define __LIBC_SYS_TYPES_H
 
 #include <stddef.h>
+#include <kernel.h>
 
-typedef size_t pid_t;
+typedef kernel_uuid_t ino_t;
 
 #endif

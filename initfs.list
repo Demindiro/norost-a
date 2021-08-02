@@ -1,2 +1,3 @@
+#lib/c/std/build/riscv64-pc-dux/test
 sysroot/riscv64-pc-dux/bin/minish
 #sysroot/riscv64-pc-dux/bin/hello_world

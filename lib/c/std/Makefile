@@ -35,6 +35,9 @@ clean:
 	for f in $(HEADERS) $(SOURCES); do rm -f "$$f~"; done
 	rm -rf $(BUILD)
 
+test:
+	./test.sh > $(BUILD)/test.c
+	$(CC) -nostartfiles -nostdlib -ffreestanding $(BUILD)/test.c $(SOURCES) $(OUTPUT)/lib/crt0.o -o $(BUILD)/test $(INCLUDE) -D__STD_TEST
 
 # Targets
 

@@ -5,8 +5,6 @@
 
 extern void *calloc(size_t, size_t);
 
-extern void memset(void *, char, size_t);
-
 extern void free(void *);
 
 extern void *malloc(size_t);

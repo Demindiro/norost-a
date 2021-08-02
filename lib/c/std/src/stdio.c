@@ -108,7 +108,7 @@ int ungetc(int c, FILE * stream) {
 	return ENOSYS;
 }
 
-int fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
+size_t fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
 	struct iovec iov[1] = {
 		{
 		 // Discarding const is fine as writev won't write to this.
