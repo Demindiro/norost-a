@@ -57,13 +57,18 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 		total_written += copied;
 
 		// Fill out the request entry
-		cre->priority = 0;
-		cre->flags = 0;
 		cre->address = 0;
-		//cre->offset = total_written;
+		cre->uuid = kernel_uuid(0, 0);
+
+		cre->id = 0;
+
+		cre->flags = 0;
+		cre->offset = total_written;
 		cre->data.raw = universal_buffer;
 		cre->length = copied;
+
 		asm volatile ("fence");
+
 		cre->opcode = KERNEL_IPC_OP_WRITE;
 
 		// Flush the queue

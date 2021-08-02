@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <sys/types.h>
+#include <kernel.h>
 
 enum {
 	SEEK_SET,
@@ -11,6 +12,7 @@ enum {
 
 typedef struct __FILE {
 	pid_t _address;
+	kernel_uuid_t _uuid;
 	int _fd;
 } FILE;
 

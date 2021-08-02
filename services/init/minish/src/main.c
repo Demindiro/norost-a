@@ -1,3 +1,5 @@
+#undef __STDC_HOSTED__
+#include <kernel.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -5,8 +7,6 @@
 #define VERSION_MIN 0
 #define VERSION_REV 1
 
-#undef __STDC_HOSTED__
-#include <kernel.h>
 int main() {
 
 	printf("MiniSH %d.%d.%d\n", VERSION_MAJ, VERSION_MIN, VERSION_REV);

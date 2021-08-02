@@ -1,64 +1,47 @@
-==========
-Filesystem
-==========
+==================================
+Inter Process / Task Communication
+==================================
+
+All communication is stateless: there is no need to allocate some object before
+communicating with another task. Instead, each packet has an address field
+indicating the recipient. The address field is simply the TID of the task that
+should receive the packet.
+
+To prevent excessive blocking, all communication is asynchronous: packets to be
+sent are put in a *transmit queue* and received packets are put in a *receive
+queue*. Explicit synchronization can be achieved with the ``io_wait`` syscall.
+
+To avoid copying overhead, data is sent by sharing pages between tasks.
 
 
-What is a file?
-~~~~~~~~~~~~~~~
-
-Definition: *A collection of data*.
-
-By this definition a file is anything from which data can be read and/or data
-can be written to.
-
-
-Implementation
-~~~~~~~~~~~~~~
-
-File I/O is IPC in reality:
-
-* To read from a file, a process requests data from another process which
-  may manage one or more devices.
-
-* To write to a file, a process passes data to another process which may
-  manage one or more devices.
-
-To keep copying to a minimum, memory pages of the client/server task are
-mapped into that of the server/client task. When a task is done with a range
-of memory pages it must free them themselves.
-
-To communicate, a task uses two ring buffers with identical size:
-
-* A *transmit queue* (TXQ)
-
-* A *receive queue* (RXQ)
-
-The size of both queues are always a power of 2 so that wrapping the index
-can be performed with a bitwise ``and`` operation.
-
+Userland implementation
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Transmit queue
 ''''''''''''''
 
 A TXQ entry is a struct with the following fields:
 
-* A ``u8`` ``opcode`` field, which describes the operation to be performed.
-  If this field is ``0``, it marks the end of entries to be processed.
+* A ``UUID`` ``uuid`` field to identify an object.
 
-* A ``u8`` ``priority`` field.
-
-* A ``u16`` ``flags`` field.
-
-* A ``u32`` ``id`` field, which can be used to keep track of requests.
-
-* A ``tid`` ``address`` field, which describes the task that should receive
-  the request.
+* A ``*mut _``data`` field, which is a pointer to an arbitrary blob of data. The
+  format of the data depends on the flags.
 
 * A ``usize`` ``length`` field, which describes the amount of data to be read or
   written.
 
-* A ``data`` field, which is a pointer to an arbitrary blob of data. The
-  format of the data depends on the flags.
+* A ``u64`` ``offset`` field that indicates an offset inside the object.
+
+* A ``tid`` ``address`` field, which describes the task that should receive
+  the request.
+
+* A ``u16`` ``flags`` field.
+
+* A ``u8`` ``opcode`` field, which describes the operation to be performed.
+  If this field is ``0``, it marks the end of entries to be processed.
+
+* A ``u8`` ``id`` field, which can be used to differentiate multiple requests
+  for the same object.
 
 The fields must be in the given order and be properly aligned.
 

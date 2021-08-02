@@ -25,14 +25,20 @@ ssize_t read(int fd, void *buf, size_t count)
 		return EAGAIN;
 	}
 
-	cre->priority = 0;
+	cre->address = 0;
+	cre->uuid = kernel_uuid(0, 0);
+
+	cre->id = 0;
+
 	cre->flags = 0;
-	//cre->file_handle = fd; // FIXME
-	//cre->offset = 0;
+	cre->offset = 0;
 	cre->data.raw = universal_buffer;
 	cre->length = count;
+
 	asm volatile ("fence");
+
 	cre->opcode = KERNEL_IPC_OP_READ;
+
 	kernel_io_wait(0, 0);
 
 	/*

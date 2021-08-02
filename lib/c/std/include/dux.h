@@ -38,4 +38,9 @@ struct dux_reserve_pages dux_reserve_pages(void *address, size_t count);
  */
 uint8_t dux_unreserve_pages(void *address, size_t count);
 
+/**
+ * Add an address range that can be freely used for IPC
+ */
+int dux_add_free_range(void *address, size_t count);
+
 #endif

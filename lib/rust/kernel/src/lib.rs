@@ -22,7 +22,7 @@ pub struct Return {
 }
 
 pub mod ipc {
-	use super::Page;
+	use super::*;
 	use core::num::NonZeroU8;
 	use core::ptr::NonNull;
 
@@ -34,16 +34,39 @@ pub mod ipc {
 		pub raw: *mut u8,
 	}
 
+	/// An UUID used to uniquely identify objects.
+	#[repr(C)]
+	pub struct UUID {
+		x: u64,
+		y: u64,
+	}
+
+	impl From<u128> for UUID {
+		fn from(uuid: u128) -> Self {
+			Self {
+				x: uuid as u64,
+				y: (uuid >> 64) as u64,
+			}
+		}
+	}
+
+	impl From<UUID> for u128 {
+		fn from(uuid: UUID) -> Self {
+			uuid.x as u128 | ((uuid.y as u128) << 64)
+		}
+	}
+
 	/// Structure used to communicate with other tasks.
 	#[repr(C)]
 	pub struct Packet {
-		pub opcode: Option<NonZeroU8>,
-		pub priority: i8,
-		pub flags: u16,
-		pub id: u32,
-		pub address: usize,
-		pub length: usize,
+		pub uuid: UUID,
 		pub data: Data,
+		pub offset: u64,
+		pub length: usize,
+		pub address: usize,
+		pub flags: u16,
+		pub opcode: Option<NonZeroU8>,
+		pub id: u8,
 	}
 
 	#[repr(u8)]

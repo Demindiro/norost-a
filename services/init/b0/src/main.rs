@@ -136,8 +136,6 @@ fn main() {
 
 	sys_log!("Spawned task with ID {}", id);
 
-	let _ = unsafe { kernel::io_wait(0, 0) };
-
 	// Dummy write some stuff to the spawned task
 	let (txq, rxq, free_pages, raw) = unsafe {
 		let addr = 0xff00_0000 as *mut kernel::Page;
@@ -168,13 +166,14 @@ fn main() {
 
 		if buf.len() > 0 {
 			*txq = kernel::ipc::Packet {
+				uuid: kernel::ipc::UUID::from(0),
 				opcode: Some(kernel::ipc::Op::Write.into()),
-				priority: 0,
 				flags: 0,
 				id: 0,
 				address: id,
 				data: unsafe { kernel::ipc::Data { raw } },
 				length: buf.len(),
+				offset: 0,
 			};
 		}
 

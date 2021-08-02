@@ -12,11 +12,11 @@
 // FIXME this is temporary as we currently rely on GCC's stddef, which doesn't have ssize_t
 typedef signed long ssize_t;
 
-static FILE _stdin = { ._address = 0, ._fd = 0 };
-static FILE _stdout = { ._address = 0, ._fd = 1 };
-static FILE _stderr = { ._address = 0, ._fd = 2 };
+static FILE _stdin  = { ._address = 0, ._fd = 0, ._uuid = KERNEL_UUID(0, 0) };
+static FILE _stdout = { ._address = 0, ._fd = 1, ._uuid = KERNEL_UUID(0, 0) };
+static FILE _stderr = { ._address = 0, ._fd = 2, ._uuid = KERNEL_UUID(0, 0) };
 
-FILE *stdin = &_stdin;
+FILE *stdin  = &_stdin;
 FILE *stdout = &_stdout;
 FILE *stderr = &_stderr;
 
@@ -196,10 +196,9 @@ int vfprintf(FILE *stream, const char *format, va_list args) {
 		}
 
 		// Fill out the request entry
-		pkt->priority = 0;
 		pkt->flags = 0;
 		pkt->address = stream->_address;
-		//pkt->offset = total_written;
+		pkt->offset = total_written;
 		pkt->data.raw = universal_buffer;
 		pkt->length = ptr - out;
 		asm volatile ("fence");

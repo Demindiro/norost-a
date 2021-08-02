@@ -49,3 +49,10 @@ Memory pages
 
 A memory page is represented with ``mem_page`` and is always aligned to a
 page boundary.
+
+
+UUID
+~~~~
+
+An UUID is a 128-bit integer. For FFI compatiblity, it is defined as
+``[u64; 2]``.

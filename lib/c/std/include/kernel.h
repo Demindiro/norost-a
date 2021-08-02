@@ -10,6 +10,21 @@
 #define PROT_EXEC  (0x4)
 
 /**
+ * An UUID, which is always 128 bits large.
+ */
+typedef struct { 
+	uint64_t _x;
+	uint64_t _y;
+} kernel_uuid_t;
+
+#define KERNEL_UUID(x, y) { ._x = x, ._y = y }
+
+static inline kernel_uuid_t kernel_uuid(uint64_t x, uint64_t y) {
+	kernel_uuid_t uuid = KERNEL_UUID(x, y);
+	return uuid;
+}
+
+/**
  * Structure returned by kernel calls.
  */
 typedef struct kernel_return {
@@ -21,15 +36,16 @@ typedef struct kernel_return {
  * Structure used for ipc.
  */
 struct kernel_ipc_packet {
-	uint8_t opcode;
-	int8_t priority;
-	uint16_t flags;
-	uint32_t id;
-	pid_t address;
-	size_t length;
+	kernel_uuid_t uuid;
 	union {
 		void *raw;
 	} data;
+	int64_t offset;
+	size_t length;
+	pid_t address;
+	uint16_t flags;
+	uint8_t opcode;
+	uint8_t id;
 };
 
 /**

@@ -57,13 +57,14 @@ union Data {
 #[repr(C)]
 #[derive(Clone)]
 pub struct Packet {
-	opcode: Option<NonZeroU8>,
-	priority: i8,
-	flags: u16,
-	id: u32,
-	address: usize,
-	length: usize,
+	uuid: [u64; 2],
 	data: Data,
+	offset: u64,
+	length: usize,
+	address: usize,
+	flags: u16,
+	opcode: Option<NonZeroU8>,
+	id: u8,
 }
 
 /// A decoded opcode
