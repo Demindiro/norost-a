@@ -2,6 +2,7 @@
 
 #![no_std]
 #![feature(asm)]
+#![feature(variant_count)]
 
 use core::ffi;
 use core::fmt;
@@ -23,6 +24,8 @@ pub struct Return {
 
 pub mod ipc {
 	use super::*;
+	use core::convert::TryFrom;
+	use core::mem;
 	use core::num::NonZeroU8;
 	use core::ptr::NonNull;
 
@@ -73,15 +76,39 @@ pub mod ipc {
 	pub enum Op {
 		Read = 1,
 		Write = 2,
+		Info = 3,
+		List = 4,
+		MapRead = 5,
+		MapWrite = 6,
+		MapReadWrite = 7,
+		MapExec = 8,
+		MapReadExec = 9,
+		MapReadCow = 10,
+		MapExecCow = 11,
+		MapReadExecCow = 12,
 	}
 
 	impl From<Op> for NonZeroU8 {
 		fn from(op: Op) -> Self {
-			NonZeroU8::new(match op {
-				Op::Read => 1,
-				Op::Write => 2,
-			})
-			.unwrap()
+			// SAFETY: we defined values for each of the variants.
+			NonZeroU8::new(op as u8).unwrap()
+		}
+	}
+
+	#[derive(Debug)]
+	pub struct UnknownOp;
+
+	impl TryFrom<NonZeroU8> for Op {
+		type Error = UnknownOp;
+
+		fn try_from(op: NonZeroU8) -> Result<Self, Self::Error> {
+			let variant_count = mem::variant_count::<Self>();
+			if usize::from(op.get()) <= variant_count {
+				// SAFETY: there are no gaps in the variant list nor is the value out of bounds.
+				Ok(unsafe { mem::transmute(op) })
+			} else {
+				Err(UnknownOp)
+			}
 		}
 	}
 

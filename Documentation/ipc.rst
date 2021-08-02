@@ -70,59 +70,42 @@ To send a response, a TXQ structure is filled out with the ``id`` and
 Operations
 ~~~~~~~~~~
 
+This table defines how *user* applications should interpret. User applications
+are allowed to interpret and/or add custom operations, although this is not
+recommended.
+
+Note that ``flags`` have to be defined appropriately for each operation to
+behave as expected.
+
 Listing
 '''''''
 
 +-------------------------+------+
 |        Operation        | Code |
 +=========================+======+
-| READ_                   |   xx |
+| READ_                   |    1 |
 +-------------------------+------+
 | WRITE_                  |    2 |
 +-------------------------+------+
-| OPEN_                   |   xx |
+| INFO_                   |    3 |
 +-------------------------+------+
-| CLOSE_                  |   xx |
+| LIST_                   |    4 |
 +-------------------------+------+
-| INFO_                   |   xx |
+| MAP_READ_               |    5 |
 +-------------------------+------+
-| MAP_READ_               |   xx |
+| MAP_WRITE_              |    6 |
 +-------------------------+------+
-| MAP_WRITE_              |   xx |
+| MAP_READ_WRITE_         |    7 |
 +-------------------------+------+
-| MAP_READ_WRITE_         |   xx |
+| MAP_EXEC_               |    8 |
 +-------------------------+------+
-| MAP_EXEC_               |   xx |
+| MAP_READ_EXEC_          |    9 |
 +-------------------------+------+
-| MAP_READ_EXEC_          |   xx |
+| MAP_READ_COW_           |   10 |
 +-------------------------+------+
-| MAP_READ_COW_           |   xx |
+| MAP_EXEC_COW_           |   11 |
 +-------------------------+------+
-| MAP_EXEC_COW_           |   xx |
-+-------------------------+------+
-| MAP_READ_EXEC_COW_      |   xx |
-+-------------------------+------+
-| READ_ONCE_              |   xx |
-+-------------------------+------+
-| WRITE_ONCE_             |   xx |
-+-------------------------+------+
-| INFO_ONCE_              |   xx |
-+-------------------------+------+
-| MAP_READ_ONCE_          |   xx |
-+-------------------------+------+
-| MAP_WRITE_ONCE_         |   xx |
-+-------------------------+------+
-| MAP_READ_WRITE_ONCE_    |   xx |
-+-------------------------+------+
-| MAP_EXEC_ONCE_          |   xx |
-+-------------------------+------+
-| MAP_READ_EXEC_ONCE_     |   xx |
-+-------------------------+------+
-| MAP_READ_COW_ONCE_      |   xx |
-+-------------------------+------+
-| MAP_EXEC_COW_ONCE_      |   xx |
-+-------------------------+------+
-| MAP_READ_EXEC_COW_ONCE_ |   xx |
+| MAP_READ_EXEC_COW_      |   12 |
 +-------------------------+------+
 
 
@@ -140,27 +123,31 @@ The offset is ignored if it does not apply (e.g. TCP sockets).
 WRITE
 `````
 
-Write data from the given memory pages into from an object at an offset.
+Write data from the given memory pages into an object at an offset.
 
 The offset is ignored if it does not apply (e.g. TCP sockets).
-
-
-OPEN
-````
-
-Map an object to a file handle and return the handle.
-
-
-CLOSE
-`````
-
-Destroy the handle mapping to an object.
 
 
 INFO
 ````
 
 Write a structure into the given memory page that describes the object.
+
+
+LIST
+````
+
+Write a structure into the given memory page that lists any child objects
+this object may have.
+
+The structure is an array containing a list of object entries. Each entry
+has the following fields:
+
+* ``UUID`` ``uuid``
+
+* ``u32`` ``name_offset``
+
+* ``u16`` ``name_length``
 
 
 MAP_READ
@@ -221,77 +208,10 @@ This range will not be affected by writes to other mappings. Existence or
 creation of a writeable range will cause a new page range to be allocated.
 
 
-MAP_READ_EXEC
-`````````````
+MAP_READ_EXEC_COW
+`````````````````
 
 Returns a read & execute page range that maps a section of an object.
 
 This range will not be affected by writes to other mappings. Existence or
 creation of a writeable range will cause a new page range to be allocated.
-
-
-READ_ONCE
-`````````
-
-Same as READ_ but does not allocate a file handle.
-
-
-WRITE_ONCE
-``````````
-
-Same as WRITE_ but does not allocate a file handle.
-
-
-INFO_ONCE
-`````````
-
-Same as INFO_ but does not allocate a file handle.
-
-
-MAP_READ_ONCE
-`````````````
-
-Same as MAP_READ_ but does not allocate a file handle.
-
-
-MAP_WRITE_ONCE
-``````````````
-
-Same as MAP_WRITE_ but does not allocate a file handle.
-
-
-MAP_READ_WRITE_ONCE
-```````````````````
-
-Same as MAP_READ_WRITE_ but does not allocate a file handle.
-
-
-MAP_EXEC_ONCE
-`````````````
-
-Same as MAP_EXEC_ but does not allocate a file handle.
-
-
-MAP_READ_EXEC_ONCE
-``````````````````
-
-Same as MAP_READ_EXEC_ but does not allocate a file handle.
-
-
-MAP_READ_COW_ONCE
-`````````````````
-
-Same as MAP_READ_COW_ but does not allocate a file handle.
-
-
-MAP_EXEC_COW_ONCE
-`````````````````
-
-Same as MAP_EXEC_COW_ but does not allocate a file handle.
-
-
-MAP_READ_EXEC_COW_ONCE
-``````````````````````
-
-Same as MAP_READ_EXEC_COW_ but does not allocate a file handle.
-

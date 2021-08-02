@@ -56,9 +56,19 @@ struct kernel_ipc_packet {
  * Valid IPC operations
  */
 enum {
-	KERNEL_IPC_OP_NONE  = 0,
-	KERNEL_IPC_OP_READ  = 1,
-	KERNEL_IPC_OP_WRITE = 2,
+	KERNEL_IPC_OP_NONE              = 0,
+	KERNEL_IPC_OP_READ              = 1,
+	KERNEL_IPC_OP_WRITE             = 2,
+	KERNEL_IPC_OP_INFO              = 3,
+	KERNEL_IPC_OP_LIST              = 4,
+	KERNEL_IPC_OP_MAP_READ          = 5,
+	KERNEL_IPC_OP_MAP_WRITE         = 6,
+	KERNEL_IPC_OP_MAP_READ_WRITE    = 7,
+	KERNEL_IPC_OP_MAP_EXEC          = 8,
+	KERNEL_IPC_OP_MAP_READ_EXEC     = 9,
+	KERNEL_IPC_OP_MAP_READ_COW      = 10,
+	KERNEL_IPC_OP_MAP_EXEC_COW      = 11,
+	KERNEL_IPC_OP_MAP_READ_EXEC_COW = 12,
 };
 
 /**
