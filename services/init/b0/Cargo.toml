@@ -9,4 +9,5 @@ edition = "2018"
 [dependencies]
 device_tree = { path = "../../../lib/rust/device_tree/" }
 kernel = { path = "../../../lib/rust/kernel/", package = "syscalls" }
+dux = { path = "../../../lib/rust/dux/" }
 xmas-elf = { path = "../../../thirdparty/rust/xmas-elf/" }

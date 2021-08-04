@@ -19,8 +19,7 @@ ssize_t read(int fd, void *buf, size_t count)
 {
 	count = count < universal_buffer_size ? count : universal_buffer_size;
 
-	struct kernel_ipc_packet *cre =
-	    dux_reserve_transmit_entry();
+	struct kernel_ipc_packet *cre = dux_reserve_transmit_entry();
 	if (cre == NULL) {
 		return EAGAIN;
 	}

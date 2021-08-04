@@ -65,6 +65,7 @@ static void list() {
 		// d_name is guaranteed to be 0 terminated
 		puts(ent->d_name);
 	}
+	closedir(dir);
 }
 
 static void _read() {

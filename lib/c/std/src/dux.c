@@ -36,7 +36,6 @@ static size_t rxq_index;
 static struct kernel_free_range *free_ranges;
 static size_t free_ranges_size;
 
-
 /**
  * Initializes the library. This should be the first function called in crt0.
  */
@@ -45,40 +44,42 @@ void __dux_init(void)
 	kernel_return_t kret;
 	struct dux_reserve_pages dret;
 	// FIXME need a mem_get_mappings syscall of sorts.
-	
+
 	// Allocate a single page for keeping track of the memory ranges.
 	// FIXME changed top 4 bits from f to 0 to workaround shitty kernel.
 	reserved_ranges = (struct memory_map *)0x0ff00000;
-	void *reserved_ranges_end = (void *)0x0ff0efff; // 64KiB, or 4096 entries ought to be enough.
+	void *reserved_ranges_end = (void *)0x0ff0efff;	// 64KiB, or 4096 entries ought to be enough.
 	kret = kernel_mem_alloc(reserved_ranges, 1, PROT_READ | PROT_WRITE);
 	if (kret.status != 0) {
 		// FIXME handle errors properly
-		for (;;) {}
+		for (;;) {
+		}
 	}
 	reserved_capacity = PAGE_SIZE / sizeof(struct memory_map);
 
 	// Immediately register the range itself and reserve some pages for it.
-	reserved_ranges[/* 0 */1].start = reserved_ranges,
-	reserved_ranges[/* 0 */1].end = reserved_ranges_end;
+	reserved_ranges[ /* 0 */ 1].start = reserved_ranges,
+	    reserved_ranges[ /* 0 */ 1].end = reserved_ranges_end;
 	//reserved_count = 1;
 
 	// FIXME assume the top and bottom are reserved for stack and ELF respectively.
 	reserved_ranges[2].start = (void *)0xfff00000,
-	reserved_ranges[2].end   = (void *)0xfffeffff,
-	reserved_ranges[0].start = (void *)   0x10000,
-	reserved_ranges[0].end   = (void *) 0x1ffffff,
-	reserved_count = 3;
+	    reserved_ranges[2].end = (void *)0xfffeffff,
+	    reserved_ranges[0].start = (void *)0x10000,
+	    reserved_ranges[0].end = (void *)0x1ffffff, reserved_count = 3;
 
 	// Reserve pages for client requests and responses
 	dret = dux_reserve_pages(NULL, 8);
 	if (dret.status != 0) {
 		// FIXME handle errors properly
-		for (;;) {}
+		for (;;) {
+		}
 	}
 	kret = kernel_mem_alloc(dret.address, 1, PROT_READ | PROT_WRITE);
 	if (kret.status != 0) {
 		// FIXME handle errors properly
-		for (;;) {}
+		for (;;) {
+		}
 	}
 	txq = (struct kernel_ipc_packet *)dret.address;
 	txq_mask = (PAGE_SIZE / sizeof(struct kernel_ipc_packet)) - 1;
@@ -87,12 +88,14 @@ void __dux_init(void)
 	dret = dux_reserve_pages(NULL, 8);
 	if (dret.status != 0) {
 		// FIXME handle errors properly
-		for (;;) {}
+		for (;;) {
+		}
 	}
 	kret = kernel_mem_alloc(dret.address, 1, PROT_READ | PROT_WRITE);
 	if (kret.status != 0) {
 		// FIXME handle errors properly
-		for (;;) {}
+		for (;;) {
+		}
 	}
 	rxq = (struct kernel_ipc_packet *)dret.address;
 	rxq_mask = (PAGE_SIZE / sizeof(struct kernel_ipc_packet)) - 1;
@@ -101,24 +104,28 @@ void __dux_init(void)
 	dret = dux_reserve_pages(NULL, 8);
 	if (dret.status != 0) {
 		// FIXME handle errors properly
-		for (;;) {}
+		for (;;) {
+		}
 	}
 	kret = kernel_mem_alloc(dret.address, 1, PROT_READ | PROT_WRITE);
 	if (kret.status != 0) {
 		// FIXME handle errors properly
-		for (;;) {}
+		for (;;) {
+		}
 	}
 	free_ranges = (struct kernel_free_range *)dret.address;
 	free_ranges_size = 1;
 	// Set a range to which pages can be mapped to.
 	free_ranges[0].address = (void *)0x660000;
-	free_ranges[0].count = 1;
+	free_ranges[0].count = 16;
 
 	// Register the queues to the kernel
-	kret = kernel_io_set_queues(txq, 0, rxq, 0, free_ranges, free_ranges_size);
+	kret =
+	    kernel_io_set_queues(txq, 0, rxq, 0, free_ranges, free_ranges_size);
 	if (kret.status != 0) {
 		// FIXME handle errors properly
-		for (;;) {}
+		for (;;) {
+		}
 	}
 }
 
@@ -128,7 +135,8 @@ void __dux_init(void)
  * Returns 0 on success, 1 if there is not enough space to insert an entry and allocation
  * of extra pages failed.
  */
-static uint8_t mem_insert_entry(size_t index, void *start, void *end) {
+static uint8_t mem_insert_entry(size_t index, void *start, void *end)
+{
 	// TODO allocate additional pages if needed.
 	if (reserved_count >= reserved_capacity) {
 		return 1;
@@ -144,7 +152,8 @@ static uint8_t mem_insert_entry(size_t index, void *start, void *end) {
 	return 0;
 }
 
-struct dux_reserve_pages dux_reserve_pages(void *address, size_t count) {
+struct dux_reserve_pages dux_reserve_pages(void *address, size_t count)
+{
 	if (address == NULL) {
 		// Find the first range with enough space.
 		// TODO maybe it's better if we try to find the tightest space possible? Or maybe
@@ -179,21 +188,50 @@ struct dux_reserve_pages dux_reserve_pages(void *address, size_t count) {
 		return ret;
 	} else {
 		// TODO do a binary search, check if there is enough space & insert if so.
-		for (;;) {}
+		for (;;) {
+		}
 	}
 }
 
-struct kernel_ipc_packet *dux_reserve_transmit_entry(void) {
+struct kernel_ipc_packet *dux_reserve_transmit_entry(void)
+{
 	return txq;
 }
 
-struct kernel_ipc_packet *dux_get_receive_entry(void) {
+struct kernel_ipc_packet *dux_get_receive_entry(void)
+{
 	return rxq;
 }
 
-int dux_add_free_range(void *page, size_t count) {
+int dux_add_free_range(void *page, size_t count)
+{
 	// FIXME
 	free_ranges[0].address = page;
 	free_ranges[0].count = count;
+	return 0;
+}
+
+int dux_ipc_list_get(const struct dux_ipc_list list, size_t index,
+		     struct dux_ipc_list_entry *entry)
+{
+	size_t *len = (size_t *)list.data;
+
+	if (index >= *len) {
+		return -1;
+	}
+
+	struct dux_ipc_list_raw_entry *re =
+	    (struct dux_ipc_list_raw_entry *)(len + 1);
+	re += index;
+
+	entry->uuid = re->uuid;
+	if (re->name_offset + re->name_len <= list.data_len) {
+		entry->name = ((const char *)list.data) + re->name_offset;
+		entry->name_len = re->name_len;
+	} else {
+		entry->name = NULL;
+		entry->name_len = 0;
+	}
+
 	return 0;
 }

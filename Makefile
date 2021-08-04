@@ -2,7 +2,7 @@ default: build
 
 
 test:
-	make -C lib/c/std/ test
+	#make -C lib/c/std/ test
 	make -C services/init/b0
 	make -C . run
 

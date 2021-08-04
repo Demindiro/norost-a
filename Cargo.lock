@@ -19,6 +19,7 @@ name = "b0"
 version = "0.1.0"
 dependencies = [
  "device_tree",
+ "dux",
  "syscalls",
  "xmas-elf",
 ]
@@ -43,6 +44,13 @@ name = "device_tree"
 version = "0.1.0"
 dependencies = [
  "simple_endian",
+]
+
+[[package]]
+name = "dux"
+version = "0.1.0"
+dependencies = [
+ "syscalls",
 ]
 
 [[package]]

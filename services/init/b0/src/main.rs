@@ -25,11 +25,20 @@ mod uart;
 
 include!(concat!(env!("OUT_DIR"), "/list.rs"));
 
+use core::convert::TryFrom;
 use kernel::sys_log;
 use xmas_elf::ElfFile;
 
 #[export_name = "main"]
 fn main() {
+
+	// GOD FUCKING DAMN IT RUST
+	//
+	// WHY ARE YOU STRIPPING THE __dux_init SYMBOL
+	//
+	// WHYYYYYYYYYYYYYYYY
+	unsafe { dux::init() };
+
 	sys_log!("Mapping devices");
 	device_tree::map_devices();
 
@@ -153,7 +162,53 @@ fn main() {
 		count: 1,
 	};
 
+	/// Create pseudo list.
+	let mut list_builder = dux::ipc::list::Builder::new(3, 50).unwrap();
+	list_builder.add(kernel::ipc::UUID::from(0), b"foohoo").unwrap();
+	list_builder.add(kernel::ipc::UUID::from(0), b"barhar").unwrap();
+	list_builder.add(kernel::ipc::UUID::from(0), b"quxhux").unwrap();
+	let list = dux::ipc::list::List::new(list_builder.data());
+	sys_log!("Listing {} entries", list.iter().count());
+	for (i, e) in list.iter().enumerate() {
+		sys_log!("{}: {:?}", i, e);
+	}
+
 	loop {
+		// Read received data & write it to UART
+		if let Some(op) = rxq.opcode {
+			match kernel::ipc::Op::try_from(op) {
+				Ok(kernel::ipc::Op::Write) => {
+					let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
+					console.write(data);
+					rxq.opcode = None;
+					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
+					free_pages.address = core::ptr::NonNull::new(data.as_ptr() as *mut _);
+					free_pages.count += 1;
+				}
+				Ok(kernel::ipc::Op::List) => {
+					let raw = list_builder.data() as *const _ as *mut _;
+					let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
+					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
+					free_pages.address = core::ptr::NonNull::new(data.as_ptr() as *mut _);
+					free_pages.count += 1;
+					*txq = kernel::ipc::Packet {
+						uuid: kernel::ipc::UUID::from(0),
+						opcode: Some(kernel::ipc::Op::List.into()),
+						flags: 0,
+						id: rxq.id,
+						address: id,
+						data: unsafe { kernel::ipc::Data { raw } },
+						length: buf.len(),
+						offset: 0,
+					};
+					rxq.opcode = None;
+					continue;
+				}
+				Ok(op) => sys_log!("TODO {:?}", op),
+				Err(kernel::ipc::UnknownOp) => sys_log!("Unknown op {}", op),
+			}
+		}
+
 		// Read data from UART & send it to child process
 		let mut buf = [0; 256];
 		let read = console.read(&mut buf);
@@ -175,16 +230,6 @@ fn main() {
 				length: buf.len(),
 				offset: 0,
 			};
-		}
-
-		// Read received data & write it to UART
-		if let Some(op) = rxq.opcode {
-			let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
-			console.write(data);
-			rxq.opcode = None;
-			let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
-			free_pages.address = core::ptr::NonNull::new(data.as_ptr() as *mut _);
-			free_pages.count += 1;
 		}
 
 		unsafe { kernel::io_wait(0, 0) };

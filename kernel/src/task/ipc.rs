@@ -67,35 +67,6 @@ pub struct Packet {
 	id: u8,
 }
 
-/// A decoded opcode
-#[repr(u8)]
-enum Op {
-	Read = 1,
-	Write = 2,
-}
-
-impl TryFrom<NonZeroU8> for Op {
-	type Error = InvalidOp;
-
-	fn try_from(n: NonZeroU8) -> Result<Self, Self::Error> {
-		Ok(match n.get() {
-			1 => Op::Read,
-			2 => Op::Write,
-			_ => Err(InvalidOp)?,
-		})
-	}
-}
-
-impl From<Op> for NonZeroU8 {
-	fn from(op: Op) -> Self {
-		NonZeroU8::new(match op {
-			Op::Read => 1,
-			Op::Write => 2,
-		})
-		.unwrap()
-	}
-}
-
 #[derive(Debug)]
 struct InvalidOp;
 
@@ -147,38 +118,32 @@ impl IPC {
 		loop {
 			let cq = unsafe { &mut *self.transmit_queue.as_ptr().add(cqi.get()) };
 			if let Some(op) = cq.opcode {
-				let op = Op::try_from(op).unwrap();
-				match op {
-					Op::Read => {}
-					Op::Write => {
-						let bits = mem::size_of::<usize>() * 4;
-						let (group, task) = (cq.address >> bits, cq.address & (1 << bits) - 1);
-						let task = Group::get(group).unwrap().task(task).unwrap();
-						cq.opcode = None;
-						let pkt = cq.clone();
-						drop(cq);
-						// FIXME this is terribly inefficient
-						task.inner().shared_state.virtual_memory.activate();
-						let task_ipc = task.inner().ipc.as_mut().unwrap();
-						let rxq = unsafe { &mut *task_ipc.receive_queue.as_ptr().add(0) };
-						let addr = task_ipc.pop_free_range(1 /* FIXME */).expect("no free ranges");
-						rxq.opcode = Some(op.into());
-						rxq.length = pkt.length;
-						unsafe { rxq.data.raw = addr.as_ptr() };
-						// FIXME ditto
-						slf_task.inner().shared_state.virtual_memory.activate();
-						task.inner()
-							.shared_state
-							.virtual_memory
-							.share(
-								addr,
-								unsafe { Page::from_pointer(pkt.data.raw).unwrap() },
-								arch::vms::RWX::R,
-								arch::vms::Accessibility::UserLocal,
-							)
-							.unwrap();
-					}
-				}
+				let bits = mem::size_of::<usize>() * 4;
+				let (group, task) = (cq.address >> bits, cq.address & (1 << bits) - 1);
+				let task = Group::get(group).unwrap().task(task).unwrap();
+				cq.opcode = None;
+				let pkt = cq.clone();
+				drop(cq);
+				// FIXME this is terribly inefficient
+				task.inner().shared_state.virtual_memory.activate();
+				let task_ipc = task.inner().ipc.as_mut().unwrap();
+				let rxq = unsafe { &mut *task_ipc.receive_queue.as_ptr().add(0) };
+				let addr = task_ipc.pop_free_range(1 /* FIXME */).expect("no free ranges");
+				rxq.opcode = Some(op.into());
+				rxq.length = pkt.length;
+				unsafe { rxq.data.raw = addr.as_ptr() };
+				// FIXME ditto
+				slf_task.inner().shared_state.virtual_memory.activate();
+				task.inner()
+					.shared_state
+					.virtual_memory
+					.share(
+						addr,
+						unsafe { Page::from_pointer(pkt.data.raw).unwrap() },
+						arch::vms::RWX::R,
+						arch::vms::Accessibility::UserLocal,
+					)
+					.unwrap();
 			} else {
 				break;
 			}

@@ -13,7 +13,33 @@
  */
 struct dux_reserve_pages {
 	uint8_t status;
-	void* address;
+	void *address;
+};
+
+/**
+ * A single, raw child object entry.
+ */
+struct dux_ipc_list_raw_entry {
+	kernel_uuid_t uuid;
+	uint32_t name_offset;
+	uint16_t name_len;
+};
+
+/**
+ * A child object entry returned by dux_ipc_list_get
+ */
+struct dux_ipc_list_entry {
+	kernel_uuid_t uuid;
+	const char *name;
+	uint16_t name_len;
+};
+
+/**
+ * A list of child objects.
+ */
+struct dux_ipc_list {
+	void *data;
+	size_t data_len;
 };
 
 /**
@@ -42,5 +68,13 @@ uint8_t dux_unreserve_pages(void *address, size_t count);
  * Add an address range that can be freely used for IPC
  */
 int dux_add_free_range(void *address, size_t count);
+
+/**
+ * Return the entry at the given index in this list.
+ *
+ * Returns -1 if the index is out of range, otherwise 0.
+ */
+int dux_ipc_list_get(const struct dux_ipc_list list, size_t index,
+		     struct dux_ipc_list_entry *entry);
 
 #endif

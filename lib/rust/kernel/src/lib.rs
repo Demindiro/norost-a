@@ -14,6 +14,9 @@ pub const IO_WRITE: u8 = 2;
 pub const PROT_READ: u8 = 0x1;
 pub const PROT_WRITE: u8 = 0x2;
 pub const PROT_EXEC: u8 = 0x4;
+pub const PROT_READ_WRITE: u8 = PROT_READ | PROT_WRITE;
+pub const PROT_READ_EXEC: u8 = PROT_READ | PROT_EXEC;
+pub const PROT_READ_WRITE_EXEC: u8 = PROT_READ | PROT_WRITE | PROT_EXEC;
 
 /// Structure returned by system calls.
 #[repr(C)]
@@ -25,6 +28,7 @@ pub struct Return {
 pub mod ipc {
 	use super::*;
 	use core::convert::TryFrom;
+	use core::fmt;
 	use core::mem;
 	use core::num::NonZeroU8;
 	use core::ptr::NonNull;
@@ -39,6 +43,7 @@ pub mod ipc {
 
 	/// An UUID used to uniquely identify objects.
 	#[repr(C)]
+	#[derive(Clone, Copy)]
 	pub struct UUID {
 		x: u64,
 		y: u64,
@@ -59,6 +64,24 @@ pub mod ipc {
 		}
 	}
 
+	impl fmt::Debug for UUID {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			write!(f, concat!(stringify!(UUID), "({})"), self)
+		}
+	}
+
+	impl fmt::Display for UUID {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			let n = u128::from(*self);
+			write!(f, "{:02x}{:02x}", n as u8, (n >> 8) as u8)?;
+			for i in 1..8 {
+				"-".fmt(f)?;
+				write!(f, "{:02x}{:02x}", (n >> (16 * i)) as u8, (n >> (24 * i)) as u8)?;
+			}
+			Ok(())
+		}
+	}
+
 	/// Structure used to communicate with other tasks.
 	#[repr(C)]
 	pub struct Packet {
@@ -72,6 +95,7 @@ pub mod ipc {
 		pub id: u8,
 	}
 
+	#[derive(Debug)]
 	#[repr(u8)]
 	pub enum Op {
 		Read = 1,

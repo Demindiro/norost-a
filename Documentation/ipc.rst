@@ -149,6 +149,9 @@ has the following fields:
 
 * ``u16`` ``name_length``
 
+The ``name_offset`` field points to a string relative to the starting address
+of the data. If the object has no name, it should be 0.
+
 
 MAP_READ
 ````````

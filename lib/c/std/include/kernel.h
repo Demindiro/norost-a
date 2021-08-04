@@ -16,14 +16,15 @@ typedef size_t pid_t;
 /**
  * An UUID, which is always 128 bits large.
  */
-typedef struct { 
+typedef struct {
 	uint64_t _x;
 	uint64_t _y;
 } kernel_uuid_t;
 
 #define KERNEL_UUID(x, y) { ._x = x, ._y = y }
 
-static inline kernel_uuid_t kernel_uuid(uint64_t x, uint64_t y) {
+static inline kernel_uuid_t kernel_uuid(uint64_t x, uint64_t y)
+{
 	kernel_uuid_t uuid = KERNEL_UUID(x, y);
 	return uuid;
 }
@@ -56,18 +57,18 @@ struct kernel_ipc_packet {
  * Valid IPC operations
  */
 enum {
-	KERNEL_IPC_OP_NONE              = 0,
-	KERNEL_IPC_OP_READ              = 1,
-	KERNEL_IPC_OP_WRITE             = 2,
-	KERNEL_IPC_OP_INFO              = 3,
-	KERNEL_IPC_OP_LIST              = 4,
-	KERNEL_IPC_OP_MAP_READ          = 5,
-	KERNEL_IPC_OP_MAP_WRITE         = 6,
-	KERNEL_IPC_OP_MAP_READ_WRITE    = 7,
-	KERNEL_IPC_OP_MAP_EXEC          = 8,
-	KERNEL_IPC_OP_MAP_READ_EXEC     = 9,
-	KERNEL_IPC_OP_MAP_READ_COW      = 10,
-	KERNEL_IPC_OP_MAP_EXEC_COW      = 11,
+	KERNEL_IPC_OP_NONE = 0,
+	KERNEL_IPC_OP_READ = 1,
+	KERNEL_IPC_OP_WRITE = 2,
+	KERNEL_IPC_OP_INFO = 3,
+	KERNEL_IPC_OP_LIST = 4,
+	KERNEL_IPC_OP_MAP_READ = 5,
+	KERNEL_IPC_OP_MAP_WRITE = 6,
+	KERNEL_IPC_OP_MAP_READ_WRITE = 7,
+	KERNEL_IPC_OP_MAP_EXEC = 8,
+	KERNEL_IPC_OP_MAP_READ_EXEC = 9,
+	KERNEL_IPC_OP_MAP_READ_COW = 10,
+	KERNEL_IPC_OP_MAP_EXEC_COW = 11,
 	KERNEL_IPC_OP_MAP_READ_EXEC_COW = 12,
 };
 
@@ -149,33 +150,29 @@ struct kernel_free_range {
 		SYSCALL("r"(a7)) \
 	}
 
-SYSCALL_2(kernel_io_wait, 0, uint16_t /* flags */, uint64_t /* time */)
-
-SYSCALL_6(kernel_io_set_queues, 1, void * /* requests */, size_t /* requests_size */,
-	void * /* completions */, size_t /* completion_sizes */,
-	void * /* free_pages */, size_t /* free_pages_size */)
-
-SYSCALL_3(kernel_mem_alloc, 3, void * /* address */, size_t /* count */, uint8_t /* flags */)
-
-SYSCALL_2(kernel_mem_dealloc, 4, void * /* address */, size_t /* count */)
-
-SYSCALL_1(kernel_mem_get_flags, 5, void * /* address */)
-
-SYSCALL_2(kernel_mem_set_flags, 6, void * /* address */, size_t /* count */)
-
-SYSCALL_2(kernel_sys_log, 15, const char * /* address */, size_t /* length */)
-
+SYSCALL_2(kernel_io_wait, 0, uint16_t /* flags */ , uint64_t /* time */ )
+    SYSCALL_6(kernel_io_set_queues, 1, void * /* requests */ ,
+	      size_t /* requests_size */ ,
+	      void * /* completions */ , size_t /* completion_sizes */ ,
+	      void * /* free_pages */ , size_t /* free_pages_size */ )
+SYSCALL_3(kernel_mem_alloc, 3, void * /* address */ , size_t /* count */ ,
+	  uint8_t /* flags */ ) SYSCALL_2(kernel_mem_dealloc, 4,
+					  void * /* address */ ,
+					  size_t /* count */ )
+SYSCALL_1(kernel_mem_get_flags, 5,
+	  void * /* address */ ) SYSCALL_2(kernel_mem_set_flags, 6,
+					   void * /* address */ ,
+					   size_t /* count */ )
+SYSCALL_2(kernel_sys_log, 15, const char * /* address */ , size_t /* length */ )
 #undef SYSCALL_4
 #undef SYSCALL_3
 #undef SYSCALL_2
 #undef SYSCALL_1
 #undef SYSCALL_0
-
 /**
  * Convienence macro that expands to kernel_sys_log. Intended for use with literals.
  *
  * If the string is not a literal, call kernel_sys_log directly instead.
  */
 #define KERNEL_LOG(msg) kernel_sys_log(msg, sizeof(msg) - 1)
-
 #endif

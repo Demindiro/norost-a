@@ -1,7 +1,8 @@
 #include <stddef.h>
 #include <string.h>
 
-void *memcpy(void *dest, const void *src, size_t n) {
+void *memcpy(void *dest, const void *src, size_t n)
+{
 	char *d = dest;
 	const char *s = src;
 	const char *e = s + n;
@@ -11,7 +12,8 @@ void *memcpy(void *dest, const void *src, size_t n) {
 	return dest;
 }
 
-void *memmove(void *dest, const void *src, size_t n) {
+void *memmove(void *dest, const void *src, size_t n)
+{
 	char *d = dest;
 	const char *s = src;
 	const char *e = s + n;
@@ -31,7 +33,8 @@ void *memmove(void *dest, const void *src, size_t n) {
 	return dest;
 }
 
-void *memset(void *dest, int c, size_t n) {
+void *memset(void *dest, int c, size_t n)
+{
 	char *d = dest;
 	char *e = dest + n;
 	while (d != e) {
@@ -83,11 +86,13 @@ char *strtok(char *str, const char *delim)
 	}
 }
 
-int strcmp(const char *a, const char *b) {
+int strcmp(const char *a, const char *b)
+{
 	return strncmp(a, b, -1);
 }
 
-int strncmp(const char *a, const char *b, size_t n) {
+int strncmp(const char *a, const char *b, size_t n)
+{
 	while (n-- > 0 && *a == *b) {
 		if (*a == 0) {
 			return 0;
@@ -99,11 +104,13 @@ int strncmp(const char *a, const char *b, size_t n) {
 	return ((int)x) - ((int)y);
 }
 
-char *strcpy(char *dest, const char *src) {
+char *strcpy(char *dest, const char *src)
+{
 	return strncpy(dest, src, -1);
 }
 
-char *strncpy(char *dest, const char *src, size_t n) {
+char *strncpy(char *dest, const char *src, size_t n)
+{
 	char *d = dest;
 	while (n-- > 0 && *src != 0) {
 		*d++ = *src++;
@@ -115,7 +122,8 @@ char *strncpy(char *dest, const char *src, size_t n) {
 
 #include <stdio.h>
 
-void __std_test_memmove(void) {
+void __std_test_memmove(void)
+{
 	char buf[64] = { "kitty" };
 
 	puts("Original:");
@@ -134,7 +142,8 @@ void __std_test_memmove(void) {
 	puts(buf);
 }
 
-void __std_test_memcpy(void) {
+void __std_test_memcpy(void)
+{
 	char buf[64] = { "kitty" };
 	char buf2[sizeof(buf)];
 

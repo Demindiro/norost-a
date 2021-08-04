@@ -12,11 +12,11 @@
 // FIXME this is temporary as we currently rely on GCC's stddef, which doesn't have ssize_t
 typedef signed long ssize_t;
 
-static FILE _stdin  = { ._address = 0, ._fd = 0, ._uuid = KERNEL_UUID(0, 0) };
-static FILE _stdout = { ._address = 0, ._fd = 1, ._uuid = KERNEL_UUID(0, 0) };
-static FILE _stderr = { ._address = 0, ._fd = 2, ._uuid = KERNEL_UUID(0, 0) };
+static FILE _stdin = {._address = 0,._fd = 0,._uuid = KERNEL_UUID(0, 0) };
+static FILE _stdout = {._address = 0,._fd = 1,._uuid = KERNEL_UUID(0, 0) };
+static FILE _stderr = {._address = 0,._fd = 2,._uuid = KERNEL_UUID(0, 0) };
 
-FILE *stdin  = &_stdin;
+FILE *stdin = &_stdin;
 FILE *stdout = &_stdout;
 FILE *stderr = &_stderr;
 
@@ -70,11 +70,13 @@ int puts(const char *s)
 	return ret;
 }
 
-int fgetc(FILE * stream) {
+int fgetc(FILE * stream)
+{
 	return ENOSYS;
 }
 
-char *fgets(char *s, int size, FILE * stream) {
+char *fgets(char *s, int size, FILE * stream)
+{
 	if (size == 0) {
 		// Paraphrasing man page: "returns NULL while no characters have been read"
 		return NULL;
@@ -91,24 +93,28 @@ char *fgets(char *s, int size, FILE * stream) {
 	}
 	*ptr = 0;
 	kernel_mem_dealloc(rxe->data.raw, 1);
-	dux_add_free_range(rxe->data.raw, 1); // FIXME do this properly.
+	dux_add_free_range(rxe->data.raw, 1);	// FIXME do this properly.
 	rxe->opcode = 0;
 	return s;
 }
 
-int getc(FILE * stream) {
+int getc(FILE * stream)
+{
 	return ENOSYS;
 }
 
-int getchar(void) {
+int getchar(void)
+{
 	return ENOSYS;
 }
 
-int ungetc(int c, FILE * stream) {
+int ungetc(int c, FILE * stream)
+{
 	return ENOSYS;
 }
 
-size_t fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
+size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
+{
 	struct iovec iov[1] = {
 		{
 		 // Discarding const is fine as writev won't write to this.
@@ -128,7 +134,8 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
 	return ret;
 }
 
-int printf(const char *format, ...) {
+int printf(const char *format, ...)
+{
 	va_list vl;
 	va_start(vl, format);
 	int rc = vfprintf(stdout, format, vl);
@@ -136,7 +143,8 @@ int printf(const char *format, ...) {
 	return rc;
 }
 
-int fprintf(FILE *stream, const char *format, ...) {
+int fprintf(FILE * stream, const char *format, ...)
+{
 	va_list vl;
 	va_start(vl, format);
 	int rc = vfprintf(stream, format, vl);
@@ -144,7 +152,8 @@ int fprintf(FILE *stream, const char *format, ...) {
 	return rc;
 }
 
-int vfprintf(FILE *stream, const char *format, va_list args) {
+int vfprintf(FILE * stream, const char *format, va_list args)
+{
 	char *out = universal_buffer;
 	int total_written = 0;
 
@@ -157,12 +166,17 @@ int vfprintf(FILE *stream, const char *format, va_list args) {
 			if (*c == '%') {
 				// It's an argument
 				struct std_format_type fty;
-				const char *end = __std_determine_format(c, &fty);
+				const char *end =
+				    __std_determine_format(c, &fty);
 				if (end != NULL) {
 					// Make a backup of args in case we need to revert
 					va_list bka;
 					va_copy(bka, args);
-					char *e = __std_format(ptr, universal_buffer_size - (ptr - out), &fty, &args);
+					char *e = __std_format(ptr,
+							       universal_buffer_size
+							       - (ptr - out),
+							       &fty,
+							       &args);
 					if (e != NULL) {
 						ptr = e;
 						c = end;
@@ -218,8 +232,8 @@ int vfprintf(FILE *stream, const char *format, va_list args) {
 
 	// Flush the queue
 	kernel_io_wait(0, 0);
-	kernel_io_wait(0, 0); // FIXME hacky workaround to ensure the receiving task prints the
-	                      // data before we overwrite it again
+	kernel_io_wait(0, 0);	// FIXME hacky workaround to ensure the receiving task prints the
+	// data before we overwrite it again
 
 	// TODO return the correct amount of bytes written
 	return total_written;

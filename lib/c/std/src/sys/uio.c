@@ -18,8 +18,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 	while (1) {
 
 		// Get a request entry
-		struct kernel_ipc_packet *cre =
-		    dux_reserve_transmit_entry();
+		struct kernel_ipc_packet *cre = dux_reserve_transmit_entry();
 		if (cre == NULL) {
 			// If we didn't write any data yet, tell the caller to try again
 			// Otherwise, return the amount of data written
@@ -73,7 +72,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 
 		// Flush the queue
 		kernel_io_wait(0, 0);
-		kernel_io_wait(0, 0); // FIXME
+		kernel_io_wait(0, 0);	// FIXME
 
 		// TODO check if the request was processed successfully
 		/*

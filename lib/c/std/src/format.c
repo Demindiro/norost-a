@@ -7,7 +7,9 @@
  *
  * Returns NULL if the buffer isn't large enough.
  */
-static inline char *format_str(const char *value, char *str, size_t size, size_t max) {
+static inline char *format_str(const char *value, char *str, size_t size,
+			       size_t max)
+{
 	value = value ? value : "(null)";
 
 	while (*value != '\0') {
@@ -29,7 +31,10 @@ static inline char *format_str(const char *value, char *str, size_t size, size_t
  *
  * Returns NULL if the buffer isn't large enough.
  */
-static inline char *format_unsigned_int(uintmax_t value, char *str, size_t size, unsigned char base, unsigned char modifiers) {
+static inline char *format_unsigned_int(uintmax_t value, char *str, size_t size,
+					unsigned char base,
+					unsigned char modifiers)
+{
 	char *end = str + size;
 	if (modifiers & STD_FORMAT_SIGNED) {
 		if (str != end) {
@@ -44,7 +49,6 @@ static inline char *format_unsigned_int(uintmax_t value, char *str, size_t size,
 			return NULL;
 		}
 	}
-
 	// Write out in reverse
 	char *start = str;
 	do {
@@ -72,13 +76,15 @@ static inline char *format_unsigned_int(uintmax_t value, char *str, size_t size,
 	return str;
 }
 
-
 /**
  * Formats the given signed number with the given base and modifiers as a human-readable string.
  *
  * Returns NULL if the buffer isn't large enough.
  */
-static inline char *format_signed_int(intmax_t value, char *str, size_t size, unsigned char base, unsigned char modifiers) {
+static inline char *format_signed_int(intmax_t value, char *str, size_t size,
+				      unsigned char base,
+				      unsigned char modifiers)
+{
 	if (value < 0) {
 		if (size > 0) {
 			*str++ = '-';
@@ -107,9 +113,9 @@ static inline char *format_signed_int(intmax_t value, char *str, size_t size, un
 		}
 	}
 
-	return format_unsigned_int((uintmax_t)value, str, size, base, modifiers);
+	return format_unsigned_int((uintmax_t) value, str, size, base,
+				   modifiers);
 }
-
 
 const char *__std_determine_format(const char *input,
 				   struct std_format_type *type)
@@ -119,7 +125,6 @@ const char *__std_determine_format(const char *input,
 	if (*input++ != '%') {
 		return NULL;
 	}
-
 	// Ensure there will be no unitialized values
 	type->width = 0;
 	type->precision = 0;
@@ -270,7 +275,8 @@ const char *__std_determine_format(const char *input,
 	return input;
 }
 
-char *__std_format(char *out, size_t size, struct std_format_type *type, va_list * args)
+char *__std_format(char *out, size_t size, struct std_format_type *type,
+		   va_list * args)
 {
 	intmax_t sval = 0;
 	uintmax_t val = 0;
@@ -279,19 +285,29 @@ char *__std_format(char *out, size_t size, struct std_format_type *type, va_list
 
 	// Load based on type
 	switch (type->type) {
-	//case STD_FORMAT_TYPE_CHAR:
-	//case STD_FORMAT_TYPE_SHORT:
+		//case STD_FORMAT_TYPE_CHAR:
+		//case STD_FORMAT_TYPE_SHORT:
 	case STD_FORMAT_TYPE_INT:
-		sign ? (sval = va_arg(*args, signed int)) : (val = va_arg(*args, unsigned int));
+		sign ? (sval = va_arg(*args, signed int)) : (val = va_arg(*args, unsigned
+									  int));
 		break;
 	case STD_FORMAT_TYPE_LONG:
-		sign ? (sval = va_arg(*args, signed long)) : (val = va_arg(*args, unsigned long));
+		sign ? (sval = va_arg(*args, signed long)) : (val =
+							      va_arg(*args,
+								     unsigned
+								     long));
 		break;
 	case STD_FORMAT_TYPE_LONG_LONG:
-		sign ? (sval = va_arg(*args, signed long long)) : (val = va_arg(*args, unsigned long long));
+		sign ? (sval = va_arg(*args, signed long long)) : (val =
+								   va_arg(*args,
+									  unsigned
+									  long
+									  long));
 		break;
 	case STD_FORMAT_TYPE_INTMAX_T:
-		sign ? (sval = va_arg(*args, intmax_t)) : (val = va_arg(*args, uintmax_t));
+		sign ? (sval = va_arg(*args, intmax_t)) : (val =
+							   va_arg(*args,
+								  uintmax_t));
 		break;
 	case STD_FORMAT_TYPE_SIZE_T:
 		// There is technically no ssize_t in standard C.
@@ -305,7 +321,7 @@ char *__std_format(char *out, size_t size, struct std_format_type *type, va_list
 		// FIXME void * may be larger than uintmax_t! see https://stackoverflow.com/a/1572189
 		// It may be worth to add a special type that switches between uintmax_t and uintptr_t
 		// depending on largest size.
-		val = (uintmax_t)va_arg(*args, void *);
+		val = (uintmax_t) va_arg(*args, void *);
 		break;
 	case STD_FORMAT_TYPE_NONE:
 	default:
@@ -336,8 +352,9 @@ char *__std_format(char *out, size_t size, struct std_format_type *type, va_list
 		return format_str(va_arg(*args, const char *), out, size, -1);
 	case STD_FORMAT_POINTER:
 		return ((out = format_str("0x", out, size, -1)) != NULL)
-			? format_unsigned_int(val, out, size - 2, 16, type->modifiers)
-			: NULL;
+		    ? format_unsigned_int(val, out, size - 2, 16,
+					  type->modifiers)
+		    : NULL;
 	case STD_FORMAT_COUNT:
 		// TODO set the pointer thingie
 		return out;

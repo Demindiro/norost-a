@@ -1,23 +1,17 @@
 #ifndef __STD_DIRENT_H
 #define __STD_DIRENT_H
 
+#include <dux.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <kernel.h>
 #include <limits.h>
 
-struct __std_dirent_entry {
-	const char *name;
-	size_t name_len;
-};
-
 typedef struct {
 	kernel_uuid_t uuid;
 	pid_t _address;
-	const char *_data;
-	struct __std_dirent_entry *_entries;
+	struct dux_ipc_list _list;
 	size_t _index;
-	size_t _count;
 	int _fd;
 } DIR;
 
@@ -28,22 +22,23 @@ struct dirent {
 
 int alphasort(const struct dirent **lhs, const struct dirent **rhs);
 
-int closedir(DIR *dir);
+int closedir(DIR * dir);
 
-int dirfd(DIR *dir);
+int dirfd(DIR * dir);
 
 DIR *fdopendir(int fd);
 
 DIR *opendir(const char *path);
 
-struct dirent *readdir(DIR *dir);
+struct dirent *readdir(DIR * dir);
 
-void rewinddir(DIR *dir);
+void rewinddir(DIR * dir);
 
-int scandir(const char *, struct dirent **, int (*)(const struct dirent *), int (*)(const struct dirent **, const struct dirent **));
+int scandir(const char *, struct dirent **, int (*)(const struct dirent *),
+	    int (*)(const struct dirent **, const struct dirent **));
 
-void seekdir(DIR *dir, long loc);
+void seekdir(DIR * dir, long loc);
 
-long telldir(DIR *dir);
+long telldir(DIR * dir);
 
 #endif
