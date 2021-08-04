@@ -63,8 +63,8 @@ pub struct Packet {
 	length: usize,
 	address: usize,
 	flags: u16,
-	opcode: Option<NonZeroU8>,
 	id: u8,
+	opcode: Option<NonZeroU8>,
 }
 
 #[derive(Debug)]

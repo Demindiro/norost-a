@@ -145,24 +145,12 @@ fn main() {
 
 	sys_log!("Spawned task with ID {}", id);
 
-	// Dummy write some stuff to the spawned task
-	let (txq, rxq, free_pages, raw) = unsafe {
-		let addr = 0xff00_0000 as *mut kernel::Page;
-		let kernel::Return { status, .. } = kernel::mem_alloc(addr, 2, 0b11);
-		assert_eq!(status, 0);
-		let raw = addr.add(1).cast::<u8>();
-		let addr = addr.cast::<kernel::ipc::Packet>();
-		let kernel::Return { status, .. } = kernel::io_set_queues(addr, 0, addr.add(1), 0, addr.add(2).cast(), 1);
-		assert_eq!(status, 0);
-		unsafe { (&mut *addr, &mut *addr.add(1), &mut *addr.add(2).cast::<kernel::ipc::FreePage>(), raw) }
-	};
+	dux::ipc::add_free_range(
+		unsafe { dux::Page::new_unchecked(0x66_0000 as *mut _) },
+		1,
+	);
 
-	*free_pages = kernel::ipc::FreePage {
-		address: core::ptr::NonNull::new(0x66_0000 as *mut _),
-		count: 1,
-	};
-
-	/// Create pseudo list.
+	// Create pseudo list.
 	let mut list_builder = dux::ipc::list::Builder::new(3, 50).unwrap();
 	list_builder.add(kernel::ipc::UUID::from(0), b"foohoo").unwrap();
 	list_builder.add(kernel::ipc::UUID::from(0), b"barhar").unwrap();
@@ -173,25 +161,34 @@ fn main() {
 		sys_log!("{}: {:?}", i, e);
 	}
 
+	// Allocate a single page for transmitting data.
+	let raw = dux::mem::reserve_range(None, 1).unwrap().as_ptr().cast::<u8>();
+	let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
+	assert_eq!(ret.status, 0);
+
 	loop {
 		// Read received data & write it to UART
-		if let Some(op) = rxq.opcode {
+		let _ = dux::ipc::try_receive(|rxq| {
+			let op = rxq.opcode.unwrap();
 			match kernel::ipc::Op::try_from(op) {
 				Ok(kernel::ipc::Op::Write) => {
 					let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
 					console.write(data);
-					rxq.opcode = None;
 					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
-					free_pages.address = core::ptr::NonNull::new(data.as_ptr() as *mut _);
-					free_pages.count += 1;
+					dux::ipc::add_free_range(
+						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
+						1,
+					);
 				}
 				Ok(kernel::ipc::Op::List) => {
 					let raw = list_builder.data() as *const _ as *mut _;
 					let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
 					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
-					free_pages.address = core::ptr::NonNull::new(data.as_ptr() as *mut _);
-					free_pages.count += 1;
-					*txq = kernel::ipc::Packet {
+					dux::ipc::add_free_range(
+						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
+						1,
+					);
+					dux::ipc::transmit(|pkt| *pkt = kernel::ipc::Packet {
 						uuid: kernel::ipc::UUID::from(0),
 						opcode: Some(kernel::ipc::Op::List.into()),
 						flags: 0,
@@ -200,14 +197,12 @@ fn main() {
 						data: unsafe { kernel::ipc::Data { raw } },
 						length: buf.len(),
 						offset: 0,
-					};
-					rxq.opcode = None;
-					continue;
+					});
 				}
 				Ok(op) => sys_log!("TODO {:?}", op),
 				Err(kernel::ipc::UnknownOp) => sys_log!("Unknown op {}", op),
 			}
-		}
+		});
 
 		// Read data from UART & send it to child process
 		let mut buf = [0; 256];
@@ -220,7 +215,7 @@ fn main() {
 		}
 
 		if buf.len() > 0 {
-			*txq = kernel::ipc::Packet {
+			dux::ipc::transmit(|pkt| *pkt = kernel::ipc::Packet {
 				uuid: kernel::ipc::UUID::from(0),
 				opcode: Some(kernel::ipc::Op::Write.into()),
 				flags: 0,
@@ -229,9 +224,10 @@ fn main() {
 				data: unsafe { kernel::ipc::Data { raw } },
 				length: buf.len(),
 				offset: 0,
-			};
+			});
 		}
 
+		// Wait for more data & make sure our packet is sent.
 		unsafe { kernel::io_wait(0, 0) };
 	}
 }

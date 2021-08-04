@@ -49,8 +49,8 @@ struct kernel_ipc_packet {
 	size_t length;
 	pid_t address;
 	uint16_t flags;
-	uint8_t opcode;
 	uint8_t id;
+	uint8_t opcode;
 };
 
 /**

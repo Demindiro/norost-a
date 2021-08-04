@@ -1,6 +1,10 @@
 use core::fmt;
 use core::ptr::NonNull;
 
+/// Error returned if an address isn't properly aligned.
+#[derive(Debug)]
+pub struct Unaligned;
+
 /// A pointer to a page.
 ///
 /// The internal pointer is always properly aligned.
@@ -11,6 +15,22 @@ pub struct Page(NonNull<kernel::Page>);
 impl Page {
 	/// The size of a single page.
 	pub const SIZE: usize = kernel::Page::SIZE;
+
+	/// The address of the NULL page, which is not a valid, accessible page.
+	pub const NULL_PAGE: *mut kernel::Page = core::ptr::null_mut();
+
+	/// The end address of the NULL page. This address is inclusive.
+	pub const NULL_PAGE_END: *mut kernel::Page = (Self::SIZE - 1) as *mut _;
+
+	/// Try to create new `Page`.
+	pub const fn new(ptr: NonNull<kernel::Page>) -> Result<Self, Unaligned> {
+		// Fuck you rustc
+		if unsafe { core::mem::transmute::<_, usize>(ptr) } & (Self::SIZE - 1) == 0 {
+			Ok(Self(ptr))
+		} else {
+			Err(Unaligned)
+		}
+	}
 
 	/// Create a new `Page` without runtime checks.
 	///
@@ -33,6 +53,11 @@ impl Page {
 	/// Get the underlying pointer.
 	pub const fn as_non_null_ptr(&self) -> NonNull<kernel::Page> {
 		self.0
+	}
+
+	/// Returns the end address of this page.
+	pub const fn end(&self) -> NonNull<kernel::Page> {
+		unsafe { NonNull::new_unchecked(self.0.as_ptr().cast::<u8>().add(Self::SIZE - 1).cast()) }
 	}
 
 	/// Determine the minimum amount of pages needed to store the given amount of bytes.

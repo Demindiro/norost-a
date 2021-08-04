@@ -68,11 +68,11 @@ static void list() {
 	closedir(dir);
 }
 
-static void _read() {
+static void read() {
 	puts("TODO");
 }
 
-static void _write() {
+static void write() {
 	puts("TODO");
 }
 
@@ -129,8 +129,7 @@ int main() {
 		// Clear the input & write out
 		printf("\r\33[2K>> %s\n", in);
 
-#define CMD2(name, fn) else if (strcmp(cmd, #name) == 0) { fn(); }
-#define CMD(fn) CMD2(fn, fn)
+#define CMD(fn) else if (strcmp(cmd, #fn) == 0) { fn(); }
 		const char *cmd = next_cmd(in);
 		if (cmd == NULL) {
 			// Don't do anything
@@ -138,12 +137,11 @@ int main() {
 		CMD(echo)
 		CMD(help)
 		CMD(list)
-		CMD2(read, _read)
-		CMD2(write, _write)
+		CMD(read)
+		CMD(write)
 		else {
 			printf("Unrecognized command '%s'\n", cmd);
 		}
 #undef CMD
-#undef CMD2
 	}
 }

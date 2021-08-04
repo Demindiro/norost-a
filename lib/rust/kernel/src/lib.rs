@@ -36,14 +36,22 @@ pub mod ipc {
 	/// Union of all possible data types that can be pointed to in a packet's `data` field.
 	///
 	/// All members are pointers.
+	#[derive(Clone, Copy)]
 	pub union Data {
 		/// An address range with raw data to be read or to which data should be written.
 		pub raw: *mut u8,
 	}
 
+	impl Default for Data {
+		fn default() -> Self {
+			let raw = core::ptr::null_mut();
+			unsafe { Self { raw } }
+		}
+	}
+
 	/// An UUID used to uniquely identify objects.
 	#[repr(C)]
-	#[derive(Clone, Copy)]
+	#[derive(Clone, Copy, Default)]
 	pub struct UUID {
 		x: u64,
 		y: u64,
@@ -83,6 +91,7 @@ pub mod ipc {
 	}
 
 	/// Structure used to communicate with other tasks.
+	#[derive(Default)]
 	#[repr(C)]
 	pub struct Packet {
 		pub uuid: UUID,
@@ -91,8 +100,8 @@ pub mod ipc {
 		pub length: usize,
 		pub address: usize,
 		pub flags: u16,
-		pub opcode: Option<NonZeroU8>,
 		pub id: u8,
+		pub opcode: Option<NonZeroU8>,
 	}
 
 	#[derive(Debug)]
