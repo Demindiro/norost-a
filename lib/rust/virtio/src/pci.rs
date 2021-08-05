@@ -396,40 +396,54 @@ where
 	handlers.handle(key, common_config, device_config, notify_config, allocator).map_err(SetupError::Handler)
 }
 
-pub trait Device<A>
+/// # Safety
+///
+/// Because `TypeId` cannot be used on non-`'static` items, the `DeviceType` is used instead.
+///
+/// To ensure it is safe, there may be only exactly one device struct per `DeviceType`.
+pub unsafe trait Device<A>
 where
 	A: Allocator,
 {
-    fn type_id(&self) -> core::any::TypeId;
+    fn device_type(&self) -> DeviceType;
 }
 
-/*
-impl dyn Device
+/// # Safety
+///
+/// Because `TypeId` cannot be used on non-`'static` items, the `DeviceType` is used instead.
+///
+/// To ensure it is safe, there may be only exactly one device struct per `DeviceType`.
+pub unsafe trait StaticDeviceType<A>
 where
-	Self: 'static,
+	A: Allocator,
 {
-	fn is<T: 'static>(&self) -> bool {
-		use core::any::*;
-        TypeId::of::<T>() == self.type_id()
+	fn device_type_of() -> DeviceType;
+}
+
+impl<'a, A> dyn Device<A> + 'a
+where
+	A: Allocator + 'a
+{
+	pub fn is<D: StaticDeviceType<A> + Device<A>>(&self) -> bool {
+		self.device_type() == D::device_type_of()
 	}
 
-	fn downcast_ref<T: 'static>(&self) -> Option<&T> {
-		if self.is::<T>() {
-			unsafe { Some(&*(self as *const _ as *const T)) }
+	pub fn downcast_ref<'s, D: StaticDeviceType<A> + Device<A>>(&'s self) -> Option<&'s D> {
+		if self.is::<D>() {
+			unsafe { Some(&*(self as *const _ as *const D)) }
 		} else {
 			None
 		}
 	}
 
-	fn downcast_mut<T: 'static>(&mut self) -> Option<&mut T> {
-		if self.is::<T>() {
-			unsafe { Some(&mut *(self as *mut _ as *mut T)) }
+	pub fn downcast_mut<'s, D: StaticDeviceType<A> + Device<A>>(&'s mut self) -> Option<&mut D> {
+		if self.is::<D>() {
+			unsafe { Some(&mut *(self as *mut _ as *mut D)) }
 		} else {
 			None
 		}
 	}
 }
-*/
 
 pub enum SetupError<'a, A>
 where

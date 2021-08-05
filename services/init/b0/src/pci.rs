@@ -50,7 +50,7 @@ pub fn init_blk_device() {
 		A: core::alloc::Allocator + 'a,
 	{
 		fn can_handle(&self, ty: DeviceType) -> bool {
-			ty.vendor() == 0x1af4 && ty.device() == 0x1001
+			virtio_block::BlockDevice::<A>::device_type_of() == ty
 		}
 
 		fn handle(&self, ty: DeviceType,
@@ -59,7 +59,7 @@ pub fn init_blk_device() {
 			notify: &'a Notify,
 			allocator: A,
 	   ) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>> {
-			assert!(ty.vendor() == 0x1af4 && ty.device() == 0x1001);
+			assert_eq!(virtio_block::BlockDevice::<A>::device_type_of(), ty);
 			virtio_block::BlockDevice::new(common, device, notify, allocator)
 		}
 	}
@@ -73,8 +73,16 @@ pub fn init_blk_device() {
 	let pci = unsafe { pci::PCI::new(super::device_tree::PCI_ADDRESS.cast(), size, &[mmio]) };
 	for bus in pci.iter() {
 		for dev in bus.iter() {
-			if let Ok(dev) = virtio::pci::new_device(dev, &Handler, FuckingRust) {
-				//dev.address
+			if let Ok(mut dev) = virtio::pci::new_device(dev, &Handler, FuckingRust) {
+				let dev = dev.downcast_mut::<virtio_block::BlockDevice<FuckingRust>>().unwrap();
+				#[repr(align(4096))]
+				struct Aligned([u8; 512]);
+				let mut data = Aligned([0; 512]);
+				for (i, c) in b"This fucking works okay?".iter().copied().enumerate() {
+					data.0[i] = c;
+				}
+				assert_eq!(data.0.as_ptr() as usize & 0xfff, 0);
+				dev.write(&data.0, 0).unwrap();
 			}
 		}
 	}

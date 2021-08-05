@@ -208,15 +208,24 @@ where
 	}
 }
 
-impl<'a, A> Device<A> for BlockDevice<'a, A>
+unsafe impl<'a, A> Device<A> for BlockDevice<'a, A>
 where
-	A: Allocator,// + 'static,
+	A: Allocator,
 {
-	fn type_id(&self) -> core::any::TypeId {
-		todo!()
-		//core::any::TypeId::of::<BlockDevice<'static, A>>()
+	fn device_type(&self) -> DeviceType {
+		Self::device_type_of()
 	}
 }
+
+unsafe impl<'a, A> StaticDeviceType<A> for BlockDevice<'a, A>
+where
+	A: Allocator,
+{
+	fn device_type_of() -> DeviceType {
+		DeviceType::new(0x1af4, 0x1001)
+	}
+}
+
 
 pub enum SetupError {}
 
