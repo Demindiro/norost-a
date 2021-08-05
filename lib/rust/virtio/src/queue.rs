@@ -142,13 +142,6 @@ impl<'a> Queue<'a> {
 
 		let align = |s| (s + 0xfff) & !0xfff;
 
-		// TODO syscall to get virtual -> physical address map
-		// How it will work: Pass in a virtual address, page count and buffer
-		// The kernel will then write the corresponding PPNs to the buffer.
-		// (Note that PPN != address! You need to shift it to the left for the actual address).
-		// (Also note that the physical address may be larger than (1 << XLEN)).
-		// TODO syscall should have an option to allocate a contiguous range of memory and an
-		// option to allocate below 4G. Or maybe as a separate syscall.
 		let ret = unsafe {
 			kernel::dev_dma_alloc(
 				DMA_ADDR as *mut kernel::Page,

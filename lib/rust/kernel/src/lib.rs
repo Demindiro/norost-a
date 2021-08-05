@@ -4,6 +4,7 @@
 #![feature(asm)]
 #![feature(variant_count)]
 
+use core::convert::TryFrom;
 use core::ffi;
 use core::fmt;
 
@@ -236,3 +237,75 @@ macro_rules! sys_log {
 		let _ = writeln!($crate::SysLog, $($arg)*);
 	}};
 }
+
+/// Representation of a Physical Page Number.
+///
+/// A Physical Page Number is a physical pointer to a page without the offset bits. e.g.
+/// the physical address `0x123000` on RISC-V would translate to a PPN of `0x123`
+#[repr(transparent)]
+pub struct PPN(usize);
+
+impl From<usize> for PPN {
+	fn from(ppn: usize) -> Self {
+		Self(ppn)
+	}
+}
+
+impl From<PPN> for usize {
+	fn from(ppn: PPN) -> Self {
+		ppn.0
+	}
+}
+
+#[derive(Debug)]
+pub struct OutOfRange;
+
+impl fmt::Display for OutOfRange {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		"out of range".fmt(f)
+	}
+}
+
+#[derive(Debug)]
+pub struct BadAlignment;
+
+impl fmt::Display for BadAlignment {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		"bad alignment".fmt(f)
+	}
+}
+
+/// Representation of a physical address.
+///
+/// A physical address may not be able to fit a PPN.
+#[repr(transparent)]
+pub struct PhysicalAddress(usize);
+
+impl TryFrom<PPN> for PhysicalAddress {
+	type Error = OutOfRange;
+
+	fn try_from(ppn: PPN) -> Result<Self, Self::Error> {
+		ppn.0.checked_shl(Page::OFFSET_BITS.into()).map(Self).ok_or(OutOfRange)
+	}
+}
+
+impl TryFrom<PhysicalAddress> for PPN {
+	type Error = BadAlignment;
+
+	fn try_from(pa: PhysicalAddress) -> Result<Self, Self::Error> {
+		(pa.0 & Page::MASK == 0).then(|| Self(pa.0 >> Page::OFFSET_BITS)).ok_or(BadAlignment)
+	}
+}
+
+impl From<usize> for PhysicalAddress {
+	fn from(pa: usize) -> Self {
+		Self(pa)
+	}
+}
+
+impl From<PhysicalAddress> for usize {
+	fn from(pa: PhysicalAddress) -> Self {
+		pa.0
+	}
+}
+

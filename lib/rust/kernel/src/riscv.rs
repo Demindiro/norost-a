@@ -64,12 +64,14 @@ macro_rules! syscall {
 	};
 }
 
+/// Representation of a single memory page.
 #[repr(align(4096))]
-pub struct Page {
-	_data: [u8; Self::SIZE],
-}
+#[repr(C)]
+pub struct Page([u8; Self::SIZE]);
 
 impl Page {
-	pub const SIZE: usize = 4096;
+	pub const OFFSET_BITS: u8 = 12;
+	pub const SIZE: usize = 1 << Self::OFFSET_BITS;
+	pub const ALIGN: usize = Self::SIZE;
 	pub const MASK: usize = Self::SIZE - 1;
 }
