@@ -81,6 +81,7 @@ struct RequestHeader {
 }
 
 impl RequestHeader {
+	const READ: u32 = 0;
 	const WRITE: u32 = 1;
 }
 
@@ -184,6 +185,55 @@ where
 			.expect("Failed to send data");
 
 		self.flush();
+
+		self.queue.wait_for_used(None);
+
+		Ok(())
+	}
+
+	/// Read in sectors
+	pub fn read<'s>(&'s mut self, mut data: impl AsMut<[u8]> + 's, sector_start: u64) -> Result<(), WriteError> {
+		let sector_count = data.as_mut().len() / 512;
+		if sector_count * 512 != data.as_mut().len() {
+			return Err(WriteError::NotSectorSized);
+		}
+
+		let header = RequestHeader {
+			typ: RequestHeader::READ.into(),
+			reserved: 0.into(),
+			sector: sector_start.into(),
+		};
+		let status = RequestStatus { status: 111 };
+		let (mut phys_header, mut phys_data, mut phys_status) = (0, 0, 0);
+		let h = &header as *const _ as usize;
+		let d = data.as_mut() as *mut _ as *mut u8 as usize;
+		let s = &status as *const _ as usize;
+		let (hp, ho) = (h & !0xfff, h & 0xfff);
+		let (dp, d_) = (d & !0xfff, d & 0xfff);
+		let (sp, so) = (s & !0xfff, s & 0xfff);
+		let ret =
+			unsafe { kernel::mem_physical_address(hp as *const _, &mut phys_header as *mut _, 1) };
+		assert_eq!(ret.status, 0, "Failed DMA get phys address");
+		let ret =
+			unsafe { kernel::mem_physical_address(dp as *const _, &mut phys_data as *mut _, 1) };
+		assert_eq!(ret.status, 0, "Failed DMA get phys address");
+		let ret =
+			unsafe { kernel::mem_physical_address(sp as *const _, &mut phys_status as *mut _, 1) };
+		assert_eq!(ret.status, 0, "Failed DMA get phys address");
+
+		let data = [
+			(phys_header + ho, mem::size_of::<RequestHeader>(), false),
+			(phys_data + d_, data.as_mut().len(), true),
+			(phys_status + so, mem::size_of::<RequestStatus>(), true),
+		];
+
+		self.queue
+			.send(data.iter().copied())
+			.expect("Failed to send data");
+
+		self.flush();
+
+		self.queue.wait_for_used(None);
 
 		Ok(())
 	}

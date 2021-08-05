@@ -74,6 +74,51 @@ pub struct Queue<'a> {
 	used: NonNull<Used>,
 }
 
+/// Returns the available head & ring.
+///
+/// This is implemented as a macro because Rust isn't quite advanced enough yet.
+macro_rules! available_ring {
+	($self:ident) => {
+		unsafe { return_ring::<Avail, AvailHead>(&mut $self.available, $self.mask) }
+	};
+}
+
+/// Returns the used head & ring.
+///
+/// This is implemented as a macro because Rust isn't quite advanced enough yet.
+macro_rules! used_ring {
+	($self:ident) => {
+		unsafe { return_ring::<Used, UsedHead>(&mut $self.used, $self.mask) }
+	};
+}
+
+/// Returns the descriptors table.
+///
+/// This is implemented as a macro because Rust isn't quite advanced enough yet.
+macro_rules! descriptors_table {
+	($self:ident) => {
+		unsafe { return_table::<Descriptor>(&mut $self.descriptors, $self.mask) }
+	};
+}
+
+/// Returns the head & ring.
+unsafe fn return_ring<'s, R, H>(ptr: &'s mut NonNull<R>, mask: u16) -> (&'s mut H, &'s mut [u16]) {
+	let size = usize::from(mask) + 1;
+	let head = &mut *ptr.as_ptr().cast::<H>();
+	let ring = ptr
+		.as_ptr()
+		.cast::<u8>()
+		.add(mem::size_of::<H>());
+	let ring = slice::from_raw_parts_mut(ring.cast(), size);
+	(head, ring)
+}
+
+/// Returns the table
+unsafe fn return_table<'s, T>(ptr: &'s mut NonNull<T>, mask: u16) -> &'s mut [T] {
+	let size = usize::from(mask) + 1;
+	slice::from_raw_parts_mut(ptr.as_ptr(), size)
+}
+
 impl<'a> Queue<'a> {
 	/// Create a new split virtqueue and attach it to the device.
 	///
@@ -168,29 +213,16 @@ impl<'a> Queue<'a> {
 			// TODO is this really the right thing to do?
 			return Ok(());
 		}
-		use core::fmt::Write;
-		unsafe {
-			let size = usize::from(self.mask) + 1;
-			let desc: &mut [Descriptor] =
-				slice::from_raw_parts_mut(self.descriptors.as_ptr(), size);
-			let avail_head = &mut *self.available.as_ptr().cast::<AvailHead>();
-			let avail_ring = self
-				.available
-				.as_ptr()
-				.cast::<u8>()
-				.add(mem::size_of::<AvailHead>());
-			let avail_ring: &mut [u16] = slice::from_raw_parts_mut(avail_ring.cast(), size);
-			let used_head = &mut *self.used.as_ptr().cast::<UsedHead>();
-			let used_ring = self
-				.used
-				.as_ptr()
-				.cast::<u8>()
-				.add(mem::size_of::<UsedHead>());
-			let used_ring: &mut [UsedElement] = slice::from_raw_parts_mut(used_ring.cast(), size);
 
-			if self.free_count < count {
-				return Err(NoBuffers);
-			}
+		if self.free_count < count {
+			self.collect_used();
+			(self.free_count < count).then(|| ()).ok_or(NoBuffers)?;
+		}
+
+		unsafe {
+			let desc = descriptors_table!(self);
+			let (avail_head, avail_ring) = available_ring!(self);
+			let (used_head, used_ring) = used_ring!(self);
 
 			let mut id = self.last_used;
 			let mut head = u16le::from(0);
@@ -213,7 +245,61 @@ impl<'a> Queue<'a> {
 			atomic::fence(Ordering::Release);
 			avail_head.index = u16::from(avail_head.index).wrapping_add(1).into();
 		}
+
 		Ok(())
+	}
+
+	/// Collect used buffers from the device and add them to the free_descriptors list.
+	///
+	/// Returns the amount of buffers collected.
+	pub fn collect_used(&mut self) -> usize {
+		atomic::fence(Ordering::AcqRel);
+
+		let (head, ring) = used_ring!(self);
+		let table = descriptors_table!(self);
+
+		let mut index @ last = self.last_used;
+		let head_index = u16::from(head.index);
+		while index != head_index {
+			let mut descr = ring[usize::from(index)];
+			loop {
+				self.free_descriptors[usize::from(self.free_count)] = descr;
+				self.free_count += 1;
+				let d = &table[usize::from(descr)];
+				if u16::from(d.flags) & Descriptor::NEXT > 0 {
+					descr = d.next.into();
+				} else {
+					break;
+				}
+			}
+			index = index.wrapping_add(1);
+		}
+		self.last_used = index;
+		usize::from(head_index.wrapping_sub(last))
+	}
+
+	/// Wait for any used buffers to appear in the queue, which is useful for polling
+	/// a device for readiness.
+	///
+	/// An optional wait function can be specified to do other work instead of idly
+	/// wasting cycles.
+	pub fn wait_for_used(&mut self, mut wait_fn: Option<&mut dyn FnMut()>) {
+		while self.collect_used() == 0 {
+			wait_fn.as_mut().map(|f| f());
+		}
+	}
+
+	pub fn test(&mut self) {
+		let mut prev_val = None;
+		loop {
+			let (used_head, _) = used_ring!(self);
+			let val = used_head.index;
+			if Some(val) != prev_val {
+				kernel::sys_log!("used_head.index = {}", val);
+				prev_val = Some(val)
+			}
+			atomic::fence(Ordering::Release);
+		}
 	}
 }
 

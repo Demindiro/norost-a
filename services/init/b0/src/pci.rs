@@ -90,7 +90,14 @@ pub fn init_blk_device() {
 				#[repr(align(4096))]
 				struct Aligned([u8; 512]);
 				let mut data = Aligned([0; 512]);
-				for (i, c) in b"This fucking works okay? ok ok oko koko ko kokook".iter().copied().enumerate() {
+
+				// Read
+				dev.read(&mut data.0, 0);
+				let num = u32::from_be_bytes([data.0[0], data.0[1], data.0[2], data.0[3]]);
+				kernel::sys_log!("Read the number {}", num);
+
+				// Write
+				for (i, c) in (num + 1).to_be_bytes().iter().copied().enumerate() {
 					data.0[i] = c;
 				}
 				assert_eq!(data.0.as_ptr() as usize & 0xfff, 0);
@@ -98,6 +105,7 @@ pub fn init_blk_device() {
 				unsafe {
 					BLK = Some(vdev);
 				}
+
 				//core::mem::forget(vdev); // FIXME I suspect this is unsound. Investigate.
 				return;
 			}
