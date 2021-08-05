@@ -149,14 +149,6 @@ where
 			return Err(WriteError::NotSectorSized);
 		}
 
-		writeln!(kernel::SysLog, "{:?}", data as *const _);
-		writeln!(kernel::SysLog, "\"\"\"");
-		for d in data {
-			write!(kernel::SysLog, "{}", *d as char);
-		}
-		writeln!(kernel::SysLog, "\n");
-		writeln!(kernel::SysLog, "\"\"\"");
-
 		let header = RequestHeader {
 			typ: RequestHeader::WRITE.into(),
 			reserved: 0.into(),
@@ -167,13 +159,9 @@ where
 		let h = &header as *const _ as usize;
 		let d = data as *const _ as *const u8 as usize;
 		let s = &status as *const _ as usize;
-		writeln!(kernel::SysLog, "WHAT {:x}", d);
 		let (hp, ho) = (h & !0xfff, h & 0xfff);
 		let (dp, d_) = (d & !0xfff, d & 0xfff);
 		let (sp, so) = (s & !0xfff, s & 0xfff);
-		writeln!(kernel::SysLog, "{:?}", (hp, ho));
-		writeln!(kernel::SysLog, "{:?}", (dp, d_));
-		writeln!(kernel::SysLog, "{:?}", (sp, so));
 		let ret =
 			unsafe { kernel::mem_physical_address(hp as *const _, &mut phys_header as *mut _, 1) };
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
@@ -190,15 +178,12 @@ where
 			(phys_status + so, mem::size_of::<RequestStatus>(), true),
 		];
 		use core::fmt::Write;
-		writeln!(kernel::SysLog, "{:#?}", &data);
 
 		self.queue
 			.send(data.iter().copied())
 			.expect("Failed to send data");
-		writeln!(kernel::SysLog, "HONK");
 
 		self.flush();
-		loop {}
 
 		Ok(())
 	}

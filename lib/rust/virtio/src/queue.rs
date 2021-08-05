@@ -143,8 +143,6 @@ impl<'a> Queue<'a> {
 		config.queue_enable.set(1.into());
 
 		use core::fmt::Write;
-		writeln!(kernel::SysLog, "ger {:x} {:x} {:x}", d_phys, a_phys, u_phys);
-		writeln!(kernel::SysLog, "aaaaaaa {:p}", used);
 
 		Ok(Queue {
 			config,
@@ -171,7 +169,6 @@ impl<'a> Queue<'a> {
 			return Ok(());
 		}
 		use core::fmt::Write;
-		writeln!(kernel::SysLog, "aaaaaaa");
 		unsafe {
 			let size = usize::from(self.mask) + 1;
 			let desc: &mut [Descriptor] =
@@ -192,11 +189,9 @@ impl<'a> Queue<'a> {
 			let used_ring: &mut [UsedElement] = slice::from_raw_parts_mut(used_ring.cast(), size);
 
 			if self.free_count < count {
-				writeln!(kernel::SysLog, "ERR {} < {}", self.free_count, count);
 				return Err(NoBuffers);
 			}
 
-			writeln!(kernel::SysLog, "====");
 			let mut id = self.last_used;
 			let mut head = u16le::from(0);
 			let mut prev_next = &mut head;
@@ -211,22 +206,12 @@ impl<'a> Queue<'a> {
 				desc[i].flags |=
 					u16le::from(u16::from(iterator.peek().is_some()) * Descriptor::NEXT);
 				*prev_next = u16le::from(i as u16);
-				writeln!(
-					kernel::SysLog,
-					"length {} | flags 0b{:b} | next {}",
-					desc[i].length,
-					desc[i].flags,
-					*prev_next
-				);
 				prev_next = &mut desc[i].next;
 			}
-			writeln!(kernel::SysLog, "FUUUUUUUUUUUU {}", head);
 
 			avail_ring[usize::from(u16::from(avail_head.index) & self.mask)] = head.into();
 			atomic::fence(Ordering::Release);
-			writeln!(kernel::SysLog, "UUUU {}", avail_head.index);
 			avail_head.index = u16::from(avail_head.index).wrapping_add(1).into();
-			writeln!(kernel::SysLog, "____ {}", avail_head.index);
 		}
 		Ok(())
 	}

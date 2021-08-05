@@ -340,7 +340,6 @@ where
 
 	let mut setup_mmio = |bar: u8, offset: u32| -> NonNull<u8> {
 		let bar_id = bar.into();
-		writeln!(kernel::SysLog, "OFFT {:x}", offset);
 		if let Option::<pci::MMIO>::Some(mmio) = &mut mmio[bar_id] {
 			unsafe { NonNull::new_unchecked(mmio.virt.as_ptr().add(offset as usize)) }
 		} else {
@@ -350,8 +349,6 @@ where
 					.pci
 					.allocate_mmio((bar & !BAR_64_FLAG).into(), u8::from(bar & BAR_64_FLAG > 0))
 					.expect("Failed to allocate MMIO space");
-				writeln!(kernel::SysLog, "{:?}", m.virt);
-				writeln!(kernel::SysLog, "{:x}", m.physical);
 				if bar & BAR_64_FLAG > 0 {
 					let mmio_phys = (m.physical as u32, (m.physical >> 32) as u32);
 					header.set_base_address(bar_id, mmio_phys.0);
