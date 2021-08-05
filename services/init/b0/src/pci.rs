@@ -23,7 +23,7 @@ static HEAP: StackAlloc = unsafe { StackAlloc(core::cell::UnsafeCell::new([0; 40
 
 // https://github.com/rust-lang/rust/issues/81270
 #[derive(Clone, Copy)]
-struct FuckingRust;
+pub struct FuckingRust;
 
 unsafe impl core::alloc::Allocator for FuckingRust {
 	fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
@@ -35,8 +35,17 @@ unsafe impl core::alloc::Allocator for FuckingRust {
 	}
 }
 
+pub static mut PCI: Option<pci::PCI> = None;
+
+use alloc::prelude::v1::*;
+
+pub static mut BLK: Option<Box<dyn virtio::pci::Device<FuckingRust>, FuckingRust>> = None;
+
 // TODO move this to a dedicated process.
 pub fn init_blk_device() {
+	// We do a little trickery around the kernel ELF loader being shit (FIXME)
+	HEAP.1.set(0);
+
 	struct Handler;
 
 	use alloc::prelude::v1::*;
@@ -68,7 +77,13 @@ pub fn init_blk_device() {
 	};
 	let size = unsafe { super::device_tree::PCI_SIZE };
 	let pci = unsafe { pci::PCI::new(super::device_tree::PCI_ADDRESS.cast(), size, &[mmio]) };
-	for bus in pci.iter() {
+	unsafe {
+		// A little more trickery
+		core::ptr::write_volatile(&mut PCI as *mut _, None);
+		core::ptr::write_volatile(&mut BLK as *mut _, None);
+		PCI = Some(pci);
+	}
+	for bus in unsafe { PCI.as_mut().unwrap() }.iter() {
 		for dev in bus.iter() {
 			if let Ok(mut vdev) = virtio::pci::new_device(dev, &Handler, FuckingRust) {
 				let dev = vdev.downcast_mut::<virtio_block::BlockDevice<FuckingRust>>().unwrap();
@@ -80,7 +95,11 @@ pub fn init_blk_device() {
 				}
 				assert_eq!(data.0.as_ptr() as usize & 0xfff, 0);
 				dev.write(&data.0, 0).unwrap();
-				core::mem::forget(vdev); // FIXME I suspect this is unsound. Investigate.
+				unsafe {
+					BLK = Some(vdev);
+				}
+				//core::mem::forget(vdev); // FIXME I suspect this is unsound. Investigate.
+				return;
 			}
 		}
 	}
