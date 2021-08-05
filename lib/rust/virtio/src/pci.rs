@@ -1,10 +1,120 @@
-use crate::block;
+use alloc::prelude::v1::*;
 use core::alloc::Allocator;
+use core::any::Any;
 use core::fmt;
 use core::num::NonZeroU8;
 use core::ptr::NonNull;
 use simple_endian::{u16le, u32le, u64le};
 use vcell::VolatileCell;
+
+/// The type of a device handler
+/*
+pub type DeviceHandler<A> =
+	for<'a> fn(
+		&'a CommonConfig,
+		&'a DeviceConfig,
+		&'a Notify,
+		A,
+	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>>;
+	*/
+
+// Using a newtype because https://github.com/rust-lang/rust/issues/64552
+pub struct DeviceHandler<A: Allocator>
+(
+	pub for<'a> fn(
+		&'a CommonConfig,
+		&'a DeviceConfig,
+		&'a Notify,
+		A,
+	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>>);
+
+/*
+// TODO move this to a separate "sync" crate.
+struct Mutex<T> {
+lock: core::sync::atomic::AtomicU8,
+value: UnsafeCell<T>,
+}
+
+impl<T> Mutex<T> {
+const fn new(value: T) -> Self {
+Self {
+lock: core::sync::atomic::AtomicU8::new(0),
+value: UnsafeCell::new(value),
+}
+}
+
+fn lock(&self) -> Guard<T> {
+use core::sync::atomic::*;
+while self.lock.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed).is_err() {
+}
+Guard { lock: self }
+}
+}
+
+unsafe impl<T> Sync for Mutex<T> {}
+
+struct Guard<'a, T> {
+lock: &'a Mutex<T>
+}
+
+impl<T> core::ops::Deref for Guard<'_, T> {
+type Target = T;
+
+fn deref(&self) -> &Self::Target {
+unsafe { &*self.lock.value.get() }
+}
+}
+
+impl<T> core::ops::DerefMut for Guard<'_, T> {
+fn deref_mut(&mut self) -> &mut Self::Target {
+unsafe { &mut *self.lock.value.get() }
+}
+}
+
+impl<T> Drop for Guard<'_, T> {
+fn drop(&mut self) {
+use core::sync::atomic::*;
+let _ret = self.lock.lock.compare_exchange(1, 0, Ordering::Release, Ordering::Relaxed);
+debug_assert!(_ret.is_ok(), "failed to release lock");
+}
+}
+
+/// All registered device handlers.
+static DEVICE_HANDLERS: Mutex<BTreeMap<DeviceType, DeviceHandler>> = Mutex::new(BTreeMap::new());
+*/
+
+/// An identifier for a device type
+#[derive(Clone, Copy, Hash, PartialOrd, Ord, Eq, PartialEq)]
+pub struct DeviceType(u32);
+
+impl DeviceType {
+	/// Create a new device type identifier.
+	#[inline(always)]
+	pub fn new(vendor: u16, device: u16) -> Self {
+		Self((u32::from(vendor) << 16) | u32::from(device))
+	}
+
+	/// Get the vendor of this device.
+	#[inline(always)]
+	pub fn vendor(&self) -> u16 {
+		(self.0 >> 16) as u16
+	}
+
+	/// Get the type of device.
+	#[inline(always)]
+	pub fn device(&self) -> u16 {
+		(self.0 & 0xffff) as u16
+	}
+}
+
+impl fmt::Debug for DeviceType {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(DeviceType))
+			.field("vendor", &self.vendor())
+			.field("device", &self.device())
+			.finish()
+	}
+}
 
 #[repr(C)]
 #[repr(packed)]
@@ -102,18 +212,39 @@ impl Log2 for u32 {
 	}
 }
 
-/// Setup a virtio device on a PCI bus.
-pub fn new_device<'a, A>(device: pci::Device<'a>) -> Result<Device<'a, A>, SetupError>
+pub trait DeviceHandlerError<A>
 where
+	Self: fmt::Debug,
 	A: Allocator,
 {
-	if device.vendor_id() != 0x1af4 {
-		return Err(SetupError::UnknownVendor(device.vendor_id()));
-	}
+}
 
-	if device.device_id() != 0x1001 {
-		return Err(SetupError::UnknownDevice(device.device_id()));
-	}
+/// A list of handlers that can initialize devices.
+pub trait DeviceHandlers<'a, A>
+where
+	A: Allocator + 'a,
+{
+	fn can_handle(&self, ty: DeviceType) -> bool;
+
+	/// Get a handler for a device of the given type.
+	fn handle(&self, device_type: DeviceType,
+		common: &'a CommonConfig,
+		device: &'a DeviceConfig,
+		notify: &'a Notify,
+		allocator: A,
+	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>>;
+}
+
+/// Setup a virtio device on a PCI bus.
+// TODO figure out how to get `A: Allocator` to work. I'm 99% certain there's a bug in the compiler
+// because static lifetimes keep slipping in somehow
+pub fn new_device<'a, A>(device: pci::Device<'a>, handlers: impl DeviceHandlers<'a, A>, allocator: A) -> Result<Box<dyn Device<A> + 'a, A>, SetupError<A>>
+where
+	A: Allocator + 'a,
+{
+	let key = DeviceType::new(device.vendor_id(), device.device_id());
+
+	handlers.can_handle(key).then(|| ()).ok_or(SetupError::NoHandler(key))?;
 
 	let cmd = pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK;
 	use core::fmt::Write;
@@ -244,7 +375,7 @@ where
 				.cast::<CommonConfig>()
 				.as_ref()
 		})
-		.expect("No common config map defined");
+	.expect("No common config map defined");
 
 	let device_config = device_config
 		.map(|cfg| unsafe {
@@ -252,7 +383,7 @@ where
 				.cast::<DeviceConfig>()
 				.as_ref()
 		})
-		.expect("No common config map defined");
+	.expect("No common config map defined");
 
 	let notify_config = notify_config
 		.map(|cfg| unsafe {
@@ -260,38 +391,67 @@ where
 				.cast::<Notify>()
 				.as_ref()
 		})
-		.expect("No common config map defined");
+	.expect("No common config map defined");
 
-	block::Device::new(common_config, device_config, notify_config)
-		.map(Device::Block)
-		.map_err(SetupError::Block)
+	handlers.handle(key, common_config, device_config, notify_config, allocator).map_err(SetupError::Handler)
 }
 
-pub enum Device<'a, A>
+pub trait Device<A>
 where
 	A: Allocator,
 {
-	Block(block::Device<'a, A>),
+    fn type_id(&self) -> core::any::TypeId;
 }
 
-pub enum SetupError {
-	/// The vendor ID is not that of a known virtio device.
-	UnknownVendor(u16),
-	/// The device ID is not that of a known virtio device.
-	UnknownDevice(u16),
+/*
+impl dyn Device
+where
+	Self: 'static,
+{
+	fn is<T: 'static>(&self) -> bool {
+		use core::any::*;
+        TypeId::of::<T>() == self.type_id()
+	}
+
+	fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+		if self.is::<T>() {
+			unsafe { Some(&*(self as *const _ as *const T)) }
+		} else {
+			None
+		}
+	}
+
+	fn downcast_mut<T: 'static>(&mut self) -> Option<&mut T> {
+		if self.is::<T>() {
+			unsafe { Some(&mut *(self as *mut _ as *mut T)) }
+		} else {
+			None
+		}
+	}
+}
+*/
+
+pub enum SetupError<'a, A>
+where
+	A: Allocator + 'a,
+{
+	/// No handler was found for the device.
+	NoHandler(DeviceType),
 	/// The header is not of an expected type, i.e. `header_type != 0`.
 	UnexpectedHeaderType(u8),
-	/// An error occured while setting up a block device.
-	Block(block::SetupError),
+	/// An error occured in the device handler.
+	Handler(Box<dyn DeviceHandlerError<A> + 'a, A>),
 }
 
-impl fmt::Debug for SetupError {
+impl<'a, A> fmt::Debug for SetupError<'a, A>
+where
+	A: Allocator + 'a,
+{
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::UnknownVendor(id) => write!(f, "Unknown vendor 0x{:x}", id),
-			Self::UnknownDevice(id) => write!(f, "Unknown device 0x{:x}", id),
-			Self::UnexpectedHeaderType(t) => write!(f, "Unexpected header type 0x{:x}", t),
-			Self::Block(b) => <block::SetupError as fmt::Debug>::fmt(b, f),
+			Self::NoHandler(id) => write!(f, "no handler for {:?}", id),
+			Self::UnexpectedHeaderType(t) => write!(f, "unexpected header type 0x{:x}", t),
+			Self::Handler(e) => e.fmt(f),
 		}
 	}
 }

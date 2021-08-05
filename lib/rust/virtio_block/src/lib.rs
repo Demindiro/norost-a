@@ -1,5 +1,14 @@
-use crate::pci::{CommonConfig, DeviceConfig, Notify};
-use crate::queue;
+#![no_std]
+
+#![feature(allocator_api)]
+#![feature(alloc_prelude)]
+
+extern crate alloc;
+
+use alloc::prelude::v1::*;
+
+use virtio::pci::{CommonConfig, DeviceConfig, Notify};
+use virtio::queue;
 use core::alloc::Allocator;
 use core::fmt;
 use core::mem;
@@ -21,12 +30,12 @@ const ANY_LAYOUT: u32 = 1 << 27;
 const EVENT_IDX: u32 = 1 << 28;
 const INDIRECT_DESC: u32 = 1 << 29;
 
-pub struct Device<'a, A>
+pub struct BlockDevice<'a, A>
 where
 	A: Allocator,
 {
 	queue: queue::Queue<'a>,
-	notify: &'a super::pci::Notify,
+	notify: &'a virtio::pci::Notify,
 	_p: core::marker::PhantomData<A>,
 }
 
@@ -85,16 +94,19 @@ struct RequestStatus {
 	status: u8,
 }
 
+use virtio::pci::*;
+
 /// Setup a block device
-impl<'a, A> Device<'a, A>
+impl<'a, A> BlockDevice<'a, A>
 where
-	A: Allocator,
+	A: Allocator + 'a,
 {
 	pub fn new(
 		common: &'a CommonConfig,
 		device: &'a DeviceConfig,
 		notify: &'a Notify,
-	) -> Result<Self, SetupError> {
+		allocator: A,
+	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>> {
 		use core::fmt::Write;
 
 		let features = SIZE_MAX | SEG_MAX | GEOMETRY | BLK_SIZE | TOPOLOGY;
@@ -106,28 +118,28 @@ where
 
 		common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE
-				| CommonConfig::STATUS_DRIVER
-				| CommonConfig::STATUS_FEATURES_OK,
-		);
+			| CommonConfig::STATUS_DRIVER
+			| CommonConfig::STATUS_FEATURES_OK,
+			);
 		// TODO check device status to ensure features were enabled correctly.
 
 		let blk_cfg = unsafe { device.cast::<Config>() };
 
 		// Set up queue.
-		let queue = queue::Queue::new(common, 0, 8).expect("OOM");
+		let queue = queue::Queue::<'a>::new(common, 0, 8).expect("OOM");
 
 		common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE
-				| CommonConfig::STATUS_DRIVER
-				| CommonConfig::STATUS_FEATURES_OK
-				| CommonConfig::STATUS_DRIVER_OK,
-		);
+			| CommonConfig::STATUS_DRIVER
+			| CommonConfig::STATUS_FEATURES_OK
+			| CommonConfig::STATUS_DRIVER_OK,
+			);
 
-		Ok(Self {
+		Ok(Box::new_in(Self {
 			queue,
 			notify,
 			_p: core::marker::PhantomData,
-		})
+		}, allocator))
 	}
 
 	/// Write out sectors
@@ -193,6 +205,16 @@ where
 
 	pub fn flush(&self) {
 		self.notify.send(0);
+	}
+}
+
+impl<'a, A> Device<A> for BlockDevice<'a, A>
+where
+	A: Allocator,// + 'static,
+{
+	fn type_id(&self) -> core::any::TypeId {
+		todo!()
+		//core::any::TypeId::of::<BlockDevice<'static, A>>()
 	}
 }
 

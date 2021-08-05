@@ -2,6 +2,8 @@
 #![no_main]
 #![feature(asm)]
 #![feature(allocator_api)]
+#![feature(alloc_prelude)]
+#![feature(default_alloc_error_handler)]
 #![feature(global_asm)]
 #![feature(panic_info_message)]
 #![feature(ptr_metadata)]
@@ -18,12 +20,25 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 	loop {}
 }
 
+extern crate alloc;
+
 mod console;
 mod device_tree;
+mod pci;
 mod rtbegin;
 mod uart;
 
 include!(concat!(env!("OUT_DIR"), "/list.rs"));
+
+#[global_allocator]
+static FUCK_OFF: GlobalFuckOff = GlobalFuckOff;
+
+struct GlobalFuckOff;
+
+unsafe impl alloc::alloc::GlobalAlloc for GlobalFuckOff {
+	unsafe fn alloc(&self, _layout: core::alloc::Layout) -> *mut u8 { todo!("Fuck off") }
+	unsafe fn dealloc(&self, ptr: *mut u8, _layout: core::alloc::Layout) { todo!("Fuck off") }
+}
 
 use core::convert::TryFrom;
 use kernel::sys_log;
@@ -41,6 +56,7 @@ fn main() {
 
 	sys_log!("Mapping devices");
 	device_tree::map_devices();
+	pci::init_blk_device();
 
 	sys_log!("Creating console");
 	{
@@ -101,7 +117,6 @@ fn main() {
 	for bin in BINARIES.iter() {
 		sys_log!("  {:p}", bin);
 		let elf = ElfFile::new(bin).unwrap();
-		sys_log!("  {:#?}", elf.header);
 		for ph in elf.program_iter() {
 			sys_log!("");
 			sys_log!("  Offset  : 0x{:x}", ph.offset());
