@@ -5,6 +5,10 @@
 
 extern crate alloc;
 
+mod sector;
+
+pub use sector::Sector;
+
 use alloc::prelude::v1::*;
 
 use virtio::pci::{CommonConfig, DeviceConfig, Notify};
@@ -30,6 +34,7 @@ const ANY_LAYOUT: u32 = 1 << 27;
 const EVENT_IDX: u32 = 1 << 28;
 const INDIRECT_DESC: u32 = 1 << 29;
 
+/// A driver for a virtio block device.
 pub struct BlockDevice<'a, A>
 where
 	A: Allocator,
@@ -97,11 +102,13 @@ struct RequestStatus {
 
 use virtio::pci::*;
 
-/// Setup a block device
 impl<'a, A> BlockDevice<'a, A>
 where
 	A: Allocator + 'a,
 {
+	/// Setup a block device
+	///
+	/// This is meant to be used as a handler by the `virtio` crate.
 	pub fn new(
 		common: &'a CommonConfig,
 		device: &'a DeviceConfig,
@@ -144,11 +151,8 @@ where
 	}
 
 	/// Write out sectors
-	pub fn write<'s>(&'s mut self, data: impl AsRef<[u8]> + 's, sector_start: u64) -> Result<(), WriteError> {
-		let sector_count = data.as_ref().len() / 512;
-		if sector_count * 512 != data.as_ref().len() {
-			return Err(WriteError::NotSectorSized);
-		}
+	pub fn write<'s>(&'s mut self, data: impl AsRef<[Sector]> + 's, sector_start: u64) -> Result<(), WriteError> {
+		let sector_count = data.as_ref().len();
 
 		let header = RequestHeader {
 			typ: RequestHeader::WRITE.into(),
@@ -175,7 +179,7 @@ where
 
 		let data = [
 			(phys_header + ho, mem::size_of::<RequestHeader>(), false),
-			(phys_data + d_, data.as_ref().len(), false),
+			(phys_data + d_, data.as_ref().len() * mem::size_of::<Sector>(), false),
 			(phys_status + so, mem::size_of::<RequestStatus>(), true),
 		];
 		use core::fmt::Write;
@@ -192,11 +196,8 @@ where
 	}
 
 	/// Read in sectors
-	pub fn read<'s>(&'s mut self, mut data: impl AsMut<[u8]> + 's, sector_start: u64) -> Result<(), WriteError> {
-		let sector_count = data.as_mut().len() / 512;
-		if sector_count * 512 != data.as_mut().len() {
-			return Err(WriteError::NotSectorSized);
-		}
+	pub fn read<'s>(&'s mut self, mut data: impl AsMut<[Sector]> + 's, sector_start: u64) -> Result<(), WriteError> {
+		let sector_count = data.as_mut().len();
 
 		let header = RequestHeader {
 			typ: RequestHeader::READ.into(),
@@ -223,7 +224,7 @@ where
 
 		let data = [
 			(phys_header + ho, mem::size_of::<RequestHeader>(), false),
-			(phys_data + d_, data.as_mut().len(), true),
+			(phys_data + d_, data.as_mut().len() * mem::size_of::<Sector>(), true),
 			(phys_status + so, mem::size_of::<RequestStatus>(), true),
 		];
 
@@ -282,13 +283,14 @@ impl fmt::Debug for SetupError {
 }
 
 pub enum WriteError {
-	NotSectorSized,
 }
 
 impl fmt::Debug for WriteError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		/*
 		f.write_str(match self {
-			Self::NotSectorSized => "The data's length is not a multiple of 512",
 		})
+		*/
+		Ok(())
 	}
 }

@@ -87,12 +87,10 @@ pub fn init_blk_device() {
 		for dev in bus.iter() {
 			if let Ok(mut vdev) = virtio::pci::new_device(dev, &Handler, FuckingRust) {
 				let dev = vdev.downcast_mut::<virtio_block::BlockDevice<FuckingRust>>().unwrap();
-				#[repr(align(4096))]
-				struct Aligned([u8; 512]);
-				let mut data = Aligned([0; 512]);
+				let mut data = virtio_block::Sector([0; 512]);
 
 				// Read
-				dev.read(&mut data.0, 0);
+				dev.read(&mut data, 0);
 				let num = u32::from_be_bytes([data.0[0], data.0[1], data.0[2], data.0[3]]);
 				kernel::sys_log!("Read the number {}", num);
 
@@ -100,8 +98,7 @@ pub fn init_blk_device() {
 				for (i, c) in (num + 1).to_be_bytes().iter().copied().enumerate() {
 					data.0[i] = c;
 				}
-				assert_eq!(data.0.as_ptr() as usize & 0xfff, 0);
-				dev.write(&data.0, 0).unwrap();
+				dev.write(&data, 0).unwrap();
 				unsafe {
 					BLK = Some(vdev);
 				}
