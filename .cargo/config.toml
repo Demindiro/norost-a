@@ -1,2 +1,10 @@
 [net]
 offline = true
+
+# FIXME for some reason the kernel needs cfg-if for test and cargo refuses to look
+# in thirdparty/rust ??
+#[source.crates-io]
+#replace-with = "local"
+
+[source.local]
+directory = "thirdparty/rust"

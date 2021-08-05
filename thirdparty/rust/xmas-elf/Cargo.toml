@@ -10,11 +10,15 @@ exclude = ["test-data/*"]
 categories = ["parser-implementations", "os::unix-apis"]
 
 [dependencies]
-zero = "0.1"
-flate2 = { version = "1", optional = true }
+#zero = "0.1"
+zero = { path = "../zero" }
+# TODO flate2 may be useful to have at some point, but it has too many (optional)
+# dependencies to filter out right now
+#flate2 = { version = "1", optional = true }
 
 [features]
-compression = ["flate2"]
+# TODO Ditto
+#compression = ["flate2"]
 
 [lib]
 name = "xmas_elf"

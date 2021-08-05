@@ -13,7 +13,7 @@
 #![feature(const_ptr_is_null)]
 #![feature(const_raw_ptr_deref)]
 #![feature(const_raw_ptr_to_usize_cast)]
-#![feature(custom_test_frameworks)]
+//#![feature(custom_test_frameworks)]
 #![feature(destructuring_assignment)]
 #![feature(dropck_eyepatch)]
 #![feature(global_asm)]
@@ -37,12 +37,13 @@
 #![feature(trivial_bounds)]
 #![feature(untagged_unions)]
 #![feature(link_llvm_intrinsics)]
-#![test_runner(crate::test::runner)]
-#![reexport_test_harness_main = "test_main"]
+//#![test_runner(crate::test::runner)]
+//#![reexport_test_harness_main = "test_main"]
 
 // TODO read up on the test framework thing. Using macro for now because custom_test_frameworks
 // does something stupid complicated with tokenstreams (I just want to log the function name
 // damnit)
+/*
 #[macro_export]
 macro_rules! test {
 	($name:ident() $code:block) => {
@@ -60,6 +61,7 @@ macro_rules! test {
 		}
 	};
 }
+*/
 
 #[macro_use]
 mod log;
@@ -439,6 +441,7 @@ extern "C" fn main(
 	exec.next();
 }
 
+/*
 #[cfg(test)]
 mod test {
 	use super::*;
@@ -473,3 +476,4 @@ mod test {
 		log!("Done");
 	}
 }
+*/
