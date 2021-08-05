@@ -34,4 +34,4 @@ gdb-run: build
 	gdb --args $(QEMU) $(QEMU_OPT)
 
 $(VIRTIO_DISK):
-	fallocate -l $$((7 * 512)) $@
+	fallocate -l $$((32 * 512)) $@

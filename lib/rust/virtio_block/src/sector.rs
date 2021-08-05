@@ -1,4 +1,5 @@
 use core::mem;
+use core::ops::{Deref, DerefMut};
 use core::slice;
 
 /// A single sector. Sectors are 512 bytes large and aligned on a 512 byte boundary.
@@ -50,5 +51,19 @@ impl AsRef<[u8]> for Sector {
 impl AsMut<[u8]> for Sector {
 	fn as_mut(&mut self) -> &mut [u8] {
 		&mut self.0[..]
+	}
+}
+
+impl Deref for Sector {
+	type Target = [u8; 512];
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl DerefMut for Sector {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
 	}
 }

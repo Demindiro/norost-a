@@ -79,7 +79,7 @@ pub struct Queue<'a> {
 /// This is implemented as a macro because Rust isn't quite advanced enough yet.
 macro_rules! available_ring {
 	($self:ident) => {
-		unsafe { return_ring::<Avail, AvailHead>(&mut $self.available, $self.mask) }
+		unsafe { return_ring::<Avail, AvailHead, AvailElement>(&mut $self.available, $self.mask) }
 	};
 }
 
@@ -88,7 +88,7 @@ macro_rules! available_ring {
 /// This is implemented as a macro because Rust isn't quite advanced enough yet.
 macro_rules! used_ring {
 	($self:ident) => {
-		unsafe { return_ring::<Used, UsedHead>(&mut $self.used, $self.mask) }
+		unsafe { return_ring::<Used, UsedHead, UsedElement>(&mut $self.used, $self.mask) }
 	};
 }
 
@@ -102,7 +102,7 @@ macro_rules! descriptors_table {
 }
 
 /// Returns the head & ring.
-unsafe fn return_ring<'s, R, H>(ptr: &'s mut NonNull<R>, mask: u16) -> (&'s mut H, &'s mut [u16]) {
+unsafe fn return_ring<'s, R, H, E>(ptr: &'s mut NonNull<R>, mask: u16) -> (&'s mut H, &'s mut [E]) {
 	let size = usize::from(mask) + 1;
 	let head = &mut *ptr.as_ptr().cast::<H>();
 	let ring = ptr
@@ -158,11 +158,14 @@ impl<'a> Queue<'a> {
 		let used = unsafe {
 			NonNull::<Used>::new_unchecked(mem.add(align(desc_size + avail_size)).cast())
 		};
+		
+		unsafe { for i in 0..size { *used.as_ptr().cast::<UsedHead>().add(1).cast::<u16>().add(i) = 0xffff }; }
 
 		let mut free_descriptors = [0; 8];
 		for (i, u) in free_descriptors.iter_mut().enumerate() {
 			*u = i as u16;
 		}
+		let free_descriptors = [5, 7, 6, 0, 1, 3, 2, 4];
 		let free_count = 8;
 
 		let mut phys = 0;
@@ -234,8 +237,8 @@ impl<'a> Queue<'a> {
 				prev_next = &mut desc[i].next;
 			}
 
-			avail_ring[usize::from(u16::from(avail_head.index) & self.mask)] = head.into();
-			atomic::fence(Ordering::Release);
+			avail_ring[usize::from(u16::from(avail_head.index) & self.mask)].index = head;
+			atomic::fence(Ordering::AcqRel);
 			avail_head.index = u16::from(avail_head.index).wrapping_add(1).into();
 		}
 
@@ -246,7 +249,15 @@ impl<'a> Queue<'a> {
 	///
 	/// Returns the amount of buffers collected.
 	pub fn collect_used(&mut self) -> usize {
-		atomic::fence(Ordering::AcqRel);
+
+		loop {
+			atomic::fence(Ordering::AcqRel);
+			let (avail, _) = available_ring!(self);
+			let (used, _) = used_ring!(self);
+			if avail.index == used.index {
+				break;
+			}
+		}
 
 		let (head, ring) = used_ring!(self);
 		let table = descriptors_table!(self);
@@ -254,7 +265,10 @@ impl<'a> Queue<'a> {
 		let mut index @ last = self.last_used;
 		let head_index = u16::from(head.index);
 		while index != head_index {
-			let mut descr = ring[usize::from(index)];
+			// TODO maybe we should use unwrap?
+			let mut descr = u32::from(ring[usize::from(index & self.mask)].index) as u16;
+			//#[cfg(debug_assertions)]
+			ring[usize::from(index & self.mask)].index = 0xffff.into();
 			loop {
 				self.free_descriptors[usize::from(self.free_count)] = descr;
 				self.free_count += 1;
@@ -288,7 +302,6 @@ impl<'a> Queue<'a> {
 			let (used_head, _) = used_ring!(self);
 			let val = used_head.index;
 			if Some(val) != prev_val {
-				kernel::sys_log!("used_head.index = {}", val);
 				prev_val = Some(val)
 			}
 			atomic::fence(Ordering::Release);

@@ -12,3 +12,8 @@ kernel = { path = "../kernel/", package = "syscalls" }
 pci = { path = "../pci/" }
 simple_endian = { path = "../../../thirdparty/rust/simple-endian/" }
 vcell = { path = "../../../thirdparty/rust/vcell/" }
+fatfs = { path = "../../../thirdparty/rust/fatfs/", optional = true, default-features = false }
+
+[features]
+# Support for rust-fatfs ReadWriteSeek trait
+fatfs_io = ["fatfs"]

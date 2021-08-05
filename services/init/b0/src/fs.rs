@@ -10,8 +10,7 @@ where
 		.volume_id(100117120)
 		.max_root_dir_entries(16)
 		;
-	let ret = fatfs::format_volume(&mut backend, fvo);
-	ret.unwrap();
+	let ret = fatfs::format_volume(&mut backend, fvo).unwrap();
 	let mut fs = fatfs::FileSystem::new(backend, fatfs::FsOptions::new()).unwrap();
 	fs.root_dir().create_file("avada");
 	fs.root_dir().create_file("kedavra");
@@ -19,9 +18,9 @@ where
 	fs
 }
 
-pub fn open<B>(mut backend: B) -> fatfs::FileSystem<B, fatfs::NullTimeProvider, fatfs::LossyOemCpConverter>
+pub fn open<B>(mut backend: B) -> Result<fatfs::FileSystem<B, fatfs::NullTimeProvider, fatfs::LossyOemCpConverter>, fatfs::Error<<B as fatfs::IoBase>::Error>>
 where
 	B: fatfs::ReadWriteSeek,
 {
-	fatfs::FileSystem::new(backend, fatfs::FsOptions::new()).unwrap()
+	fatfs::FileSystem::new(backend, fatfs::FsOptions::new())
 }

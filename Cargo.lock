@@ -271,6 +271,7 @@ dependencies = [
 name = "virtio_block"
 version = "0.1.0"
 dependencies = [
+ "fatfs",
  "pci",
  "simple_endian",
  "syscalls",

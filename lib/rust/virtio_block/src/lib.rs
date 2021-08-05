@@ -6,8 +6,12 @@
 extern crate alloc;
 
 mod sector;
+#[cfg(feature = "fatfs_io")]
+mod fatfs;
 
 pub use sector::Sector;
+#[cfg(feature = "fatfs_io")]
+pub use crate::fatfs::Proxy;
 
 use alloc::prelude::v1::*;
 
@@ -41,6 +45,8 @@ where
 {
 	queue: queue::Queue<'a>,
 	notify: &'a virtio::pci::Notify,
+	/// The amount of sectors available
+	capacity: u64,
 	_p: core::marker::PhantomData<A>,
 }
 
@@ -146,6 +152,7 @@ where
 		Ok(Box::new_in(Self {
 			queue,
 			notify,
+			capacity: blk_cfg.capacity.into(),
 			_p: core::marker::PhantomData,
 		}, allocator))
 	}

@@ -5,6 +5,7 @@
 #![feature(alloc_prelude)]
 #![feature(default_alloc_error_handler)]
 #![feature(global_asm)]
+#![feature(option_result_unwrap_unchecked)]
 #![feature(panic_info_message)]
 #![feature(ptr_metadata)]
 
@@ -60,10 +61,6 @@ fn main() {
 	pci::init_blk_device();
 
 	sys_log!("Creating console");
-	{
-		use core::fmt::Write;
-		let _ = write!(kernel::SysLog, "INIT >> ");
-	}
 
 	struct Dummy<'a>(&'a mut [u8], usize);
 
@@ -132,8 +129,26 @@ fn main() {
 		}
 	}
 
-	let mut buf = [0u8; 512 * 11];
-	let mut fs = fs::init(Dummy(&mut buf[..], 0));
+	//let mut buf = [0u8; 512 * 11];
+	//let mut fs = fs::init(Dummy(&mut buf[..], 0));
+	let mut dev = unsafe { pci::BLK.as_mut().unwrap().downcast_mut().unwrap() };
+	let mut fs = match fs::open(virtio_block::Proxy::new(dev)) {
+		Ok(fs) => {
+			sys_log!("Successfully opened FAT FS");
+			fs
+		}
+		err => {
+			// SAFETY: it's certainly an Err. It is done this way because the compiler doesn't
+			// recognize we have ownership otherwise.
+			let err = unsafe { err.unwrap_err_unchecked() };
+			sys_log!("Failed to open FAT FS: {:?}", err);
+			drop(err);
+			sys_log!("Creating FAT FS");
+			let fs = fs::init(virtio_block::Proxy::new(dev));
+			sys_log!("Created FAT FS");
+			fs
+		}
+	};
 
 	let mut console = unsafe { console::Console::new(device_tree::UART_ADDRESS.cast()) };
 	let mut buf = [0; 256];

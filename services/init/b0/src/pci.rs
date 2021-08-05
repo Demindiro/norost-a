@@ -89,6 +89,7 @@ pub fn init_blk_device() {
 				let dev = vdev.downcast_mut::<virtio_block::BlockDevice<FuckingRust>>().unwrap();
 				let mut data = virtio_block::Sector([0; 512]);
 
+				/*
 				// Read
 				dev.read(&mut data, 0);
 				let num = u32::from_be_bytes([data.0[0], data.0[1], data.0[2], data.0[3]]);
@@ -99,6 +100,7 @@ pub fn init_blk_device() {
 					data.0[i] = c;
 				}
 				dev.write(&data, 0).unwrap();
+				*/
 				unsafe {
 					BLK = Some(vdev);
 				}
