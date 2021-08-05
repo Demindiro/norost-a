@@ -143,9 +143,9 @@ where
 	}
 
 	/// Write out sectors
-	pub fn write(&mut self, data: &[u8], sector_start: u64) -> Result<(), WriteError> {
-		let sector_count = data.len() / 512;
-		if sector_count * 512 != data.len() {
+	pub fn write<'s>(&'s mut self, data: impl AsRef<[u8]> + 's, sector_start: u64) -> Result<(), WriteError> {
+		let sector_count = data.as_ref().len() / 512;
+		if sector_count * 512 != data.as_ref().len() {
 			return Err(WriteError::NotSectorSized);
 		}
 
@@ -157,7 +157,7 @@ where
 		let status = RequestStatus { status: 111 };
 		let (mut phys_header, mut phys_data, mut phys_status) = (0, 0, 0);
 		let h = &header as *const _ as usize;
-		let d = data as *const _ as *const u8 as usize;
+		let d = data.as_ref() as *const _ as *const u8 as usize;
 		let s = &status as *const _ as usize;
 		let (hp, ho) = (h & !0xfff, h & 0xfff);
 		let (dp, d_) = (d & !0xfff, d & 0xfff);
@@ -174,7 +174,7 @@ where
 
 		let data = [
 			(phys_header + ho, mem::size_of::<RequestHeader>(), false),
-			(phys_data + d_, data.len(), false),
+			(phys_data + d_, data.as_ref().len(), false),
 			(phys_status + so, mem::size_of::<RequestStatus>(), true),
 		];
 		use core::fmt::Write;
@@ -190,6 +190,15 @@ where
 
 	pub fn flush(&self) {
 		self.notify.send(0);
+	}
+}
+
+impl<A> Drop for BlockDevice<'_, A>
+where
+	A: Allocator
+{
+	fn drop(&mut self) {
+		todo!("ensure the device doesn't read/write memory after being dropped");
 	}
 }
 
