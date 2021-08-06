@@ -185,7 +185,11 @@ fn main() {
 	// Create pseudo list.
 	let mut list_builder = dux::ipc::list::Builder::new(3, 50).unwrap();
 	for f in fs.root_dir().iter() {
-		list_builder.add(kernel::ipc::UUID::from(0), f.unwrap().short_file_name_as_bytes()).unwrap();
+		let f = f.unwrap();
+		let uuid = kernel::ipc::UUID::from(0);
+		let name = f.short_file_name_as_bytes();
+		let size = f.len();
+		list_builder.add(uuid, name, size).unwrap();
 	}
 	let list = dux::ipc::list::List::new(list_builder.data());
 	sys_log!("Listing {} entries", list.iter().count());

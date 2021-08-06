@@ -21,6 +21,7 @@ struct dux_reserve_pages {
  */
 struct dux_ipc_list_raw_entry {
 	kernel_uuid_t uuid;
+	uint64_t size;
 	uint32_t name_offset;
 	uint16_t name_len;
 };
@@ -30,6 +31,7 @@ struct dux_ipc_list_raw_entry {
  */
 struct dux_ipc_list_entry {
 	kernel_uuid_t uuid;
+	uint64_t size;
 	const char *name;
 	uint16_t name_len;
 };

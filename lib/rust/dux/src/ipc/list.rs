@@ -35,11 +35,13 @@ impl<'a> List<'a> {
 			let len = self.data.len() * mem::size_of::<kernel::Page>();
 			let data = unsafe { slice::from_raw_parts(self.data.as_ptr().cast(), len) };
 			let start = usize::try_from(e.name_offset).unwrap();
-			let name = start
-				.checked_add(e.name_length.into())
-				.and_then(|end| data.get(start..end));
-			let uuid = e.uuid;
-			Entry { uuid, name }
+			Entry {
+				uuid: e.uuid,
+				name: start
+					.checked_add(e.name_length.into())
+					.and_then(|end| data.get(start..end)),
+				size: e.size
+			}
 		})
 	}
 
@@ -63,19 +65,21 @@ pub struct Entry<'a> {
 	/// This will also be `None` if the name couldn't be fetched, i.e `RawEntry::name_length` or
 	/// `RawEntry::name_offset` were out of range.
 	pub name: Option<&'a [u8]>,
+	/// The size of the object. Usually, this limit is expressed in bytes.
+	pub size: u64,
 }
 
 impl fmt::Debug for Entry<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		if let Some(name) = self.name {
-			if let Ok(name) = str::from_utf8(name) {
-				write!(f, "Entry({} | {:?})", self.uuid, name)
-			} else {
-				write!(f, "Entry({} | {:?})", self.uuid, name)
-			}
-		} else {
-			write!(f, "Entry({})", self.uuid)
-		}
+		let mut d = f.debug_struct("Entry");
+		d.field("uuid", &self.uuid);
+		self.name.map(|name| {
+			str::from_utf8(name)
+				.map(|name| { d.field("name", &name); })
+				.map_err(|name| { d.field("name", &name); });
+		});
+		d.field("size", &self.size);
+		d.finish()
 	}
 }
 
@@ -83,6 +87,7 @@ impl fmt::Debug for Entry<'_> {
 #[repr(C)]
 pub struct RawEntry {
 	pub uuid: kernel::ipc::UUID,
+	pub size: u64,
 	pub name_offset: u32,
 	pub name_length: u16,
 }
@@ -148,7 +153,7 @@ impl Builder {
 
 	/// Add an entry
 	#[inline]
-	pub fn add(&mut self, uuid: kernel::ipc::UUID, name: &[u8]) -> Result<(), BuilderAddError> {
+	pub fn add(&mut self, uuid: kernel::ipc::UUID, name: &[u8], size: u64) -> Result<(), BuilderAddError> {
 		let name_length = name
 			.len()
 			.try_into()
@@ -180,6 +185,7 @@ impl Builder {
 				.add(self.index)
 				.write(RawEntry {
 					uuid,
+					size,
 					name_offset,
 					name_length,
 				});

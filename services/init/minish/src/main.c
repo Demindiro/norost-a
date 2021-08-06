@@ -8,7 +8,7 @@
 
 #define VERSION_MAJ 0
 #define VERSION_MIN 0
-#define VERSION_REV 2
+#define VERSION_REV 3
 
 #define ARG_SEPARATORS " \t"
 

@@ -225,6 +225,7 @@ int dux_ipc_list_get(const struct dux_ipc_list list, size_t index,
 	re += index;
 
 	entry->uuid = re->uuid;
+	entry->size = re->size;
 	if (re->name_offset + re->name_len <= list.data_len) {
 		entry->name = ((const char *)list.data) + re->name_offset;
 		entry->name_len = re->name_len;
