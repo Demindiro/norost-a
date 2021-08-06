@@ -127,6 +127,10 @@ pub struct Segment {
 	pub ppn: PPNRange,
 	/// The RWX flags.
 	pub flags: arch::vms::RWX,
+	/// The offset past which all bytes should be zeroed.
+	pub clear_from: usize,
+	/// The offset before which all bytes should be zeroed.
+	pub clear_to: usize,
 }
 
 /// Parse the ELF file and set the PPNs & flags to be mapped.
@@ -248,6 +252,8 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 			address,
 			ppn,
 			flags,
+			clear_from: header.file_size + offset,
+			clear_to: header.memory_size + offset,
 		});
 		i += 1;
 	}

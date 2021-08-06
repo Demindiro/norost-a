@@ -427,9 +427,15 @@ extern "C" fn main(
 		let mut a = s.address;
 		while let Some(ppn) = s.ppn.pop_base() {
 			let ppn = arch::Map::Private(ppn);
-			arch::VMS::add(a, ppn, s.flags, arch::vms::Accessibility::UserLocal).unwrap();
+			arch::VMS::add(a, ppn, /* s.flags */ arch::vms::RWX::RWX, arch::vms::Accessibility::UserLocal).unwrap();
 			a = a.next().unwrap();
 		}
+
+		arch::set_supervisor_userpage_access(true);
+		for i in s.clear_from..s.clear_to {
+			unsafe { ptr::write_volatile(s.address.as_ptr::<u8>().add(i), 0) };
+		}
+		arch::set_supervisor_userpage_access(false);
 	}
 	init.set_pc(entry);
 
