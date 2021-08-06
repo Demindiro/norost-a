@@ -2,13 +2,12 @@
 // Note: this header is not part of the standard library, but there is
 // no other way to iterate directories.
 #include <dirent.h>
-#include <kernel.h>
 #include <stdio.h>
 #include <string.h>
 
 #define VERSION_MAJ 0
 #define VERSION_MIN 0
-#define VERSION_REV 3
+#define VERSION_REV 5
 
 #define ARG_SEPARATORS " \t"
 
@@ -54,8 +53,8 @@ static void help() {
 		"  echo   [args]\n"
 		"  help\n"
 		"  list   [path]\n"
-		"  read   <path> [offset [len]]\n"
-		"  write  <path> [offset [len]]\n"
+		"  read   <path>\n"
+		"  write  <path> [text]\n"
 	);
 }
 
@@ -87,10 +86,23 @@ static void read() {
 		}
 	}
 	fclose(f);
+
+	puts("");
 }
 
 static void write() {
-	puts("TODO");
+
+	const char *path = next_arg();
+	if (path == NULL) {
+		puts("Usage: write <path> [text]");
+		return;
+	}
+
+	FILE *f = fopen(path, "w");
+	for (const char *arg = next_arg(); arg != NULL; arg = next_arg()) {
+		fwrite(arg, strlen(arg), 1, f);
+	}
+	fclose(f);
 }
 
 int main() {

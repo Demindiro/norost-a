@@ -29,6 +29,9 @@ ssize_t read(int fd, void *buf, size_t count)
 
 	cre->id = 0;
 
+	cre->name = NULL;
+	cre->name_len = 0;
+
 	cre->flags = 0;
 	cre->offset = 0;
 	cre->data.raw = universal_buffer;

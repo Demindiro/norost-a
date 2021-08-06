@@ -193,12 +193,14 @@ FILE *fopen(const char *path, const char *mode)
 	f._uuid = kernel_uuid(0, 0);
 	f._path = path_buf;
 	f._fd = -1;
+	f._position = 0;
 
 	return &f;
 }
 
 size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
 {
+	// TODO account properly for size
 	char *p = ptr;
 	size_t read_total = size * count;
 	size_t total_read = 0;
@@ -220,7 +222,7 @@ size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
 		pkt->address = stream->_address;
 		pkt->offset = stream->_position;
 		pkt->name = (void *)stream->_path;
-		pkt->name_len = strlen(stream->_path);
+		pkt->name_len = stream->_path != NULL ? strlen(stream->_path) : 0;
 		pkt->data.raw = universal_buffer;
 		pkt->length = universal_buffer_size;
 		asm volatile ("fence");
@@ -252,23 +254,60 @@ size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
 
 size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
 {
-	struct iovec iov[1] = {
-		{
-		 // Discarding const is fine as writev won't write to this.
-		 .iov_base = (void *)ptr,
-		 .iov_len = size * count,
-		 },
-	};
+	// TODO account properly for size
+	char *p = ptr;
+	size_t write_total = size * count;
+	size_t total_written = 0;
 
-	ssize_t ret = writev(stream->_fd, iov, 1);
+	while (write_total > total_written) {
+		// Determine the maximum amount of data to be written.
+		size_t delta_write = write_total - total_written;
+		size_t max_size = universal_buffer_size < delta_write ? universal_buffer_size : delta_write;
 
-	if (ret >= 0) {
-		// ret just has to be a "non-negative number". ssize_t may overflow int so just set it
-		// to 0.
-		ret = 0;
+		// Copy the data
+		for (size_t i = 0; i < max_size; i++) {
+			((char *)universal_buffer)[i] = *p++;
+		}
+
+		// Get a request entry
+		struct kernel_ipc_packet *pkt = NULL;
+		while (pkt == NULL) {
+			kernel_io_wait(0, 0);
+			pkt = dux_reserve_transmit_entry();
+		}
+
+		// Fill out the request entry
+		pkt->flags = 0;
+		pkt->address = stream->_address;
+		pkt->offset = stream->_position;
+		pkt->name = (void *)stream->_path;
+		pkt->name_len = stream->_path != NULL ? strlen(stream->_path) : 0;
+		pkt->data.raw = universal_buffer;
+		pkt->length = max_size;
+		asm volatile ("fence");
+		pkt->opcode = KERNEL_IPC_OP_WRITE;
+
+		// Wait for a response
+		struct kernel_ipc_packet *cce = dux_get_receive_entry();
+		while (cce->opcode == KERNEL_IPC_OP_NONE) {
+			kernel_io_wait(0, 0);
+		}
+
+		// Note the amount of written data.
+		p += cce->length;
+		total_written += cce->length;
+		stream->_position += cce->length;
+
+		// Mark packet as processed
+		cce->opcode = 0;
+
+		// Check if the "stream" ended early
+		if (cce->length < max_size) {
+			break;
+		}
 	}
 
-	return ret;
+	return total_written;
 }
 
 int vfprintf(FILE * stream, const char *format, va_list args)

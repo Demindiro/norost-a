@@ -224,6 +224,8 @@ fn main() {
 	for (i, e) in list.iter().enumerate() {
 		sys_log!("{}: {:?}", i, e);
 	}
+	drop(list);
+	drop(list_builder);
 
 	// Allocate a single page for transmitting data.
 	let raw = dux::mem::reserve_range(None, 1).unwrap().as_ptr().cast::<u8>();
@@ -249,6 +251,10 @@ fn main() {
 
 					// Free ranges
 					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
+					dux::ipc::add_free_range(
+						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
+						1,
+					);
 					if let Some(name) = rxq.name {
 						let _ = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, 1) };
 						dux::ipc::add_free_range(
@@ -256,10 +262,6 @@ fn main() {
 							1,
 						);
 					}
-					dux::ipc::add_free_range(
-						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
-						1,
-					);
 
 					// Send completion event
 					dux::ipc::transmit(|pkt| *pkt = kernel::ipc::Packet {
@@ -276,8 +278,53 @@ fn main() {
 					});
 				}
 				Ok(kernel::ipc::Op::Write) => {
+					// Figure out object to write to.
 					let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
-					console.write(data);
+					let path = rxq.name.map(|name| unsafe { core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into()) });
+
+					// Write data
+					let len = if path.is_none() {
+						console.write(data);
+						data.len()
+					} else {
+						let name = core::str::from_utf8(path.unwrap()).unwrap();
+						let mut f = match fs.root_dir().open_file(name) {
+							Ok(f) => f,
+							Err(_) => fs.root_dir().create_file(name).unwrap(),
+						};
+						use fatfs::{Write, Seek, SeekFrom};
+						f.seek(SeekFrom::Start(rxq.offset)).unwrap();
+						f.write(data).unwrap()
+					};
+
+					// Free ranges
+					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
+					dux::ipc::add_free_range(
+						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
+						1,
+					);
+					if let Some(name) = rxq.name {
+						let _ = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, 1) };
+						dux::ipc::add_free_range(
+							dux::Page::new(core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap()).unwrap(),
+							1,
+						);
+
+						// Confirm reception.
+						dux::ipc::transmit(|pkt| *pkt = kernel::ipc::Packet {
+							uuid: kernel::ipc::UUID::from(0),
+							opcode: Some(kernel::ipc::Op::Write.into()),
+							name: None,
+							name_len: 0,
+							flags: 0,
+							id: 0,
+							address: id,
+							data: unsafe { kernel::ipc::Data { raw: core::ptr::null_mut() } },
+							length: len,
+							offset: 0,
+						});
+					}
+
 					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
 					dux::ipc::add_free_range(
 						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
@@ -285,7 +332,18 @@ fn main() {
 					);
 				}
 				Ok(kernel::ipc::Op::List) => {
+					let mut list_builder = dux::ipc::list::Builder::new(fs.root_dir().iter().count(), 50).unwrap();
+					for f in fs.root_dir().iter() {
+						let f = f.unwrap();
+						let uuid = kernel::ipc::UUID::from(0);
+						let name = f.short_file_name_as_bytes();
+						let size = f.len();
+						list_builder.add(uuid, name, size).unwrap();
+					}
+					let list = dux::ipc::list::List::new(list_builder.data());
+
 					let raw = list_builder.data() as *const _ as *mut _;
+
 					let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
 					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
 					dux::ipc::add_free_range(
@@ -301,9 +359,13 @@ fn main() {
 						id: rxq.id,
 						address: id,
 						data: unsafe { kernel::ipc::Data { raw } },
-						length: buf.len(),
+						length: list_builder.bytes_len(),
 						offset: 0,
 					});
+
+					// FIXME goddamnit
+					let _ = unsafe { kernel::io_wait(0, 0) };
+					let _ = unsafe { kernel::io_wait(0, 0) };
 				}
 				Ok(op) => sys_log!("TODO {:?}", op),
 				Err(kernel::ipc::UnknownOp) => sys_log!("Unknown op {}", op),

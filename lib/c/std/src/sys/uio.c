@@ -61,6 +61,9 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 
 		cre->id = 0;
 
+		cre->name = NULL;
+		cre->name_len = 0;
+
 		cre->flags = 0;
 		cre->offset = total_written;
 		cre->data.raw = universal_buffer;

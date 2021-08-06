@@ -89,6 +89,7 @@ struct ProgramHeader {
 	alignment: usize,
 }
 */
+#[derive(Debug)]
 #[cfg_attr(
 	target_pointer_width = "64",
 	doc = "Structure representing an entry in an an ELF64 program header"
@@ -120,6 +121,7 @@ const _PROGRAM_HEADER_SIZE_CHECK: usize = 0 - (56 - mem::size_of::<ProgramHeader
 
 const TYPE_EXEC: u16 = 2;
 
+#[derive(Debug)]
 pub struct Segment {
 	/// The address to map the segment to.
 	pub address: arch::Page,

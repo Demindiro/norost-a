@@ -49,7 +49,7 @@ where
 
 	fn fetch(&mut self) {
 		self.buffer_sector = self.seek_sector();
-		self.device.read(&mut self.buffer, self.buffer_sector);
+		self.device.read(&mut self.buffer, self.buffer_sector).unwrap();
 	}
 
 	fn max_seek(&self) -> u64 {
@@ -68,7 +68,7 @@ impl<'a, A> Read for Proxy<'a, '_, A>
 where
 	A: Allocator + 'a
 {
-	fn read(&mut self, mut data: &mut [u8]) -> Result<usize, Self::Error> {
+	fn read(&mut self, data: &mut [u8]) -> Result<usize, Self::Error> {
 		let mut i = 0;
 		while i < data.len() {
 			if self.position >= self.max_seek() {
@@ -80,6 +80,7 @@ where
 				assert_eq!(self.seek_sector(), self.buffer_sector());
 			}
 			data[i] = self.buffer[self.seek_offset()];
+			//kernel::sys_log!("read  [0x{:x}] = 0x{:x}", self.position, data[i]);
 			self.position += 1;
 			i += 1;
 		}
