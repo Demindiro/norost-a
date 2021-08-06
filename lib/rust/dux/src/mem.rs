@@ -63,8 +63,6 @@ struct GlobalPart {
 	reserved_capacity: AtomicUsize,
 	/// A pointer to extra reserved entries.
 	extra_reserved_entries: Cell<*mut MemoryMap>,
-	/// The amount of occupied free range entries.
-	free_ranges_count: usize,
 	/// The amount of available free range entries.
 	///
 	/// If it is 0, the list is locked.
@@ -171,14 +169,15 @@ pub unsafe fn init() {
 	GLOBAL.part.receive_mask.store(0, Ordering::Release);
 
 	let free_ranges = addr.add(2).cast();
+	let free_ranges_len = 12;
 	GLOBAL.part.free_ranges.set(free_ranges);
-	GLOBAL.part.free_ranges_capacity.store(1, Ordering::Release);
+	GLOBAL.part.free_ranges_capacity.store(free_ranges_len, Ordering::Release);
 
 	// Set a range to which pages can be mapped to.
-	let free_ranges = unsafe { slice::from_raw_parts_mut(free_ranges, 1) };
-	// FIXME Ditto
-	let addr = reserve_range(None, 8).unwrap();
-	ipc::add_free_range(addr, 1).unwrap();
+	let free_ranges = unsafe { slice::from_raw_parts_mut(free_ranges, free_ranges_len) };
+	let count = free_ranges_len; // The effective maximum right now.
+	let addr = reserve_range(None, count).unwrap();
+	ipc::add_free_range(addr, count).unwrap();
 
 	// Register the queues to the kernel
 	let ret = kernel::io_set_queues(
@@ -464,11 +463,18 @@ pub(crate) mod ipc {
 
 	/// Add an address range the kernel is free to map pages into.
 	pub fn add_free_range(page: Page, count: usize) -> Result<(), ()> {
-		// FIXME
-		unsafe {
-			(&mut *GLOBAL.part.free_ranges.get()).address = Some(page.as_non_null_ptr());
-			(&mut *GLOBAL.part.free_ranges.get()).count = count;
-		}
-		Ok(())
+		util::spin_lock(&GLOBAL.part.free_ranges_capacity, 0, |capacity| {
+			let ranges = unsafe { slice::from_raw_parts_mut(GLOBAL.part.free_ranges.get(), *capacity) };
+			// TODO merge fragmented ranges.
+			// This should be done by sorting the free range list.
+			for (i, range) in ranges.iter_mut().enumerate() {
+				if range.count == 0 {
+					range.address = Some(page.as_non_null_ptr());
+					range.count = count;
+					return Ok(());
+				}
+			}
+			Err(())
+		})
 	}
 }

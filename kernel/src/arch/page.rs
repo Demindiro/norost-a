@@ -10,7 +10,7 @@ use core::ptr::NonNull;
 #[repr(transparent)]
 pub struct Page(NonZeroUsize);
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BadAlignment;
 
 impl Page {
@@ -151,7 +151,7 @@ impl fmt::Pointer for Page {
 }
 
 /// Error returned if converting a pointer to a page failed.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum FromPointerError {
 	/// The pointer is null
 	Null,

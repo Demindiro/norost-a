@@ -8,6 +8,8 @@
 #define PROT_WRITE (0x2)
 #define PROT_EXEC  (0x4)
 
+#define PAGE_SIZE (0x1000)
+
 /**
  * The type of a task / process identifier
  */
@@ -45,10 +47,12 @@ struct kernel_ipc_packet {
 	union {
 		void *raw;
 	} data;
+	void *name;
 	int64_t offset;
 	size_t length;
 	pid_t address;
 	uint16_t flags;
+	uint16_t name_len;
 	uint8_t id;
 	uint8_t opcode;
 };
@@ -174,5 +178,5 @@ SYSCALL_2(kernel_sys_log, 15, const char * /* address */ , size_t /* length */ )
  *
  * If the string is not a literal, call kernel_sys_log directly instead.
  */
-#define KERNEL_LOG(msg) kernel_sys_log(msg, sizeof(msg) - 1)
+#define KERNEL_LOG(msg) kernel_sys_log(msg "\n", sizeof(msg))
 #endif

@@ -69,7 +69,24 @@ static void list() {
 }
 
 static void read() {
-	puts("TODO");
+
+	const char *path = next_arg();
+	if (path == NULL) {
+		puts("Usage: read <path>");
+		return;
+	}
+
+	FILE *f = fopen(path, "r");
+	char buf[256];
+	for (;;) {
+		size_t r = fread(buf, sizeof(buf) - 1, 1, f);
+		buf[r] = '\0';
+		printf("%s", buf);
+		if (r != sizeof(buf) - 1) {
+			break;
+		}
+	}
+	fclose(f);
 }
 
 static void write() {
@@ -84,6 +101,7 @@ int main() {
 		printf(">> ");
 
 		char in[1024];
+		memset(in, 0, sizeof(in));
 
 		// Read input
 		char *ptr = in;
@@ -100,7 +118,7 @@ int main() {
 			for (char *p = in; *p != '\0'; p++) {
 				if (*p == '\n') {
 					// Discard the newline & break to begin parsing input
-					*p = 0;
+					*p = '\0';
 					goto parse_input;
 				} else if (*p == 8 || *p == 127) { // Backspace or delete
 					if (p == in) {

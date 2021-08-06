@@ -12,6 +12,12 @@
 // FIXME this is temporary as we currently rely on GCC's stddef, which doesn't have ssize_t
 typedef signed long ssize_t;
 
+#define MODE_READ    (0x1)  // "r"
+#define MODE_WRITE   (0x2)  // "w"
+#define MODE_APPEND  (0x4)  // "a"
+#define MODE_UPDATE  (0x8)  // "+"
+#define MODE_EXIST   (0x10) // "x"
+
 static FILE _stdin = {._address = 0,._fd = 0,._uuid = KERNEL_UUID(0, 0) };
 static FILE _stdout = {._address = 0,._fd = 1,._uuid = KERNEL_UUID(0, 0) };
 static FILE _stderr = {._address = 0,._fd = 2,._uuid = KERNEL_UUID(0, 0) };
@@ -92,8 +98,14 @@ char *fgets(char *s, int size, FILE * stream)
 		*ptr++ = *data++;
 	}
 	*ptr = 0;
-	kernel_mem_dealloc(rxe->data.raw, 1);
-	dux_add_free_range(rxe->data.raw, 1);	// FIXME do this properly.
+	size_t data_pages = (rxe->length + (PAGE_SIZE - 1)) / PAGE_SIZE;
+	kernel_mem_dealloc(rxe->data.raw, data_pages);
+	dux_add_free_range(rxe->data.raw, data_pages);
+	if (rxe->name != NULL) {
+		size_t name_pages = (rxe->name_len + (PAGE_SIZE - 1)) / PAGE_SIZE;
+		kernel_mem_dealloc(rxe->name, name_pages);
+		dux_add_free_range(rxe->name, name_pages);
+	}
 	rxe->opcode = 0;
 	return s;
 }
@@ -111,6 +123,131 @@ int getchar(void)
 int ungetc(int c, FILE * stream)
 {
 	return ENOSYS;
+}
+
+int printf(const char *format, ...)
+{
+	va_list vl;
+	va_start(vl, format);
+	int rc = vfprintf(stdout, format, vl);
+	va_end(vl);
+	return rc;
+}
+
+int fprintf(FILE * stream, const char *format, ...)
+{
+	va_list vl;
+	va_start(vl, format);
+	int rc = vfprintf(stream, format, vl);
+	va_end(vl);
+	return rc;
+}
+
+int fclose(FILE *stream)
+{
+	return ENOSYS;
+}
+
+FILE *fopen(const char *path, const char *mode)
+{
+	unsigned char flags = 0;
+	for (const char *c = mode; *c != '\0'; c++) {
+		switch (*c) {
+		case 'r':
+			flags |= MODE_READ;
+			break;
+		case 'w':
+			flags |= MODE_WRITE;
+			break;
+		case 'a':
+			flags |= MODE_APPEND;
+			break;
+		case '+':
+			flags |= MODE_UPDATE;
+			break;
+		case 'b':
+			// Whatever. Everything is binary anyways.
+			break;
+		default:
+			// Don't silently ignore bad mode specifiers.
+			// Some libraries supposedly ignore additional characters. I believe that's _probably_
+			// a bad idea
+			return NULL;
+		}
+	}
+
+	if (flags == 0 || flags == MODE_UPDATE) {
+		// Opening a file without either reading or writing is nonsense.
+		return NULL;
+	}
+
+	// FIXME don't use statics
+	static char path_buf[4096] __attribute__ ((__aligned__(4096)));
+	static FILE f = {};
+
+	size_t len = strlen(path);
+	len = len < sizeof(path_buf) - 1 ? len : sizeof(path_buf) - 1;
+	memcpy(path_buf, path, len);
+	path_buf[len] = '\0';
+	f._address = 0;
+	f._uuid = kernel_uuid(0, 0);
+	f._path = path_buf;
+	f._fd = -1;
+
+	return &f;
+}
+
+size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
+{
+	char *p = ptr;
+	size_t read_total = size * count;
+	size_t total_read = 0;
+
+	while (read_total > total_read) {
+		// Determine the maximum amount of data to be read.
+		size_t delta_read = read_total - total_read;
+		size_t max_size = universal_buffer_size < delta_read ? universal_buffer_size : delta_read;
+
+		// Get a request entry
+		struct kernel_ipc_packet *pkt = NULL;
+		while (pkt == NULL) {
+			kernel_io_wait(0, 0);
+			pkt = dux_reserve_transmit_entry();
+		}
+
+		// Fill out the request entry
+		pkt->flags = 0;
+		pkt->address = stream->_address;
+		pkt->offset = stream->_position;
+		pkt->name = (void *)stream->_path;
+		pkt->name_len = strlen(stream->_path);
+		pkt->data.raw = universal_buffer;
+		pkt->length = universal_buffer_size;
+		asm volatile ("fence");
+		pkt->opcode = KERNEL_IPC_OP_READ;
+
+		// Wait for a response
+		struct kernel_ipc_packet *cce = dux_get_receive_entry();
+		while (cce->opcode == KERNEL_IPC_OP_NONE) {
+			kernel_io_wait(0, 0);
+		}
+
+		// Copy the received data.
+		memcpy(p, universal_buffer, cce->length);
+		p += cce->length;
+		total_read += cce->length;
+		stream->_position += cce->length;
+
+		// Mark packet as processed
+		cce->opcode = 0;
+
+		// Check if the "stream" ended early
+		if (cce->length < max_size) {
+			break;
+		}
+	}
+
+	return total_read;
 }
 
 size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
@@ -132,24 +269,6 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
 	}
 
 	return ret;
-}
-
-int printf(const char *format, ...)
-{
-	va_list vl;
-	va_start(vl, format);
-	int rc = vfprintf(stdout, format, vl);
-	va_end(vl);
-	return rc;
-}
-
-int fprintf(FILE * stream, const char *format, ...)
-{
-	va_list vl;
-	va_start(vl, format);
-	int rc = vfprintf(stream, format, vl);
-	va_end(vl);
-	return rc;
 }
 
 int vfprintf(FILE * stream, const char *format, va_list args)
@@ -213,6 +332,8 @@ int vfprintf(FILE * stream, const char *format, va_list args)
 		pkt->flags = 0;
 		pkt->address = stream->_address;
 		pkt->offset = total_written;
+		pkt->name = NULL;
+		pkt->name_len = 0;
 		pkt->data.raw = universal_buffer;
 		pkt->length = ptr - out;
 		asm volatile ("fence");

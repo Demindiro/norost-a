@@ -1,7 +1,6 @@
 #include "dux.h"
 #include "kernel.h"
 
-#define PAGE_SIZE (0x1000)
 #define NULL ((void *)0)
 
 /**
@@ -63,10 +62,11 @@ void __dux_init(void)
 	//reserved_count = 1;
 
 	// FIXME assume the top and bottom are reserved for stack and ELF respectively.
-	reserved_ranges[2].start = (void *)0xfff00000,
-	    reserved_ranges[2].end = (void *)0xfffeffff,
-	    reserved_ranges[0].start = (void *)0x10000,
-	    reserved_ranges[0].end = (void *)0x1ffffff, reserved_count = 3;
+	reserved_ranges[2].start = (void *)0xfff00000;
+	reserved_ranges[2].end = (void *)0xfffeffff; // 0x1_000_0000
+	reserved_ranges[0].start = (void *)0x10000;
+	reserved_ranges[0].end = (void *)0x0ffffff; // 0x100_0000
+	reserved_count = 3;
 
 	// Reserve pages for client requests and responses
 	dret = dux_reserve_pages(NULL, 8);
@@ -114,9 +114,16 @@ void __dux_init(void)
 		}
 	}
 	free_ranges = (struct kernel_free_range *)dret.address;
-	free_ranges_size = 1;
+	free_ranges_size = 16;
+
 	// Set a range to which pages can be mapped to.
-	free_ranges[0].address = (void *)0x660000;
+	dret = dux_reserve_pages(NULL, 16);
+	if (dret.status != 0) {
+		// FIXME handle errors properly
+		for (;;) {
+		}
+	}
+	free_ranges[0].address = dret.address;
 	free_ranges[0].count = 16;
 
 	// Register the queues to the kernel
@@ -205,10 +212,16 @@ struct kernel_ipc_packet *dux_get_receive_entry(void)
 
 int dux_add_free_range(void *page, size_t count)
 {
-	// FIXME
-	free_ranges[0].address = page;
-	free_ranges[0].count = count;
-	return 0;
+	// TODO merge fragmented ranges.
+	// This should be done by sorting the free range list.
+	for (size_t i = 0; i < free_ranges_size; i++) {
+		if (free_ranges[i].count == 0) {
+			free_ranges[i].address = page;
+			free_ranges[i].count = count;
+			return 0;
+		}
+	}
+	return -1;
 }
 
 int dux_ipc_list_get(const struct dux_ipc_list list, size_t index,

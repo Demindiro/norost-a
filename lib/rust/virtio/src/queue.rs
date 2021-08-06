@@ -128,7 +128,7 @@ impl<'a> Queue<'a> {
 		index: u16,
 		max_size: u16,
 	) -> Result<Self, OutOfMemory> {
-		const DMA_ADDR: usize = 0x200_0000;
+		const DMA_ADDR: usize = 0x300_0000; // FIXME *something* else is allocating at this address
 
 		// TODO ensure max_size is a power of 2
 		let size = u16::from(config.queue_size.get()).min(max_size) as usize;

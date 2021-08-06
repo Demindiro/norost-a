@@ -27,7 +27,6 @@ void __posix_init(void)
 	asm volatile ("fence");
 	universal_buffer = dret.address;
 	asm volatile ("fence");
-#define PAGE_SIZE (4096)
 	universal_buffer_size = 16 * PAGE_SIZE;
 	asm volatile ("fence");
 }

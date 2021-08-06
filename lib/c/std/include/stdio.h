@@ -10,9 +10,11 @@ enum {
 	SEEK_SET,
 };
 
-typedef struct __FILE {
-	pid_t _address;
+typedef struct {
 	kernel_uuid_t _uuid;
+	uint64_t _position;
+	pid_t _address;
+	const char *_path;
 	int _fd;
 } FILE;
 
@@ -54,7 +56,7 @@ FILE *fopen(const char *, const char *);
 
 void setbuf(FILE *, char *);
 
-void fclose(FILE *);
+int fclose(FILE *);
 
 size_t fread(void *, size_t, size_t, FILE *);
 

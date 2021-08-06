@@ -59,10 +59,12 @@ union Data {
 pub struct Packet {
 	uuid: [u64; 2],
 	data: Data,
+	name: Option<NonNull<()>>,
 	offset: u64,
 	length: usize,
 	address: usize,
 	flags: u16,
+	name_len: u16,
 	id: u8,
 	opcode: Option<NonZeroU8>,
 }
@@ -128,22 +130,35 @@ impl IPC {
 				task.inner().shared_state.virtual_memory.activate();
 				let task_ipc = task.inner().ipc.as_mut().unwrap();
 				let rxq = unsafe { &mut *task_ipc.receive_queue.as_ptr().add(0) };
-				let addr = task_ipc.pop_free_range(1 /* FIXME */).expect("no free ranges");
+				let page = Page::from_pointer(unsafe { pkt.data.raw });
+				let addr = page.map(|_| task_ipc.pop_free_range(1 /* FIXME */).expect("no free ranges"));
+				let name_addr = pkt.name.map(|_| task_ipc.pop_free_range(1 /* FIXME */).expect("no free ranges"));
 				rxq.opcode = Some(op.into());
 				rxq.length = pkt.length;
-				unsafe { rxq.data.raw = addr.as_ptr() };
+				addr.map(|addr| unsafe { rxq.data.raw = addr.as_ptr() });
+				rxq.name = name_addr.map(|p| p.as_non_null_ptr());
+				rxq.name_len = pkt.name_len;
 				// FIXME ditto
 				slf_task.inner().shared_state.virtual_memory.activate();
-				task.inner()
-					.shared_state
-					.virtual_memory
-					.share(
-						addr,
-						unsafe { Page::from_pointer(pkt.data.raw).unwrap() },
-						arch::vms::RWX::R,
-						arch::vms::Accessibility::UserLocal,
-					)
-					.unwrap();
+				let vm = &mut task.inner().shared_state.virtual_memory;
+				if let Ok(page) = page {
+					vm.share(
+							addr.unwrap(),
+							page,
+							arch::vms::RWX::RW, // TODO use flags field for this
+							arch::vms::Accessibility::UserLocal,
+						)
+						.unwrap();
+				}
+				if let Some(name) = pkt.name {
+					vm.share(
+							name_addr.unwrap(),
+							Page::from_pointer(name.as_ptr()).unwrap(),
+							arch::vms::RWX::R,
+							arch::vms::Accessibility::UserLocal,
+						)
+						.unwrap();
+				}
 			} else {
 				break;
 			}
@@ -169,6 +184,7 @@ impl IPC {
 }
 
 /// A single free page.
+#[derive(Debug)]
 #[repr(C)]
 pub struct FreePage {
 	address: Option<NonNull<()>>,

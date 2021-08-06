@@ -243,6 +243,7 @@ mod sys {
 	sys! {
 		/// Frees a range of pages of the current task.
 		[task] mem_dealloc(address, count) {
+			logcall!("mem_dealloc 0x{:x}, {}", address, count);
 			let address = match Page::from_usize(address) {
 				Ok(a) => a,
 				Err(arch::page::FromPointerError::Null) => return Return(Status::NullArgument, 0),

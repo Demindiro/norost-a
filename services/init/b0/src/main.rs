@@ -210,11 +210,6 @@ fn main() {
 
 	sys_log!("Spawned task with ID {}", id);
 
-	dux::ipc::add_free_range(
-		unsafe { dux::Page::new_unchecked(0x66_0000 as *mut _) },
-		1,
-	);
-
 	// Create pseudo list.
 	let mut list_builder = dux::ipc::list::Builder::new(3, 50).unwrap();
 	for f in fs.root_dir().iter() {
@@ -238,8 +233,48 @@ fn main() {
 	loop {
 		// Read received data & write it to UART
 		let _ = dux::ipc::try_receive(|rxq| {
+
 			let op = rxq.opcode.unwrap();
 			match kernel::ipc::Op::try_from(op) {
+				Ok(kernel::ipc::Op::Read) => {
+
+					// Figure out object to read.
+					let data = unsafe { core::slice::from_raw_parts_mut(rxq.data.raw, rxq.length) };
+					let path = rxq.name.map(|name| unsafe { core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into()) });
+
+					// Read data
+					let mut f = fs.root_dir().open_file(core::str::from_utf8(path.unwrap()).unwrap()).unwrap();
+					use fatfs::Read;
+					let len = f.read(data).unwrap();
+
+					// Free ranges
+					let _ = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
+					if let Some(name) = rxq.name {
+						let _ = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, 1) };
+						dux::ipc::add_free_range(
+							dux::Page::new(core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap()).unwrap(),
+							1,
+						);
+					}
+					dux::ipc::add_free_range(
+						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
+						1,
+					);
+
+					// Send completion event
+					dux::ipc::transmit(|pkt| *pkt = kernel::ipc::Packet {
+						uuid: kernel::ipc::UUID::from(0),
+						opcode: Some(kernel::ipc::Op::Write.into()),
+						name: None,
+						name_len: 0,
+						flags: 0,
+						id: 0,
+						address: id,
+						data: unsafe { kernel::ipc::Data { raw: core::ptr::null_mut() } },
+						length: len,
+						offset: 0,
+					});
+				}
 				Ok(kernel::ipc::Op::Write) => {
 					let data = unsafe { core::slice::from_raw_parts(rxq.data.raw, rxq.length) };
 					console.write(data);
@@ -260,6 +295,8 @@ fn main() {
 					dux::ipc::transmit(|pkt| *pkt = kernel::ipc::Packet {
 						uuid: kernel::ipc::UUID::from(0),
 						opcode: Some(kernel::ipc::Op::List.into()),
+						name: None,
+						name_len: 0,
 						flags: 0,
 						id: rxq.id,
 						address: id,
@@ -287,6 +324,8 @@ fn main() {
 			dux::ipc::transmit(|pkt| *pkt = kernel::ipc::Packet {
 				uuid: kernel::ipc::UUID::from(0),
 				opcode: Some(kernel::ipc::Op::Write.into()),
+				name: None,
+				name_len: 0,
 				flags: 0,
 				id: 0,
 				address: id,

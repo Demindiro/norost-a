@@ -5,8 +5,6 @@
 #include <kernel.h>
 #include <string.h>
 
-#define PAGE_SIZE (4096) /* TODO */
-
 int alphasort(const struct dirent **lhs, const struct dirent **rhs)
 {
 	return strncmp((*lhs)->d_name, (*rhs)->d_name, sizeof((*lhs)->d_name));
@@ -61,6 +59,8 @@ DIR *opendir(const char *path)
 	pkt->address = 0;
 	pkt->uuid = kernel_uuid(0, 0);
 	pkt->offset = 0;
+	pkt->name = NULL;
+	pkt->name_len = 0;
 	pkt->data.raw = universal_buffer;
 	pkt->length = ptr - out;
 	asm volatile ("fence");

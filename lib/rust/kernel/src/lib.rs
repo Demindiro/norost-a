@@ -97,10 +97,12 @@ pub mod ipc {
 	pub struct Packet {
 		pub uuid: UUID,
 		pub data: Data,
+		pub name: Option<NonNull<Page>>,
 		pub offset: u64,
 		pub length: usize,
 		pub address: usize,
 		pub flags: u16,
+		pub name_len: u16,
 		pub id: u8,
 		pub opcode: Option<NonZeroU8>,
 	}
