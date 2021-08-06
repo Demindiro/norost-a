@@ -147,22 +147,55 @@ fn main() {
 			let mut offset = ph.offset() & !0xfff;
 			let mut virt_a = ph.virtual_addr() & !0xfff;
 
-			for _ in 0..((ph.file_size() + 0xfff) & !0xfff) / 0x1000 {
-				let self_address = bin.as_ptr().wrapping_add(offset as usize) as *mut _;
-				let flags = ph.flags();
-				let flags = u8::from(flags.is_read()) << 0
-					| u8::from(flags.is_write()) << 1
-					| u8::from(flags.is_execute()) << 2;
-				sys_log!("    {:p} -> 0x{:x} ({:b})", self_address, virt_a, flags);
-				mappings[i] = kernel::TaskSpawnMapping {
-					typ: 0,
-					flags,
-					task_address: virt_a as *mut _,
-					self_address,
+			let file_pages = ((ph.file_size() + 0xfff) & !0xfff) / 0x1000;
+			let mem_pages = ((ph.mem_size() + 0xfff) & !0xfff) / 0x1000;
+			let flags = ph.flags();
+			let flags = u8::from(flags.is_read()) << 0
+				| u8::from(flags.is_write()) << 1
+				| u8::from(flags.is_execute()) << 2;
+
+			if ph.flags().is_write() {
+				// We must copy the pages as they may be written to.
+				// FIXME add a sort of "mmap" to dux so we can avoid this lazy brokenness.
+				let addr = 0xded_0000 as *mut _;
+				let ret = unsafe { kernel::mem_alloc(addr, mem_pages as usize, flags) };
+				let addr = addr.cast::<u8>();
+				assert_eq!(ret.status, 0);
+				let data = match ph {
+					xmas_elf::program::ProgramHeader::Ph64(ph) => ph.raw_data(&elf),
+					_ => unreachable!(),
 				};
-				i += 1;
-				offset += 0x1000;
-				virt_a += 0x1000;
+				for k in 0..ph.file_size() {
+					unsafe { *addr.add(k as usize) = data[k as usize] };
+				}
+				for k in 0..mem_pages {
+					let self_address = addr.wrapping_add((k * 0x1000) as usize) as *mut _;
+					sys_log!("    {:p} -> 0x{:x} ({:b})", self_address, virt_a, flags);
+					mappings[i] = kernel::TaskSpawnMapping {
+						typ: 0,
+						flags,
+						task_address: virt_a as *mut _,
+						self_address,
+					};
+					i += 1;
+					offset += 0x1000;
+					virt_a += 0x1000;
+				}
+			} else {
+				// It is safe to share the pages
+				for _ in 0..file_pages {
+					let self_address = bin.as_ptr().wrapping_add(offset as usize) as *mut _;
+					sys_log!("    {:p} -> 0x{:x} ({:b})", self_address, virt_a, flags);
+					mappings[i] = kernel::TaskSpawnMapping {
+						typ: 0,
+						flags,
+						task_address: virt_a as *mut _,
+						self_address,
+					};
+					i += 1;
+					offset += 0x1000;
+					virt_a += 0x1000;
+				}
 			}
 		}
 		pc = elf.header.pt2.entry_point() as usize;
