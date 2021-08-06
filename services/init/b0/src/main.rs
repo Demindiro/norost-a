@@ -211,7 +211,7 @@ fn main() {
 	sys_log!("Spawned task with ID {}", id);
 
 	// Create pseudo list.
-	let mut list_builder = dux::ipc::list::Builder::new(3, 50).unwrap();
+	let mut list_builder = dux::ipc::list::Builder::new(fs.root_dir().iter().count(), 50).unwrap();
 	for f in fs.root_dir().iter() {
 		let f = f.unwrap();
 		let uuid = kernel::ipc::UUID::from(0);

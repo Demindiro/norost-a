@@ -114,6 +114,7 @@ pub struct Builder {
 	max_pages: usize,
 	strings_offset: usize,
 	index: usize,
+	max_entries: usize,
 }
 
 #[derive(Debug)]
@@ -121,6 +122,8 @@ pub enum BuilderAddError {
 	MemoryAllocationError,
 	MaxPagesExceeded,
 	NameTooLong,
+	// TODO we could avoid this error by moving the strings up & perhaps reallocating.
+	MaxEntriesExceeded,
 }
 
 impl Builder {
@@ -142,6 +145,7 @@ impl Builder {
 			max_pages,
 			strings_offset,
 			index: 0,
+			max_entries,
 		})
 	}
 
@@ -149,6 +153,12 @@ impl Builder {
 	#[inline(always)]
 	pub fn data<'a>(&'a self) -> &'a [kernel::Page] {
 		unsafe { slice::from_raw_parts(self.address.as_ptr(), self.page_count) }
+	}
+
+	/// Return the amount of bytes this list spans.
+	#[inline(always)]
+	pub fn bytes_len(&self) -> usize {
+		self.page_count * crate::Page::SIZE
 	}
 
 	/// Add an entry
@@ -162,6 +172,9 @@ impl Builder {
 		(str_end < self.max_data())
 			.then(|| ())
 			.ok_or(BuilderAddError::NameTooLong)?;
+
+		// TODO see struct definition.
+		self.max_entries.checked_sub(1).map(|e| self.max_entries = e).ok_or(BuilderAddError::MaxEntriesExceeded)?;
 
 		unsafe {
 			if self.page_count == 0 {
