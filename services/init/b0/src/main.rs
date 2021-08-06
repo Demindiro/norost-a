@@ -60,77 +60,7 @@ fn main() {
 	device_tree::map_devices();
 	pci::init_blk_device();
 
-	sys_log!("Creating console");
-
-	struct Dummy<'a>(&'a mut [u8], usize);
-
-	impl fatfs::IoBase for Dummy<'_> {
-		type Error = ();
-	}
-	impl fatfs::Read for Dummy<'_> {
-		fn read(&mut self, data: &mut [u8]) -> Result<usize, Self::Error> {
-			let max_r = self.0[self.1..].len().min(data.len());
-			for (w, r) in data.iter_mut().zip(self.0[self.1..].iter().copied()) {
-				*w = r;
-			}
-			self.1 += max_r;
-			Ok(max_r)
-		}
-	}
-	impl fatfs::Write for Dummy<'_> {
-		fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
-			let max_w = self.0[self.1..].len().min(data.len());
-			for (w, r) in self.0[self.1..].iter_mut().zip(data.iter().copied()) {
-				*w = r;
-			}
-			self.1 += max_w;
-			Ok(max_w)
-		}
-		fn flush(&mut self) -> Result<(), Self::Error> {
-			Ok(())
-		}
-	}
-	impl fatfs::Seek for Dummy<'_> {
-		fn seek(&mut self, pos: fatfs::SeekFrom) -> Result<u64, Self::Error> {
-			use core::convert::TryInto;
-			match pos {
-				fatfs::SeekFrom::Start(p) => self.1 = p.try_into().unwrap(),
-				fatfs::SeekFrom::Current(d) => {
-					if d > 0 {
-						self.1 += { let d: usize = d.try_into().unwrap(); d };
-					} else {
-						self.1 -= { let d: usize = (-d).try_into().unwrap(); d };
-					}
-				}
-				fatfs::SeekFrom::End(d) => self.1 = self.0.len() - { let d: usize = (-d).try_into().unwrap(); d },
-			}
-			Ok(self.1.try_into().unwrap())
-		}
-	}
-	impl fatfs::IoBase for &mut Dummy<'_> {
-		type Error = ();
-	}
-	impl fatfs::Read for &mut Dummy<'_> {
-		fn read(&mut self, data: &mut [u8]) -> Result<usize, Self::Error> {
-			Dummy::read(self, data)
-		}
-	}
-	impl fatfs::Write for &mut Dummy<'_> {
-		fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
-			Dummy::write(self, data)
-		}
-		fn flush(&mut self) -> Result<(), Self::Error> {
-			Dummy::flush(self)
-		}
-	}
-	impl fatfs::Seek for &mut Dummy<'_> {
-		fn seek(&mut self, pos: fatfs::SeekFrom) -> Result<u64, Self::Error> {
-			(*self).seek(pos)
-		}
-	}
-
-	//let mut buf = [0u8; 512 * 11];
-	//let mut fs = fs::init(Dummy(&mut buf[..], 0));
+	sys_log!("Opening FAT FS");
 	let mut dev = unsafe { pci::BLK.as_mut().unwrap().downcast_mut().unwrap() };
 	let mut fs = match fs::open(virtio_block::Proxy::new(dev)) {
 		Ok(fs) => {
@@ -150,6 +80,7 @@ fn main() {
 		}
 	};
 
+	sys_log!("Creating console");
 	let mut console = unsafe { console::Console::new(device_tree::UART_ADDRESS.cast()) };
 	let mut buf = [0; 256];
 	let mut i = 0;
