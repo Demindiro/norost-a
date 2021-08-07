@@ -14,18 +14,65 @@ queue*. Explicit synchronization can be achieved with the ``io_wait`` syscall.
 To avoid copying overhead, data is sent by sharing pages between tasks.
 
 
-Userland implementation
-~~~~~~~~~~~~~~~~~~~~~~~
+Implementation
+~~~~~~~~~~~~~~
 
-Transmit queue
-''''''''''''''
+Packet table
+''''''''''''
 
-A TXQ entry is a struct with the following fields:
+Communication is achieved with the use of packets. Packets are stored in a
+contiguous array.
+
+Packets to be sent are put in the transmit queue, which is a ring buffer of
+packet slots.
+
+Packets that are received are put in the send queue by the kernel, which is
+also a ring buffer.
+
+Free packet slots are put in the free stack. This stack is used by both the
+kernel
+
+The structure is layed out as follows:
+
+::
+   
+   +-------------------+
+   | packet 0          |
+   | packet 1          |
+   | ...               |
+   | packet n-1        |
+   +-------------------+
+   | transmit index    |
+   +-------------------+
+   | transmit slot 0   |
+   | transmit slot 1   |
+   | ...               |
+   | transmit slot n-1 |
+   +-------------------+
+   | received index    |
+   +-------------------+
+   | received slot 0   |
+   | ...               |
+   +-------------------+
+   | free stack index  |
+   +-------------------+
+   | free slot 0       |
+   | ...               |
+   +-------------------+
+
+At most ``2 ^ 15`` packets can be allocated, as slots are addressed with
+16-bit unsigned integers and to prevent ambiguity when the kernel/client side
+``index`` is equal to that of the ring.
+
+
+Packets
+'''''''
+
+A packet has the following fields:
 
 * A ``UUID`` ``uuid`` field to identify an object.
 
-* A ``*mut _``data`` field, which is a pointer to an arbitrary blob of data. The
-  format of the data depends on the flags.
+* A ``*mut Page``data`` field, which is the start address of a page range.
 
 * A ``usize`` ``length`` field, which describes the amount of data to be read or
   written.
@@ -45,26 +92,56 @@ A TXQ entry is a struct with the following fields:
 
 The fields must be in the given order and be properly aligned.
 
+
+Flags
+`````
+
++-----+-------------+-------------------------------------------------------+
+| Bit | Name        | Description                                           |
++-----+-------------+-------------------------------------------------------+
+|   0 | Readable    | Make data pages readable                              |
++-----+-------------+-------------------------------------------------------+
+|   1 | Writeable   | Make data pages writeable                             |
++-----+-------------+-------------------------------------------------------+
+|   2 | Executable  | Make data pages executable                            |
++-----+-------------+-------------------------------------------------------+
+|   3 | Lock        | Lock page flags                                       |
++-----+-------------+-------------------------------------------------------+
+|   4 | Response    | The packet is a response                              |
++-----+-------------+-------------------------------------------------------+
+|   5 | Error       | The packet is an error response                       |
++-----+-------------+-------------------------------------------------------+
+|   6 | Quiet       | No confirmation of successfull processing is expected |
++-----+-------------+-------------------------------------------------------+
+|   7 | Unavailable | The resource is unavailable                           |
++-----+-------------+-------------------------------------------------------+
+
+
+Transmitting packets
+''''''''''''''''''''
+
 To send data, the operation goes as follows:
 
-1. Write out the structure **without** the ``opcode``.
+1. Write out the structure.
 
-2. Execute a memory fence.
+2. Add the slot index to the ``transmit`` ring buffer..
 
-3. Write out the ``opcode``.
+3. Execute a memory fence.
+
+4. Increment the transmit ring index.
+
 
 The memory fence is necessary so that the ``opcode`` won't be written until
 all the fields of the RQ entry have been written out.
 
 
-Receive queue
-'''''''''''''
+Receiving packets
+'''''''''''''''''
 
-An RXQ entry is identical to a TXQ entry except that ``address`` corresponds
-to that of the sending task instead of the receiving task.
-
-To send a response, a TXQ structure is filled out with the ``id`` and
-``address`` matching that of the RXQ structure.
+To detect received packets, a private ``last_received`` index should be used.
+If this index is *not* equal to that of the ``received`` ring buffer, it should
+be incremented until it does. Any elements in between are slots of new received
+packets.
 
 
 Operations
