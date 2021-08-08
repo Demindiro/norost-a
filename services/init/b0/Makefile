@@ -1,7 +1,5 @@
 include ../../../common.mk
 
-export CARGO_BUILD_TARGET = riscv64gc-unknown-none-elf
-
 NAME = b0
 
 build:

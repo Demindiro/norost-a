@@ -3,6 +3,7 @@ default: build
 
 test:
 	#make -C lib/c/std/ test
+	make -C lib/rust/dux_ar
 	make -C lib/c/std/ -B
 	make -C services/init/minish/ -B
 	make -C services/init/b0

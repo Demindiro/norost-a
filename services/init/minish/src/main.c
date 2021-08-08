@@ -1,4 +1,3 @@
-#undef __STDC_HOSTED__
 // Note: this header is not part of the standard library, but there is
 // no other way to iterate directories.
 #include <dirent.h>
@@ -7,7 +6,7 @@
 
 #define VERSION_MAJ 0
 #define VERSION_MIN 0
-#define VERSION_REV 5
+#define VERSION_REV 6
 
 #define ARG_SEPARATORS " \t"
 
@@ -80,7 +79,7 @@ static void read() {
 	for (;;) {
 		size_t r = fread(buf, sizeof(buf) - 1, 1, f);
 		buf[r] = '\0';
-		printf("%s", buf);
+		printf("%s ", buf);
 		if (r != sizeof(buf) - 1) {
 			break;
 		}

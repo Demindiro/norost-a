@@ -38,7 +38,7 @@ impl Executor<'_> {
 			};
 
 			if let Ok(task) = group.task(id) {
-				task.process_io();
+				task.process_io(Address::todo(id));
 				task.execute()
 			};
 		}

@@ -11,6 +11,7 @@
 #![feature(const_option)]
 #![feature(const_panic)]
 #![feature(const_ptr_is_null)]
+#![feature(const_ptr_offset)]
 #![feature(const_raw_ptr_deref)]
 #![feature(const_raw_ptr_to_usize_cast)]
 //#![feature(custom_test_frameworks)]
@@ -433,7 +434,7 @@ extern "C" fn main(
 
 		arch::set_supervisor_userpage_access(true);
 		for i in s.clear_from..s.clear_to {
-			unsafe { ptr::write_volatile(s.address.as_ptr::<u8>().add(i), 0) };
+			unsafe { ptr::write_volatile(s.address.as_ptr().cast::<u8>().add(i), 0) };
 		}
 		arch::set_supervisor_userpage_access(false);
 	}

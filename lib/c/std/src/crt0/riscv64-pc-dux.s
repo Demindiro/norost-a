@@ -3,9 +3,8 @@
 .globl _start
 
 # Reserve 64 Kb stack space to start with
-.equ STACK_TOP_ADDRESS, 0x010000000
-.equ STACK_INITIAL_ADDRESS, 0x0fff0000
-.equ STACK_INITIAL_SIZE, 16
+.equ STACK_TOP_ADDRESS, 0x0fff * 0x10000
+.equ STACK_INITIAL_SIZE, 16 # 64 KiB
 .equ PROT_RW, 0b011
 
 .section .text
@@ -19,7 +18,7 @@ _start:
 	
 	# Allocate pages for stack frame
 	li		a7, 3		# mem_alloc
-	li		a0, STACK_INITIAL_ADDRESS
+	li		a0, STACK_TOP_ADDRESS - STACK_INITIAL_SIZE * 0x1000
 	li		a1, STACK_INITIAL_SIZE
 	li		a2, PROT_RW
 	ecall

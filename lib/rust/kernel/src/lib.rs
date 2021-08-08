@@ -29,26 +29,10 @@ pub struct Return {
 pub mod ipc {
 	use super::*;
 	use core::convert::TryFrom;
-	use core::fmt;
+	use core::ptr;
 	use core::mem;
 	use core::num::NonZeroU8;
 	use core::ptr::NonNull;
-
-	/// Union of all possible data types that can be pointed to in a packet's `data` field.
-	///
-	/// All members are pointers.
-	#[derive(Clone, Copy)]
-	pub union Data {
-		/// An address range with raw data to be read or to which data should be written.
-		pub raw: *mut u8,
-	}
-
-	impl Default for Data {
-		fn default() -> Self {
-			let raw = core::ptr::null_mut();
-			unsafe { Self { raw } }
-		}
-	}
 
 	/// An UUID used to uniquely identify objects.
 	#[repr(C)]
@@ -92,11 +76,11 @@ pub mod ipc {
 	}
 
 	/// Structure used to communicate with other tasks.
-	#[derive(Default)]
+	#[derive(Debug, Default)]
 	#[repr(C)]
 	pub struct Packet {
 		pub uuid: UUID,
-		pub data: Data,
+		pub data: Option<NonNull<Page>>,
 		pub name: Option<NonNull<Page>>,
 		pub offset: u64,
 		pub length: usize,
@@ -153,6 +137,16 @@ pub mod ipc {
 		pub address: Option<NonNull<Page>>,
 		pub count: usize,
 	}
+
+	impl fmt::Debug for FreePage {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f
+				.debug_struct(stringify!(FreePage))
+				.field("address", &self.address.map(|p| p.as_ptr()).unwrap_or_else(ptr::null_mut))
+				.field("count", &self.count)
+				.finish()
+		}
+	}
 }
 
 #[repr(C)]
@@ -173,10 +167,8 @@ syscall!(io_wait, 0, flags: u8, time: u64);
 syscall!(
 	io_set_queues,
 	1,
-	transmit_queue: *mut ipc::Packet,
-	transmit_size: usize,
-	receive_queue: *mut ipc::Packet,
-	receive_size: usize,
+	packets: *mut ipc::Packet,
+	mask_bits: u8,
 	free_pages: *mut ipc::FreePage,
 	free_pages_size: usize
 );
@@ -311,3 +303,24 @@ impl From<PhysicalAddress> for usize {
 	}
 }
 
+// Shamelessly copied from stdlib.
+#[macro_export]
+macro_rules! dbg {
+    () => {
+        $crate::sys_log!("[{}:{}]", file!(), line!());
+    };
+    ($val:expr $(,)?) => {
+        // Use of `match` here is intentional because it affects the lifetimes
+        // of temporaries - https://stackoverflow.com/a/48732525/1063961
+        match $val {
+            tmp => {
+                $crate::sys_log!("[{}:{}] {} = {:#?}",
+                    file!(), line!(), stringify!($val), &tmp);
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($crate::dbg!($val)),+,)
+    };
+}

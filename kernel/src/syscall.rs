@@ -3,7 +3,7 @@
 //! This module contains generic code. Arch-specific code is located in [`arch`](crate::arch)
 
 use crate::arch::vms::{self, VirtualMemorySystem, RWX};
-use crate::arch::{self, Map, MapRange, Page};
+use crate::arch::{self, Map, MapRange, Page, PageData};
 use crate::memory::ppn::*;
 use crate::task;
 use core::convert::TryFrom;
@@ -85,10 +85,10 @@ impl From<Status> for u8 {
 /// Mapping used to spawn new tasks.
 #[repr(C)]
 pub struct Mapping {
-	task_address: *mut Page,
+	task_address: *mut PageData,
 	typ: u8,
 	flags: u8,
-	self_address: *mut Page,
+	self_address: *mut PageData,
 }
 
 /// Module containing all the actual syscalls.
@@ -192,30 +192,26 @@ mod sys {
 
 	sys! {
 		/// Resize the task's IPC buffers to be able to hold the given amount of entries.
-		[task] io_set_queues(transmit_queue, transmit_size, receive_queue, receive_size, free_pages, free_pages_size) {
+		[task] io_set_queues(packet_table, mask_bits, free_pages, free_pages_size) {
 			logcall!(
 				"io_set_queues 0x{:x}, {}, 0x{:x}, {}, 0x{:x}, {}",
-				transmit_queue,
-				transmit_size,
-				receive_queue,
-				receive_size,
+				packet_table,
+				mask_bits,
 				free_pages,
 				free_pages_size,
 			);
-			let a = if transmit_queue == 0 {
-				None
-			} else {
-				let rq = NonNull::new(transmit_queue as *mut _);
-				let rs = transmit_size as u8;
-				let cq = NonNull::new(receive_queue as *mut _);
-				let cs = receive_size as u8;
-				let fp = NonNull::new(free_pages as *mut _);
-				let fs = free_pages_size;
-				let r = rq.and_then(|rq| cq.and_then(|cq| fp.map(|fp| crate::task::ipc::IPC::new(rq, rs, cq, cs, fp, fs))));
-				if r.is_none() {
-					return Return(Status::NullArgument, 0);
+			let a = match NonNull::new(packet_table as *mut _) {
+				Some(pt) => {
+					let mb = mask_bits as u8;
+					let fp = NonNull::new(free_pages as *mut _);
+					let fs = free_pages_size;
+					let r = fp.map(|fp| unsafe { crate::task::ipc::IPC::new(pt, mb, fp, fs).unwrap() });
+					if r.is_none() {
+						return Return(Status::NullArgument, 0);
+					}
+					r
 				}
-				r
+				None => None,
 			};
 			task.set_queues(a);
 			Return(Status::Ok, 0)
@@ -226,11 +222,11 @@ mod sys {
 		/// Allocates a range of private or shared pages for the current task.
 		[task] mem_alloc(address, count, flags) {
 			logcall!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
-			match arch::Page::try_from(address as *mut ()) {
+			match arch::Page::try_from(address as *mut _) {
 				Ok(address) => match decode_rwx_flags(flags) {
 					Ok(rwx) => {
 						task.allocate_memory(address, count, rwx).unwrap();
-						Return(Status::Ok, address.as_ptr::<()>() as usize)
+						Return(Status::Ok, address.as_ptr() as usize)
 					}
 					Err(InvalidPageFlags) => Return(Status::MemoryInvalidProtectionFlags, 0),
 				}
@@ -273,7 +269,7 @@ mod sys {
 				return Return(Status::BadAlignment, 0);
 			}
 			let store = unsafe { core::slice::from_raw_parts_mut(store as *mut _, count) };
-			let address = arch::Page::try_from(address as *mut ()).unwrap();
+			let address = arch::Page::try_from(address as *mut _).unwrap();
 			arch::set_supervisor_userpage_access(true);
 			let ret = arch::VMS::physical_addresses(address, store);
 			arch::set_supervisor_userpage_access(false);
@@ -326,7 +322,7 @@ mod sys {
 			for i in 1..count {
 				ppns[i] = Some(memory::allocate().unwrap());
 			}
-			if let Some(addr) = NonNull::new(address as *mut ()) {
+			if let Some(addr) = NonNull::new(address as *mut _) {
 				let mut addr = arch::Page::new(addr).ok();
 				for i in 0..count {
 					if let Some(a) = addr {
@@ -350,7 +346,7 @@ mod sys {
 		[_] sys_platform_info(address, _max_count) {
 			logcall!("sys_platform_info 0x{:x}, {}", address, _max_count);
 			use crate::{PLATFORM_INFO_SIZE, PLATFORM_INFO_PHYS_PTR};
-			if let Some(a) = NonNull::new(address as *mut arch::Page) {
+			if let Some(a) = NonNull::new(address as *mut _) {
 				if let Ok(a) = arch::Page::new(a) {
 					let p = PPNDirect::from_usize(*PLATFORM_INFO_PHYS_PTR).unwrap();
 					if let Ok(p) = PPNDirectRange::new(p.into(), *PLATFORM_INFO_SIZE) {
@@ -372,7 +368,7 @@ mod sys {
 	sys! {
 		[_] sys_direct_alloc(address, ppn, count, _flags) {
 			logcall!("sys_direct_alloc 0x{:x}, 0x{:x}, {}, 0b{:b}", address, ppn << arch::PAGE_BITS, count, _flags);
-			if let Some(addr) = NonNull::new(address as *mut ()) {
+			if let Some(addr) = NonNull::new(address as *mut _) {
 				if let Ok(addr) = arch::Page::new(addr) {
 					if let Ok(ppn) = PPNBox::try_from(ppn) {
 						if let Ok(ppn) = PPNDirectRange::new(ppn, count) {

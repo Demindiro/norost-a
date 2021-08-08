@@ -238,7 +238,7 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 
 		let offset = header.offset & arch::PAGE_MASK;
 
-		let address = ((header.virtual_address & !arch::PAGE_MASK) as *mut ())
+		let address = ((header.virtual_address & !arch::PAGE_MASK) as *mut arch::PageData)
 			.try_into()
 			.expect("Address is 0x0");
 		let count = ((header.memory_size + offset + arch::PAGE_MASK) / arch::Page::SIZE)

@@ -185,7 +185,6 @@ const char *__std_determine_format(const char *input,
 		}
 	}
 	// Check if there is a length specifier
-	char length_specifier_is_long = 0;
 	switch (*input++) {
 	case 'h':
 		if (*input == 'h') {
@@ -200,7 +199,6 @@ const char *__std_determine_format(const char *input,
 			input++;
 			type->type = STD_FORMAT_TYPE_LONG_LONG;
 		} else {
-			length_specifier_is_long = 1;
 			type->type = STD_FORMAT_TYPE_LONG;
 		}
 		break;

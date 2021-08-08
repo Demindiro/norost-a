@@ -83,31 +83,15 @@ int fgetc(FILE * stream)
 
 char *fgets(char *s, int size, FILE * stream)
 {
-	if (size == 0) {
-		// Paraphrasing man page: "returns NULL while no characters have been read"
-		return NULL;
-	}
-	struct kernel_ipc_packet *rxe = dux_get_receive_entry();
-	while (rxe->opcode == 0) {
-		kernel_io_wait(0, 0);
-	}
-	char *ptr = s;
-	char *data = rxe->data.raw;
-	char *end = data + rxe->length;
-	while (data != end) {
-		*ptr++ = *data++;
-	}
-	*ptr = 0;
-	size_t data_pages = (rxe->length + (PAGE_SIZE - 1)) / PAGE_SIZE;
-	kernel_mem_dealloc(rxe->data.raw, data_pages);
-	dux_add_free_range(rxe->data.raw, data_pages);
-	if (rxe->name != NULL) {
-		size_t name_pages = (rxe->name_len + (PAGE_SIZE - 1)) / PAGE_SIZE;
-		kernel_mem_dealloc(rxe->name, name_pages);
-		dux_add_free_range(rxe->name, name_pages);
-	}
-	rxe->opcode = 0;
-	return s;
+	char* ret;
+	// FIXME this is not the proper way to do it
+	do {
+		// size - 1 so we can store a null terminator.
+		size_t rd = fread(s, size - 1, 1, stdin);
+		ret = rd == 0 ? NULL : s;
+		s[rd] = '\0';
+	} while (ret == NULL);
+	return ret;
 }
 
 int getc(FILE * stream)
@@ -211,37 +195,48 @@ size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
 		size_t max_size = universal_buffer_size < delta_read ? universal_buffer_size : delta_read;
 
 		// Get a request entry
-		struct kernel_ipc_packet *pkt = NULL;
+		struct kernel_ipc_packet *pkt;
+		uint16_t slot = dux_reserve_transmit_entry(&pkt);
 		while (pkt == NULL) {
 			kernel_io_wait(0, 0);
-			pkt = dux_reserve_transmit_entry();
+			slot = dux_reserve_transmit_entry(&pkt);
 		}
 
 		// Fill out the request entry
+		pkt->uuid = kernel_uuid(-1, 0);
 		pkt->flags = 0;
 		pkt->address = stream->_address;
 		pkt->offset = stream->_position;
 		pkt->name = (void *)stream->_path;
 		pkt->name_len = stream->_path != NULL ? strlen(stream->_path) : 0;
 		pkt->data.raw = universal_buffer;
-		pkt->length = universal_buffer_size;
-		asm volatile ("fence");
+		pkt->length = 0x1000; // TODO
 		pkt->opcode = KERNEL_IPC_OP_READ;
+		
+		// Send the packet
+		dux_submit_transmit_entry(slot);
 
 		// Wait for a response
-		struct kernel_ipc_packet *cce = dux_get_receive_entry();
-		while (cce->opcode == KERNEL_IPC_OP_NONE) {
+		const struct kernel_ipc_packet *cce;
+		for (;;) {
+			slot = dux_get_received_entry(&cce);
+			if (slot == -1) {
+				// Do nothing
+			} else if (cce->opcode == KERNEL_IPC_OP_READ) {
+
+				// Copy the received data.
+				memcpy(p, universal_buffer, cce->length);
+				p += cce->length;
+				total_read += cce->length;
+				stream->_position += cce->length;
+
+				dux_pop_received_entry(slot);
+				break;
+			} else {
+				dux_defer_received_entry(slot);
+			}
 			kernel_io_wait(0, 0);
 		}
-
-		// Copy the received data.
-		memcpy(p, universal_buffer, cce->length);
-		p += cce->length;
-		total_read += cce->length;
-		stream->_position += cce->length;
-
-		// Mark packet as processed
-		cce->opcode = 0;
 
 		// Check if the "stream" ended early
 		if (cce->length < max_size) {
@@ -255,7 +250,7 @@ size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
 size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
 {
 	// TODO account properly for size
-	char *p = ptr;
+	const char *p = ptr;
 	size_t write_total = size * count;
 	size_t total_written = 0;
 
@@ -270,13 +265,15 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
 		}
 
 		// Get a request entry
-		struct kernel_ipc_packet *pkt = NULL;
+		struct kernel_ipc_packet *pkt;
+		uint16_t slot = dux_reserve_transmit_entry(&pkt);
 		while (pkt == NULL) {
 			kernel_io_wait(0, 0);
-			pkt = dux_reserve_transmit_entry();
+			slot = dux_reserve_transmit_entry(&pkt);
 		}
 
 		// Fill out the request entry
+		pkt->uuid = kernel_uuid(0, -1);
 		pkt->flags = 0;
 		pkt->address = stream->_address;
 		pkt->offset = stream->_position;
@@ -284,22 +281,31 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
 		pkt->name_len = stream->_path != NULL ? strlen(stream->_path) : 0;
 		pkt->data.raw = universal_buffer;
 		pkt->length = max_size;
-		asm volatile ("fence");
 		pkt->opcode = KERNEL_IPC_OP_WRITE;
 
+		// Send the packet
+		dux_submit_transmit_entry(slot);
+
 		// Wait for a response
-		struct kernel_ipc_packet *cce = dux_get_receive_entry();
-		while (cce->opcode == KERNEL_IPC_OP_NONE) {
+		const struct kernel_ipc_packet *cce;
+		for (;;) {
+			slot = dux_get_received_entry(&cce);
+			if (slot == -1) {
+				// Do nothing
+			} else if (cce->opcode == KERNEL_IPC_OP_WRITE) {
+
+				// Note the amount of written data.
+				p += cce->length;
+				total_written += cce->length;
+				stream->_position += cce->length;
+
+				dux_pop_received_entry(slot);
+				break;
+			} else {
+				dux_defer_received_entry(slot);
+			}
 			kernel_io_wait(0, 0);
 		}
-
-		// Note the amount of written data.
-		p += cce->length;
-		total_written += cce->length;
-		stream->_position += cce->length;
-
-		// Mark packet as processed
-		cce->opcode = 0;
 
 		// Check if the "stream" ended early
 		if (cce->length < max_size) {
@@ -361,13 +367,11 @@ int vfprintf(FILE * stream, const char *format, va_list args)
 		}
 
 		// Get a request entry
-		struct kernel_ipc_packet *pkt = NULL;
-		while (pkt == NULL) {
-			kernel_io_wait(0, 0);
-			pkt = dux_reserve_transmit_entry();
-		}
+		struct kernel_ipc_packet *pkt;
+		uint16_t slot = dux_reserve_transmit_entry(&pkt);
 
 		// Fill out the request entry
+		pkt->uuid = kernel_uuid(-1, -1);
 		pkt->flags = 0;
 		pkt->address = stream->_address;
 		pkt->offset = total_written;
@@ -375,25 +379,31 @@ int vfprintf(FILE * stream, const char *format, va_list args)
 		pkt->name_len = 0;
 		pkt->data.raw = universal_buffer;
 		pkt->length = ptr - out;
-		asm volatile ("fence");
 		pkt->opcode = KERNEL_IPC_OP_WRITE;
 
-		// TODO check if the request was processed successfully
-		/*
-		   struct kernel_client_completion_entry *cce = &completion_queue[completion_index];
-		   completion_index++;
-		   completion_index &= request_mask;
+		// Send the packet
+		dux_submit_transmit_entry(slot);
 
-		   return cce->status;
-		 */
+		// Wait for a response
+		const struct kernel_ipc_packet *cce;
+		for (;;) {
+			slot = dux_get_received_entry(&cce);
+			if (slot == -1) {
+				// Do nothing
+			} else if (cce->opcode == KERNEL_IPC_OP_WRITE) {
 
-		total_written += ptr - out;
+				// Note the amount of written data.
+				total_written += cce->length;
+				stream->_position += cce->length;
+
+				dux_pop_received_entry(slot);
+				break;
+			} else {
+				dux_defer_received_entry(slot);
+			}
+			kernel_io_wait(0, 0);
+		}
 	}
-
-	// Flush the queue
-	kernel_io_wait(0, 0);
-	kernel_io_wait(0, 0);	// FIXME hacky workaround to ensure the receiving task prints the
-	// data before we overwrite it again
 
 	// TODO return the correct amount of bytes written
 	return total_written;

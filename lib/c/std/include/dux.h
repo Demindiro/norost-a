@@ -9,11 +9,19 @@
 #define DUX_RESERVE_NOMEM   (2)
 
 /**
- * Structure returned by dux_reserve_pages. A non-zero status field indicates an error.
+ * Structure returned by dux_reserve_pages. A negative status field indicates an error.
+ *
+ * Possible error values:
+ *
+ * -1 means no more ranges were free.
+ *
+ * -2 means the address wasn't properly aligned.
+ *
+ * -3 means there was no more physical memory available to add the entry.
  */
 struct dux_reserve_pages {
-	uint8_t status;
 	void *address;
+	int8_t status;
 };
 
 /**
@@ -45,15 +53,41 @@ struct dux_ipc_list {
 };
 
 /**
- * Returns a pointer to an empty client request entry. Returns NULL if none
+ * Returns a slot with an empty client request entry. Returns -1 if none
  * are available.
+ *
+ * This locks the transmit ring buffer until a packet is submitted.
+ *
+ * The `packet` parameter **MUST** not be NULL!
  */
-struct kernel_ipc_packet *dux_reserve_transmit_entry(void);
+uint16_t dux_reserve_transmit_entry(struct kernel_ipc_packet **packet);
 
 /**
- * Return a pointer to the current receive entry. Returns NULL if there is no receive queue.
+ * Submits a packet previously received with `dux_reserve_transmit_entry`. This
+ * unlocks the transmit ring buffer.
  */
-struct kernel_ipc_packet *dux_get_receive_entry(void);
+void dux_submit_transmit_entry(uint16_t slot);
+
+/**
+ * Return a pointer to the current receive entry. Returns -1 if no unprocessed packets
+ * are available.
+ */
+uint16_t dux_get_received_entry(const struct kernel_ipc_packet **packet);
+
+/**
+ * "Pop" the received entry from the received list, readding it to the free stack
+ *
+ * This **MUST** be called only once per slot!
+ */
+void dux_pop_received_entry(uint16_t slot);
+
+/**
+ * Readd the slot to the received list. This is useful if a function is
+ * waiting for a specific packet.
+ *
+ * This **MUST** be called only once per slot!
+ */
+void dux_defer_received_entry(uint16_t slot);
 
 /**
  * Reserves a range of memory pages. If the address is NULL, the best fitting address is used and
@@ -62,9 +96,19 @@ struct kernel_ipc_packet *dux_get_receive_entry(void);
 struct dux_reserve_pages dux_reserve_pages(void *address, size_t count);
 
 /**
- * Unreserves a range of memory pages. Returns a non-zero value if an error occured.
+ * Unreserves a range of memory pages. Returns a negative value if an error occured.
+ *
+ * # Returns
+ *
+ * 0 on success.
+ *
+ * -1 if the address is either NULL or not properly aligned.
+ *
+ * -2 if the range isn't reserved.
+ *
+ * -3 if a matching entry was found but the count is too large.
  */
-uint8_t dux_unreserve_pages(void *address, size_t count);
+int dux_unreserve_pages(void *address, size_t count);
 
 /**
  * Add an address range that can be freely used for IPC
@@ -76,7 +120,7 @@ int dux_add_free_range(void *address, size_t count);
  *
  * Returns -1 if the index is out of range, otherwise 0.
  */
-int dux_ipc_list_get(const struct dux_ipc_list list, size_t index,
+int dux_ipc_list_get(const struct dux_ipc_list *list, size_t index,
 		     struct dux_ipc_list_entry *entry);
 
 #endif

@@ -36,7 +36,7 @@
 //! of CPU cores is very limited. For now, `4096` is assumed to be the practical limit for
 //! commercial CPUs in the future.
 
-use crate::arch::Page;
+use crate::arch::{Page, PageData};
 use core::ptr::NonNull;
 
 /// Structure used to denote a start and end range.
@@ -44,7 +44,7 @@ pub struct Range {
 	/// The start address of a range.
 	pub start: Page,
 	/// The end address of a range (inclusive).
-	pub end: NonNull<u8>,
+	pub end: NonNull<PageData>,
 }
 
 impl Range {
@@ -61,7 +61,7 @@ impl Range {
 		//    = note: casting pointers to integers in constants
 		use core::mem::transmute;
 		let s = unsafe { transmute::<_, usize>(self.end.as_ptr()) };
-		let e = unsafe { transmute::<_, usize>(self.start.as_ptr::<()>()) };
+		let e = unsafe { transmute::<_, usize>(self.start.as_ptr()) };
 		e + 1 - s
 	}
 }
@@ -194,7 +194,7 @@ macro_rules! range {
 			range![@dump LOCAL $($l_name,)*];
 		}
 
-		const _: usize = unsafe { (LOCAL.start.as_ptr::<()>() as usize) } - $limit; // Limit check
+		const _: usize = unsafe { (LOCAL.start.as_ptr() as usize) } - $limit; // Limit check
 	};
 }
 

@@ -19,13 +19,13 @@
 
 pub mod ipc;
 
+mod address;
 mod executor;
 mod group;
 
+pub use address::*;
 pub use executor::Executor;
 pub use group::Group;
-
-use ipc::RingIndex;
 
 use crate::arch::vms::{self, VirtualMemorySystem, RWX};
 use crate::arch::{self, Map, Page};
@@ -84,7 +84,7 @@ impl Task {
 			)
 			.unwrap();
 		}
-		let task = Self(unsafe { TASK_DATA_ADDRESS }.as_non_null_ptr());
+		let task = Self(unsafe { TASK_DATA_ADDRESS }.as_non_null_ptr().cast());
 		// SAFETY: task is valid
 		unsafe {
 			task.0.as_ptr().write(TaskData {
@@ -152,6 +152,9 @@ impl Task {
 #[export_name = "executor_next_task"]
 #[linkage = "external"]
 extern "C" fn next(exec: Task) -> ! {
+	todo!();
+	/*
 	exec.process_io();
 	exec.execute()
+	*/
 }

@@ -3,7 +3,7 @@ pub mod page;
 pub mod vms;
 
 pub use map::{Map, MapRange};
-pub use page::Page;
+pub use page::*;
 
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 pub mod riscv;

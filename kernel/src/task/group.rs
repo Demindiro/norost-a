@@ -15,7 +15,7 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 /// The start of the task group list.
 static GROUPS: arena::Arena<GroupData> = unsafe {
 	arena::Arena::new(
-		reserved::TASK_GROUPS.start.as_non_null_ptr(),
+		reserved::TASK_GROUPS.start.as_non_null_ptr().cast(),
 		reserved::TASK_GROUPS.byte_count(),
 	)
 };

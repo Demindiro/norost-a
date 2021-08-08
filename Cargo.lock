@@ -82,6 +82,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dux_ar"
+version = "0.1.0"
+dependencies = [
+ "dux",
+ "syscalls",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

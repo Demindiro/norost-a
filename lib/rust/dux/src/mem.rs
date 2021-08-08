@@ -13,11 +13,12 @@ use crate::util;
 use crate::Page;
 use core::cell::Cell;
 use core::mem;
+use core::ops;
 use core::ptr;
 use core::ptr::NonNull;
 use core::slice;
 use core::sync::atomic;
-use core::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 
 /// A single memory range.
 #[repr(C)]
@@ -43,32 +44,43 @@ struct IPCQueue {}
 /// Part of the global structure but separate to account for be able to account for memory size.
 #[repr(C)]
 struct GlobalPart {
-	/// The mask of the transmit queue, which is the length of the queue `- 1`.
-	///
-	/// If it is `2`, the queue is locked.
-	transmit_mask: AtomicU16,
-	transmit_index: Cell<u16>,
-	/// The mask of the receive queue, which is the length of the queue `- 1`.
-	///
-	/// If it is `2`, the queue is locked.
-	receive_mask: AtomicU16,
-	receive_index: Cell<u16>,
-	transmit_entries: Cell<*mut kernel::ipc::Packet>,
-	receive_entries: Cell<*mut kernel::ipc::Packet>,
+	/// The table of IPC packets as well as the transmit & receive buffers & free stack.
+	ipc_packets: Cell<*mut kernel::ipc::Packet>,
+
+	/// A list of free ranges for use with IPC.
+	free_ranges: Cell<*mut kernel::ipc::FreePage>,
+
+	/// A pointer to extra reserved entries.
+	extra_reserved_entries: Cell<*mut MemoryMap>,
+
 	/// The amount of occupied reserved entries
 	reserved_count: Cell<usize>,
+
 	/// The amount of available reserved entries.
 	///
 	/// If this is 0, the list is locked.
 	reserved_capacity: AtomicUsize,
-	/// A pointer to extra reserved entries.
-	extra_reserved_entries: Cell<*mut MemoryMap>,
+
 	/// The amount of available free range entries.
 	///
 	/// If it is 0, the list is locked.
 	free_ranges_capacity: AtomicUsize,
-	/// A list of free ranges for use with IPC.
-	free_ranges: Cell<*mut kernel::ipc::FreePage>,
+
+	/// The mask of the ring buffers, which is the length of the buffer `- 1`.
+	ring_mask: Cell<u16>,
+
+	/// The slot index of the last processed received packet.
+	last_received_index: Cell<u16>,
+
+	/// A lock for the transmit ring buffer.
+	///
+	/// `false` means the lock is open, `true` means it is locked.
+	transmit_lock: AtomicBool,
+
+	/// A lock for the received ring buffer.
+	///
+	/// `false` means the lock is open, `true` means it is locked.
+	received_lock: AtomicBool,
 }
 
 /// The whole memory management structure.
@@ -114,6 +126,7 @@ impl core::ops::Deref for Magic {
 /// Initializes the library. This should be the first function called in crt0.
 // TODO this should be moved to a separate library inside `rtbegin.rs` or even just `¢rt0.rs`
 // TODO maybe this should be written in assembly? We can avoid using the stack if we do.
+#[export_name = "__dux_init"]
 pub unsafe fn init() {
 	// FIXME need a mem_get_mappings syscall of sorts.
 
@@ -147,6 +160,9 @@ pub unsafe fn init() {
 	GLOBAL.reserved_entries[0].end.set(0x1ffffff as *mut _);
 	GLOBAL.part.reserved_count.set(3);
 
+	// Set up IPC queues
+	let packets_count = 4;
+
 	// Reserve pages for IPC
 	// FIXME handle errors properly
 	let addr = reserve_range(None, 8).unwrap();
@@ -156,19 +172,24 @@ pub unsafe fn init() {
 		todo!()
 	}
 
-	let addr = addr.as_ptr().cast::<kernel::ipc::Packet>();
+	GLOBAL.part.ipc_packets.set(addr.as_ptr().cast::<kernel::ipc::Packet>());
+	GLOBAL.part.last_received_index.set(0);
+	GLOBAL.part.ring_mask.set(packets_count - 1);
 
-	let txq = addr;
-	GLOBAL.part.transmit_entries.set(txq);
-	GLOBAL.part.transmit_index.set(0);
-	GLOBAL.part.transmit_mask.store(0, Ordering::Release);
+	// Push the slots on the free stack
+	for slot in 0..packets_count {
+		ipc::push_free_slot(slot);
+	}
 
-	let rxq = addr.add(1);
-	GLOBAL.part.receive_entries.set(rxq);
-	GLOBAL.part.receive_index.set(0);
-	GLOBAL.part.receive_mask.store(0, Ordering::Release);
-
-	let free_ranges = addr.add(2).cast();
+	// Reserve pages for free ranges
+	// FIXME handle errors properly
+	let addr = reserve_range(None, 8).unwrap();
+	let ret = kernel::mem_alloc(addr.as_ptr(), 1, kernel::PROT_READ_WRITE);
+	if ret.status != 0 {
+		// FIXME handle errors properly
+		todo!()
+	}
+	let free_ranges = addr.as_ptr().cast();
 	let free_ranges_len = 12;
 	GLOBAL.part.free_ranges.set(free_ranges);
 	GLOBAL.part.free_ranges_capacity.store(free_ranges_len, Ordering::Release);
@@ -181,10 +202,8 @@ pub unsafe fn init() {
 
 	// Register the queues to the kernel
 	let ret = kernel::io_set_queues(
-		txq,
-		0,
-		rxq,
-		0,
+		GLOBAL.part.ipc_packets.get(),
+		(packets_count - 1).count_ones() as u8,
 		free_ranges.as_ptr() as *mut _,
 		free_ranges.len(),
 	);
@@ -321,143 +340,147 @@ pub(crate) mod ipc {
 	/// Send an IPC packet to a task.
 	///
 	/// This will yield the task if no slots are available.
-	pub fn transmit<F, R>(f: F) -> R
-	where
-		F: FnOnce(&mut kernel::ipc::Packet) -> R,
-	{
-		// Acquiring the lock before looping should improve performance slightly & reduce
-		// the risk of a task stalling indefinitely.
-		util::spin_lock(&GLOBAL.part.transmit_mask, 2, |mask| {
-			let mut index = GLOBAL.part.transmit_index.get();
-			let entries = GLOBAL.part.transmit_entries.get();
-			loop {
-				match unsafe { get_free_slot(entries, &mut index, *mask) } {
-					Ok(pkt) => {
-						GLOBAL.part.transmit_index.set(index);
-						let mut f_pkt = Default::default();
-						let ret = f(&mut f_pkt);
-						// Don't increase the index nor copy the data if the
-						// opcode is Noe
-						if f_pkt.opcode.is_some() {
-							GLOBAL.part.transmit_index.set(index);
-							copy(&f_pkt, pkt);
-						}
-						return ret;
-					}
-					Err(NoFreeSlots) => unsafe {
-						kernel::io_wait(0, 0);
-					},
-				}
+	pub fn transmit() -> TransmitLock {
+		let _ = util::SpinLockGuard::new(&GLOBAL.part.transmit_lock, true).into_raw();
+		loop {
+			match unsafe { pop_free_slot() } {
+				Ok(slot) => return TransmitLock { slot },
+				Err(NoFreeSlots) => unsafe {
+					kernel::io_wait(0, 0);
+				},
 			}
-		})
+		}
 	}
 
 	/// Attempt to reserve a slot for sendng an IPC packet to a task.
-	pub fn try_transmit<F, R>(f: F) -> Result<R, NoFreeSlots>
-	where
-		F: FnOnce(&mut kernel::ipc::Packet) -> R,
-	{
-		util::spin_lock(&GLOBAL.part.transmit_mask, 2, |mask| {
-			let mut index = GLOBAL.part.transmit_index.get();
-			let entries = GLOBAL.part.transmit_entries.get();
-			let pkt = unsafe { get_free_slot(entries, &mut index, *mask) }?;
-			let mut f_pkt = Default::default();
-			let ret = f(&mut f_pkt);
-			// Don't increase the index nor copy the data if the
-			// opcode is Noe
-			if f_pkt.opcode.is_some() {
-				GLOBAL.part.transmit_index.set(index);
-				copy(&f_pkt, pkt);
-			}
-			Ok(ret)
-		})
+	pub fn try_transmit() -> Result<TransmitLock, NoFreeSlots> {
+		let guard = util::SpinLockGuard::new(&GLOBAL.part.transmit_lock, true);
+		let slot = unsafe { pop_free_slot() }?;
+		let _ = guard.into_raw();
+		Ok(TransmitLock { slot })
 	}
 
-	/// Try to get an unused slot in an IPC queue.
-	///
-	/// # Safety
-	///
-	/// The queue must be locked & the lifetime must have an appropriate limit.
-	///
-	/// The index must be in range.
-	unsafe fn get_free_slot<'a>(
-		queue: *mut kernel::ipc::Packet,
-		index: &mut u16,
-		mask: u16,
-	) -> Result<&'a mut kernel::ipc::Packet, NoFreeSlots> {
-		let entry = &mut *queue.add(usize::from(*index));
-		if entry.opcode.is_none() {
-			*index += 1;
-			*index &= mask;
-			Ok(entry)
-		} else {
-			Err(NoFreeSlots)
+	/// A lock on the transmit queue along with the slot of the packet to write to.
+	pub struct TransmitLock {
+		slot: u16,
+	}
+
+	impl TransmitLock {
+		pub fn into_raw<'a>(self) -> (u16, &'a mut kernel::ipc::Packet) {
+			let slot = self.slot;
+			mem::forget(self);
+			(slot, unsafe { packet(slot) }.unwrap())
+		}
+
+		pub unsafe fn from_raw(slot: u16) -> Self {
+			Self { slot }
+		}
+	}
+
+	impl ops::Deref for TransmitLock {
+		type Target = kernel::ipc::Packet;
+
+		fn deref(&self) -> &Self::Target {
+			unsafe { packet(self.slot) }.unwrap()
+		}
+	}
+
+	impl ops::DerefMut for TransmitLock {
+		fn deref_mut(&mut self) -> &mut Self::Target {
+			unsafe { packet(self.slot) }.unwrap()
+		}
+	}
+
+	impl Drop for TransmitLock {
+		fn drop(&mut self) {
+			let (index, entries) = unsafe { transmit_ring() };
+			let mask = GLOBAL.part.ring_mask.get();
+
+			entries[usize::from(*index & mask)] = self.slot;
+			*index = index.wrapping_add(1);
+
+			unsafe { util::SpinLockGuard::from_raw(&GLOBAL.part.transmit_lock, false) };
 		}
 	}
 
 	/// Receive an IPC packet.
 	///
 	/// This will yield the task if no packets have been received yet.
-	pub fn receive<F, R>(f: F) -> R
-	where
-		F: FnOnce(&kernel::ipc::Packet) -> R,
-	{
-		// Acquiring the lock before looping should improve performance slightly & reduce
-		// the risk of a task stalling indefinitely.
-		util::spin_lock(&GLOBAL.part.receive_mask, 2, |mask| {
-			let mut index = GLOBAL.part.receive_index.get();
-			let entries = GLOBAL.part.receive_entries.get();
-			loop {
-				match unsafe { get_used_slot(entries, &mut index, *mask) } {
-					Ok(pkt) => {
-						GLOBAL.part.receive_index.set(index);
-						let ret = f(pkt);
-						pkt.opcode = None;
-						return ret;
-					}
-					Err(NoFreeSlots) => unsafe {
-						kernel::io_wait(0, 0);
-					},
-				}
+	pub fn receive() -> ReceivedLock {
+		let _ = util::SpinLockGuard::new(&GLOBAL.part.received_lock, true).into_raw();
+		let mask = GLOBAL.part.ring_mask.get();
+		loop {
+			let (index, entries) = unsafe { received_ring() };
+			let i = GLOBAL.part.last_received_index.get();
+			if i != index {
+				return ReceivedLock { slot: entries[usize::from(i & mask)].get() };
 			}
-		})
+			let _ = unsafe { kernel::io_wait(0, 0) };
+		}
 	}
 
 	/// Attempt to reserve a slot for sendng an IPC packet to a task.
-	pub fn try_receive<F, R>(f: F) -> Result<R, NoFreeSlots>
-	where
-		F: FnOnce(&kernel::ipc::Packet) -> R,
-	{
-		util::spin_lock(&GLOBAL.part.receive_mask, 2, |mask| {
-			let mut index = GLOBAL.part.receive_index.get();
-			let entries = GLOBAL.part.receive_entries.get();
-			let pkt = unsafe { get_used_slot(entries, &mut index, *mask)? };
-			GLOBAL.part.receive_index.set(index);
-			let ret = f(pkt);
-			pkt.opcode = None;
-			Ok(ret)
+	pub fn try_receive() -> Option<ReceivedLock> {
+		let guard = util::SpinLockGuard::new(&GLOBAL.part.received_lock, true);
+
+		let (index, entries) = unsafe { received_ring() };
+		let mask = GLOBAL.part.ring_mask.get();
+		let i = GLOBAL.part.last_received_index.get();
+		(i != index).then(|| {
+			let _ = guard.into_raw();
+			ReceivedLock { slot: entries[usize::from(i & mask)].get() }
 		})
 	}
 
-	/// Try to get an used slot in an IPC queue.
-	///
-	/// # Safety
-	///
-	/// The queue must be locked & the lifetime must have an appropriate limit.
-	///
-	/// The index must be in range.
-	unsafe fn get_used_slot<'a>(
-		queue: *mut kernel::ipc::Packet,
-		index: &mut u16,
-		mask: u16,
-	) -> Result<&'a mut kernel::ipc::Packet, NoFreeSlots> {
-		let entry = &mut *queue.add(usize::from(*index));
-		if entry.opcode.is_some() {
-			*index += 1;
-			*index &= mask;
-			Ok(entry)
-		} else {
-			Err(NoFreeSlots)
+	/// A lock on the received queue along with the slot of the packet to write to.
+	pub struct ReceivedLock {
+		slot: u16,
+	}
+
+	impl ReceivedLock {
+		pub fn into_raw<'a>(self) -> (u16, &'a kernel::ipc::Packet) {
+			let slot = self.slot;
+			mem::forget(self);
+			(slot, unsafe { packet(slot) }.unwrap())
+		}
+
+		pub unsafe fn from_raw(slot: u16) -> Self {
+			Self { slot }
+		}
+
+		/// Release the lock but don't discard the packet. Instead, swap the packet with the last
+		/// available entry in the ring buffer.
+		pub fn defer(self) {
+			let (index, entries) = unsafe { received_ring() };
+			let last_index = GLOBAL.part.last_received_index.get();
+			let mask = GLOBAL.part.ring_mask.get();
+
+			let a = entries[usize::from(last_index & mask)].get();
+			let b = entries[usize::from(index & mask)].get();
+			debug_assert_eq!(a, self.slot, "current received entry mutated while locked");
+			assert_eq!(a, self.slot, "current received entry mutated while locked");
+			entries[usize::from(index & mask)].set(a);
+			entries[usize::from(last_index & mask)].set(b);
+
+			unsafe { util::SpinLockGuard::from_raw(&GLOBAL.part.received_lock, false) };
+		}
+	}
+
+	impl ops::Deref for ReceivedLock {
+		type Target = kernel::ipc::Packet;
+
+		fn deref(&self) -> &Self::Target {
+			unsafe { packet(self.slot) }.unwrap()
+		}
+	}
+
+	impl Drop for ReceivedLock {
+		fn drop(&mut self) {
+			let i = GLOBAL.part.last_received_index.get();
+			GLOBAL.part.last_received_index.set(i.wrapping_add(1));
+			drop(unsafe { util::SpinLockGuard::from_raw(&GLOBAL.part.received_lock, false) });
+			// push it after dropping the lock to reduce contention
+			unsafe { push_free_slot(self.slot) };
 		}
 	}
 
@@ -465,6 +488,11 @@ pub(crate) mod ipc {
 	pub fn add_free_range(page: Page, count: usize) -> Result<(), ()> {
 		util::spin_lock(&GLOBAL.part.free_ranges_capacity, 0, |capacity| {
 			let ranges = unsafe { slice::from_raw_parts_mut(GLOBAL.part.free_ranges.get(), *capacity) };
+			// FIXME return an error if a double page is being added.
+			ranges
+				.iter()
+				.filter_map(|r| (r.count > 0).then(|| r.address))
+				.for_each(|addr| assert_ne!(addr, Some(page.as_non_null_ptr())));
 			// TODO merge fragmented ranges.
 			// This should be done by sorting the free range list.
 			for (i, range) in ranges.iter_mut().enumerate() {
@@ -476,5 +504,122 @@ pub(crate) mod ipc {
 			}
 			Err(())
 		})
+	}
+
+	/// Return the IPC packet at a given slot.
+	///
+	/// # Safety
+	///
+	/// The queue may not be resized while there is a reference to the packet.
+	///
+	/// There may be no other references to this packet.
+	unsafe fn packet<'a>(index: u16) -> Option<&'a mut kernel::ipc::Packet> {
+		(index <= GLOBAL.part.ring_mask.get())
+			.then(|| &mut *GLOBAL.part.ipc_packets.get().add(usize::from(index)))
+	}
+
+	/// Return the transmit index & buffer.
+	///
+	/// # Safety
+	///
+	/// There may be no other references to this buffer.
+	///
+	/// The ring may not be resized while there is a reference to the slice.
+	///
+	/// The ring must be locked during this call.
+	unsafe fn transmit_ring<'a>() -> (&'a mut u16, &'a mut [u16]) {
+		let len = usize::from(ring_len());
+		// Skip table
+		let addr = GLOBAL
+			.part
+			.ipc_packets
+			.get()
+			.add(len)
+			.cast::<u16>();
+		let index = &mut *addr;
+		let slice = slice::from_raw_parts_mut(addr.cast::<u16>().add(1), len);
+		(index, slice)
+	}
+
+	/// Return the received index & buffer.
+	///
+	/// # Safety
+	///
+	/// The ring may not be resized while there is a reference to the slice.
+	///
+	/// The ring must be locked during this call.
+	unsafe fn received_ring<'a>() -> (u16, &'a [Cell<u16>]) {
+		let len = usize::from(ring_len());
+		// Skip table + transmit ring
+		// Use an AtomicU16 as the kernel may write to it from another thread.
+		let addr = GLOBAL
+			.part
+			.ipc_packets
+			.get()
+			.add(len)
+			.cast::<AtomicU16>()
+			.add(1 + len);
+		let index = (&*addr).load(Ordering::Acquire);
+		let slice = slice::from_raw_parts(addr.cast::<Cell<u16>>().add(1), len);
+		(index, slice)
+	}
+
+	/// Try to get an unused slot from the free stack.
+	fn pop_free_slot() -> Result<u16, NoFreeSlots> {
+		let (top, entries) = unsafe { free_stack() };
+		util::spin_lock(top, u16::MAX, |top| { 
+			top
+				.checked_sub(1)
+				.map(|t| {
+					*top = t;
+					entries[usize::from(t)].get()
+				})
+				.ok_or(NoFreeSlots)
+		})
+	}
+
+	/// Add an unused slot to the free stack.
+	///
+	/// # Safety
+	///
+	/// The index must be in range and not already present on the stack.
+	pub(super) unsafe fn push_free_slot(slot: u16) {
+		let (top, entries) = free_stack();
+		util::spin_lock(top, u16::MAX, |top| { 
+			assert!(*top < ring_len(), "free stack overflow");
+			entries[usize::from(*top)].set(slot);
+			*top += 1;
+		});
+	}
+
+	/// Return the free stack.
+	///
+	/// # Safety
+	///
+	/// The stack may not be resized while there is a reference to the slice.
+	///
+	/// The stack must be locked during this call.
+	unsafe fn free_stack<'a>() -> (&'a AtomicU16, &'a [Cell<u16>]) {
+		let len = usize::from(ring_len());
+		// Skip table + transmit ring
+		// Use an AtomicU16 as the kernel may write to it from another thread.
+		let addr = GLOBAL
+			.part
+			.ipc_packets
+			.get()
+			.add(len)
+			.cast::<AtomicU16>()
+			.add((1 + len) * 2);
+		let top = &*addr;
+		let slice = slice::from_raw_parts_mut(addr.cast::<Cell<u16>>().add(1), len);
+		(top, slice)
+	}
+
+	/// Returns the length of the ring buffers.
+	///
+	/// The queue may not be resized during this call.
+	unsafe fn ring_len() -> u16 {
+		debug_assert_ne!(GLOBAL.part.ring_mask.get(), u16::MAX);
+		GLOBAL.part.ring_mask.get() + 1
 	}
 }

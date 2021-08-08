@@ -4,6 +4,7 @@ members = [
 	"kernel",
 	"lib/rust/device_tree",
 	"lib/rust/dux",
+	"lib/rust/dux_ar",
 	"lib/rust/kernel",
 	"lib/rust/pci",
 	"lib/rust/virtio",

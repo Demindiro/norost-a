@@ -13,8 +13,8 @@
 
 pub mod ipc;
 pub mod mem;
+pub mod page;
 
-mod page;
 mod util;
 
 pub use mem::init;

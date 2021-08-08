@@ -24,7 +24,7 @@ BUILD  = build/$(TARGET)
 
 default: install-headers build
 
-build: $(OUTPUT)/lib/crt0.o $(OUTPUT)/lib/libc.a $(OUTPUT)/lib/libdux.a
+build: $(OUTPUT)/lib/crt0.o $(OUTPUT)/lib/libc.a
 
 install-headers: $(patsubst %,$(OUTPUT)/%,$(HEADERS))
 
@@ -48,18 +48,11 @@ $(OUTPUT)/lib/libc.a: $(OBJECTS) | $(OUTPUT)/lib
 	rm -f $@
 	$(AR) rc $@ $^
 
-$(OUTPUT)/lib/libdux.a: $(BUILD)/dux.o | $(OUTPUT)/lib
-	rm -f $@
-	$(AR) rc $@ $^
-
 $(OUTPUT)/include/%.h: include/%.h | $(HEADER_DIRS)
 	cp $< $@
 
 $(BUILD)/%.o: src/%.c | $(DIRECTORIES)
 	$(CC) -c $< -o $@ $(INCLUDE) $(CC_ARGS)
-
-../dux/output/dux.a:
-	make -C ../dux
 
 $(BUILD) $(DIRECTORIES) $(HEADER_DIRS):
 	mkdir -p $@

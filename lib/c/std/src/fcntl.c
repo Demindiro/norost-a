@@ -19,8 +19,9 @@ ssize_t read(int fd, void *buf, size_t count)
 {
 	count = count < universal_buffer_size ? count : universal_buffer_size;
 
-	struct kernel_ipc_packet *cre = dux_reserve_transmit_entry();
-	if (cre == NULL) {
+	struct kernel_ipc_packet *cre;
+	uint16_t slot = dux_reserve_transmit_entry(&cre);
+	if (slot == -1) {
 		return EAGAIN;
 	}
 
@@ -36,8 +37,6 @@ ssize_t read(int fd, void *buf, size_t count)
 	cre->offset = 0;
 	cre->data.raw = universal_buffer;
 	cre->length = count;
-
-	asm volatile ("fence");
 
 	cre->opcode = KERNEL_IPC_OP_READ;
 

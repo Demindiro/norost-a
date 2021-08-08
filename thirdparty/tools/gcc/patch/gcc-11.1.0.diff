@@ -89,7 +89,7 @@ diff -ruN /tmp/gcc-11.1.0/gcc/config/dux.h gcc-11.1.0/gcc/config/dux.h
 +#define TARGET_DUX
 + 
 +#undef LIB_SPEC
-+#define LIB_SPEC "-lc"
++#define LIB_SPEC "-lc -ldux"
 + 
 +#undef STARTFILE_SPEC
 +#define STARTFILE_SPEC "crt0.o%s crti.o%s crtbegin.o%s"

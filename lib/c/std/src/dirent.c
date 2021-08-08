@@ -49,9 +49,10 @@ DIR *opendir(const char *path)
 
 	// Get a request entry
 	struct kernel_ipc_packet *pkt = NULL;
-	while (pkt == NULL) {
+	uint16_t slot = dux_reserve_transmit_entry(&pkt);
+	while (slot == -1) {
 		kernel_io_wait(0, 0);
-		pkt = dux_reserve_transmit_entry();
+		slot = dux_reserve_transmit_entry(&pkt);
 	}
 
 	// Fill out the request entry
@@ -63,26 +64,27 @@ DIR *opendir(const char *path)
 	pkt->name_len = 0;
 	pkt->data.raw = universal_buffer;
 	pkt->length = ptr - out;
-	asm volatile ("fence");
 	pkt->opcode = KERNEL_IPC_OP_LIST;
+
+	// Submit the entry
+	dux_submit_transmit_entry(slot);
 
 	void *data;
 	size_t data_len;
 
-	struct kernel_ipc_packet *cce = dux_get_receive_entry();
-	cce->opcode = 0;
 	for (;;) {
-		kernel_io_wait(0, 0);
-		if (cce->opcode == KERNEL_IPC_OP_LIST) {
+		const struct kernel_ipc_packet *cce;
+		slot = dux_get_received_entry(&cce);
+		if (slot == -1) {
+			// Do nothing
+		} else if (cce->opcode == KERNEL_IPC_OP_LIST) {
 			data = cce->data.raw;
 			data_len = cce->length;
-			cce->opcode = KERNEL_IPC_OP_NONE;
+			dux_pop_received_entry(slot);
 			break;
+		} else {
+			dux_defer_received_entry(slot);
 		}
-		//completion_index++;
-		//completion_index &= request_mask;
-
-		// Flush the queue
 		kernel_io_wait(0, 0);
 	}
 
@@ -98,7 +100,7 @@ DIR *opendir(const char *path)
 struct dirent *readdir(DIR * dir)
 {
 	struct dux_ipc_list_entry e;
-	if (dux_ipc_list_get(dir->_list, dir->_index, &e) < 0) {
+	if (dux_ipc_list_get(&dir->_list, dir->_index, &e) < 0) {
 		return NULL;
 	}
 	dir->_index += 1;

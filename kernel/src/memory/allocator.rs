@@ -170,9 +170,10 @@ impl Allocator {
 		};
 		let stacks = unsafe {
 			Stacks {
-				stacks: slice::from_raw_parts_mut(stacks.as_ptr(), hc),
+				stacks: slice::from_raw_parts_mut(stacks.as_ptr().cast(), hc),
 				top_base: stacks
-					.as_ptr::<u8>()
+					.as_ptr()
+					.cast::<u8>()
 					.add(Stacks::MEM_STACK_SIZE * hc)
 					.cast(),
 			}

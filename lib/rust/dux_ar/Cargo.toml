@@ -1,0 +1,12 @@
+[package]
+name = "dux_ar"
+version = "0.1.0"
+authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
+edition = "2018"
+
+[dependencies]
+dux = { path = "../dux" }
+kernel = { path = "../kernel", package = "syscalls" }
+
+[lib]
+crate-type = ["staticlib"]

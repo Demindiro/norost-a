@@ -3,17 +3,13 @@ use core::convert::TryFrom;
 ///
 /// This page is guaranteed to be properly aligned and non-null.
 use core::fmt;
-use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct Page(NonZeroUsize);
+/// A representation of a raw page.
+#[repr(align(4096))]
+pub struct PageData([u8; Self::SIZE]);
 
-#[derive(Clone, Copy, Debug)]
-pub struct BadAlignment;
-
-impl Page {
+impl PageData {
 	/// The size of the offset part in bits.
 	pub const OFFSET_BITS: usize = 12;
 
@@ -23,11 +19,36 @@ impl Page {
 	/// The alignment of a single page. This is always equivalent to the `SIZE`
 	pub const ALIGN: usize = Self::SIZE;
 
+	/// The mask for the offset bits.
+	pub const OFFSET_MASK: usize = (1 << Self::OFFSET_BITS) - 1;
+}
+
+/// The address of a page.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Page(NonNull<PageData>);
+
+#[derive(Clone, Copy, Debug)]
+pub struct BadAlignment;
+
+impl Page {
+	/// The size of the offset part in bits.
+	pub const OFFSET_BITS: usize = PageData::OFFSET_BITS;
+
+	/// The size of a single page.
+	pub const SIZE: usize = PageData::SIZE;
+
+	/// The alignment of a single page. This is always equivalent to the `SIZE`
+	pub const ALIGN: usize = PageData::ALIGN;
+
+	/// The mask for the offset bits.
+	pub const OFFSET_MASK: usize = PageData::OFFSET_MASK;
+
 	/// Create a new `Page` with the given aligned address.
 	///
 	/// Returns an error if the address isn't properly aligned.
 	#[inline(always)]
-	pub const fn new<T>(address: NonNull<T>) -> Result<Self, BadAlignment> {
+	pub const fn new(address: NonNull<PageData>) -> Result<Self, BadAlignment> {
 		// Using transmute because fuck you rustc
 		//
 		//  error[E0133]: cast of pointer to int is unsafe and requires unsafe function or block
@@ -38,17 +59,17 @@ impl Page {
 		//    |
 		//    = note: casting pointers to integers in constants
 		use core::mem::transmute;
-		// SAFETY: NonNull can never be casted to 0.
-		let addr = unsafe { transmute::<_, NonZeroUsize>(address) };
-		if addr.get() & (Self::ALIGN - 1) == 0 {
-			Ok(Self(addr))
+		// SAFETY: usize can represent all possible values of address.
+		let addr = unsafe { transmute::<_, usize>(address) };
+		if addr & (Self::ALIGN - 1) == 0 {
+			Ok(Self(address))
 		} else {
 			Err(BadAlignment)
 		}
 	}
 
 	/// Create a new `Page` from a raw pointer.
-	pub const fn from_pointer<T>(ptr: *mut T) -> Result<Self, FromPointerError> {
+	pub const fn from_pointer(ptr: *mut PageData) -> Result<Self, FromPointerError> {
 		// Why the fuck is NonNull::new not const?
 		if !ptr.is_null() {
 			let ptr = unsafe { NonNull::new_unchecked(ptr) };
@@ -67,7 +88,7 @@ impl Page {
 	pub const fn from_usize(ptr: usize) -> Result<Self, FromPointerError> {
 		if ptr != 0 {
 			if ptr & (Self::ALIGN - 1) == 0 {
-				Ok(unsafe { Self(NonZeroUsize::new_unchecked(ptr)) })
+				Ok(unsafe { Self(NonNull::new_unchecked(ptr as *mut _)) })
 			} else {
 				Err(FromPointerError::BadAlignment)
 			}
@@ -78,75 +99,51 @@ impl Page {
 
 	/// Return the address of this page.
 	#[inline(always)]
-	pub const fn as_ptr<T>(&self) -> *mut T {
-		self.0.get() as *mut T
+	pub const fn as_ptr(&self) -> *mut PageData {
+		self.0.as_ptr()
 	}
 
 	/// Return the address of this page.
 	#[inline(always)]
-	pub const fn as_non_null_ptr<T>(&self) -> NonNull<T> {
-		// SAFETY: NonZeroUsize can never be casted to a null pointer
-		unsafe { NonNull::new_unchecked(self.0.get() as *mut T) }
-	}
-
-	/// Return the page as an immutable reference.
-	///
-	/// # Safety
-	///
-	/// The page must point to valid and initialized memory.
-	#[inline(always)]
-	pub const unsafe fn as_ref<'a, T>(&self) -> &'a T {
-		&*self.as_ptr()
-	}
-
-	/// Return the page as a mutable reference.
-	///
-	/// # Safety
-	///
-	/// The page must point to valid and initialized memory.
-	///
-	/// The memory may not be referenced already.
-	#[inline(always)]
-	pub const unsafe fn as_mut<'a, T>(&mut self) -> &'a mut T {
-		&mut *self.as_ptr()
+	pub const fn as_non_null_ptr(&self) -> NonNull<PageData> {
+		self.0
 	}
 
 	/// Return the page that comes after this one.
 	#[inline(always)]
 	pub const fn next(&self) -> Option<Self> {
-		// Ditto. Rust pls
-		let v = self.0.get().wrapping_add(Self::SIZE);
-		if v != 0 {
-			Some(Self(unsafe { NonZeroUsize::new_unchecked(v) }))
-		} else {
-			None
-		}
+		self.skip(1)
 	}
 
 	/// Return the page at the given offset.
 	#[inline(always)]
 	pub const fn skip(&self, offset: usize) -> Option<Self> {
-		if let Some(v) = self.0.get().checked_add(Self::SIZE * offset) {
-			if v != 0 {
-				Some(Self(unsafe { NonZeroUsize::new_unchecked(v) }))
-			} else {
+		unsafe {
+			let ptr = self.0.as_ptr().add(offset);
+			if ptr.is_null() {
 				None
+			} else {
+				Some(Self(NonNull::new_unchecked(ptr)))
 			}
-		} else {
-			None
 		}
+	}
+
+	/// Return the amount of pages needed to cover the given amount of bytes.
+	#[inline(always)]
+	pub const fn min_pages_for_byte_count(bytes: usize) -> usize {
+		(bytes + Self::OFFSET_MASK) / Self::SIZE
 	}
 }
 
 impl fmt::Debug for Page {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "0x{:x}", self.0)
+		write!(f, "Page({:p})", self.0)
 	}
 }
 
 impl fmt::Pointer for Page {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		fmt::Debug::fmt(self, f)
+		fmt::Pointer::fmt(&self.0, f)
 	}
 }
 
@@ -159,11 +156,11 @@ pub enum FromPointerError {
 	BadAlignment,
 }
 
-impl<T> TryFrom<*mut T> for Page {
+impl TryFrom<*mut PageData> for Page {
 	type Error = FromPointerError;
 
 	/// Create a new `Page` with the given pointer
-	fn try_from(ptr: *mut T) -> Result<Self, Self::Error> {
+	fn try_from(ptr: *mut PageData) -> Result<Self, Self::Error> {
 		Self::from_pointer(ptr)
 	}
 }

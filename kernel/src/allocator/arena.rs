@@ -118,7 +118,7 @@ impl<T> Arena<T> {
 					let page = memory::allocate().map_err(|_| InsertError::NoMemory)?;
 					// FIXME don't allocate just the first page ya fuckwit
 					VMS::add(
-						Page::new(self.slots).unwrap(),
+						Page::new(self.slots.cast()).unwrap(),
 						Map::Private(page),
 						vms::RWX::RW,
 						vms::Accessibility::KernelGlobal,
