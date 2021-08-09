@@ -106,3 +106,47 @@ pub fn set_supervisor_userpage_access(enable: bool) {
 	sstatus |= sum_bit * (enable as usize);
 	unsafe { asm!("csrw sstatus, {0}", in(reg) sstatus) };
 }
+
+#[inline]
+pub fn enable_supervisor_interrupts(enable: bool) {
+	// Enable in supervisor mode
+	let sie_bit = 1 << 1;
+	let mut sstatus: usize;
+	unsafe { asm!("csrr {0}, sstatus", out(reg) sstatus) };
+	log!("sstatus: 0x{:x}", sstatus);
+	sstatus &= !sie_bit;
+	sstatus |= sie_bit * usize::from(u8::from(enable));
+	log!("sstatus: 0x{:x}", sstatus);
+	unsafe { asm!("csrw sstatus, {0}", in(reg) sstatus) };
+}
+
+#[inline]
+pub fn enable_timer_interrupts(enable: bool) {
+	// Enable supervisor timer interrupts.
+	let stie_bit = 1 << 5;
+	let mut sie: usize;
+	unsafe { asm!("csrr {0}, sie", out(reg) sie) };
+	log!("sie: 0x{:x}", sie);
+	sie &= !stie_bit;
+	sie |= stie_bit * usize::from(u8::from(enable));
+	log!("sie: 0x{:x}", sie);
+	unsafe { asm!("csrw sie, {0}", in(reg) sie) };
+}
+
+#[inline]
+pub fn enable_external_interrupts(enable: bool) {
+	// Enable supervisor timer interrupts.
+	let seie_bit = 1 << 9;
+	let mut sie: usize;
+	unsafe { asm!("csrr {0}, sie", out(reg) sie) };
+	log!("sie: 0x{:x}", sie);
+	sie &= !seie_bit;
+	sie |= seie_bit * usize::from(u8::from(enable));
+	log!("sie: 0x{:x}", sie);
+	unsafe { asm!("csrw sie, {0}", in(reg) sie) };
+}
+
+#[inline]
+pub fn clear_pending_interrupts() {
+	unsafe { asm!("csrw sip, zero") };
+}

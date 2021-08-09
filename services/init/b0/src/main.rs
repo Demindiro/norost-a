@@ -27,6 +27,7 @@ mod console;
 mod device_tree;
 mod fs;
 mod pci;
+mod plic;
 mod rtbegin;
 mod uart;
 
@@ -59,6 +60,19 @@ fn main() {
 	sys_log!("Mapping devices");
 	device_tree::map_devices();
 	pci::init_blk_device();
+
+	sys_log!("Setting up PLIC & enabling Interrupt 0");
+	let mut plic = unsafe { plic::PLIC::new(device_tree::PLIC_ADDRESS) };
+	let source = core::num::NonZeroU16::new(0xa).unwrap(); // UART
+	let context = 0x1; // Hart 0 S-mode
+
+	// The PLIC's behaviour should match that of SiFive's PLIC
+	// https://static.dev.sifive.com/U54-MC-RVCoreIP.pdf
+	// Presumably, since we're running on hart 0 (the only hart), we need to
+	// enable the interrupt in context 0x1 (S-mode).
+	plic.enable(context, source, true);
+	plic.set_priority(source, 1);
+	plic.set_priority_threshold(context, 0);
 
 	sys_log!("Opening FAT FS");
 	let mut dev = unsafe { pci::BLK.as_mut().unwrap().downcast_mut().unwrap() };
@@ -124,6 +138,7 @@ fn main() {
 	}
 
 	sys_log!("Listing binary addresses:");
+	loop {}
 
 	// SAFETY: all zeroes TaskSpawnMapping is valid.
 	let mut mappings =

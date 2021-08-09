@@ -169,6 +169,16 @@ impl CommonConfig {
 	pub const STATUS_FAILED: u8 = 0x80;
 }
 
+#[repr(C)]
+pub struct ISRConfig {
+	pub status: VolatileCell<u8>,
+}
+
+impl ISRConfig {
+	pub const QUEUE_INTERRUPT: u8 = 0x1;
+	pub const DEVICE_CONFIGURATION_INTERRUPT: u8 = 0x2;
+}
+
 /// Device specific configuration struct.
 ///
 /// The fields of this struct are empty as there are no common fields.
@@ -299,6 +309,7 @@ where
 	let mut pci_config = None;
 
 	for cap in header.capabilities() {
+		kernel::dbg!(cap.id());
 		if cap.id() == 0x9 {
 			let cap = unsafe { cap.data::<Capability>() };
 			if bar_sizes[usize::from(cap.base_address.get())].is_some() {
@@ -332,7 +343,61 @@ where
 					_ => (),
 				}
 			}
+		} else if cap.id() == 0x5 { // MSI
+			kernel::dbg!("lesgo");
+			#[repr(C)]
+			struct MSI {
+				msg_ctrl: VolatileCell<[u8; 2]>,
+				msg_addr: VolatileCell<[u8; 8]>,
+				_reserved: VolatileCell<[u8; 2]>,
+				msg_data: VolatileCell<[u8; 2]>,
+				mask: VolatileCell<[u8; 4]>,
+				pending: VolatileCell<[u8; 4]>,
+			}
+			let data = unsafe { cap.data::<MSI>() };
+			kernel::dbg!("set msi");
+			data.msg_ctrl.set([0x1, 0x0]);
+			kernel::dbg!("done msi");
+		} else if cap.id() == 0x11 { // MSI-X
+			kernel::dbg!("LESGO");
+			#[repr(C)]
+			#[repr(packed)]
+			struct MSIX {
+				msg_ctrl: VolatileCell<u16le>,
+				table_offt_and_bir: VolatileCell<u32le>,
+				pending_bit_offt_and_bir: VolatileCell<u32le>,
+			}
+			let data = unsafe { cap.data::<MSIX>() };
+			kernel::dbg!("set msi-x");
+
+			data.msg_ctrl.set(((1 << 15) | 1).into());
+
+			kernel::dbg!(data.msg_ctrl.get());
+			kernel::dbg!(data.table_offt_and_bir.get());
+			kernel::dbg!(data.pending_bit_offt_and_bir.get());
+
+			//data.table_offt_and_bir
+
+			kernel::dbg!("done msi-x");
+
+		match device.header() {
+			::pci::Header::H0(h) => {
+				kernel::dbg!("set msi-x h");
+				kernel::dbg!("done msi-x h");
+			}
+			_ => panic!("bad header type"),
 		}
+		}
+	}
+
+	match device.header() {
+		::pci::Header::H0(h) => {
+			kernel::dbg!("set int");
+			h.interrupt_line.set(0);
+			h.interrupt_pin.set(1);
+			kernel::dbg!("done int");
+		}
+		_ => panic!("bad header type"),
 	}
 
 	let mut mmio = [None, None, None, None, None, None];
@@ -389,6 +454,18 @@ where
 				.as_ref()
 		})
 	.expect("No common config map defined");
+
+	let isr_config = isr_config
+		.map(|cfg| unsafe {
+			setup_mmio(cfg.base_address.get(), cfg.offset.get().into())
+				.cast::<ISRConfig>()
+				.as_ref()
+		})
+	.expect("No isr config map defined");
+
+		kernel::dbg!("set isr");
+	isr_config.status.set(0x0);
+		kernel::dbg!("done isr");
 
 	handlers.handle(key, common_config, device_config, notify_config, allocator).map_err(SetupError::Handler)
 }

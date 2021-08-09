@@ -96,77 +96,67 @@ stval_msg:
 .section .text
 
 trap_section_start:
+
 	.balign 4	# 0
 interrupt_table:
-	jal		zero, trap_handler
+	jal		zero, trap_handler	# User software interrupt _or_ instruction misaligned
 	.balign 4	# 1
-	ret
+	j	trap_early_handler   # Supervisor software interrupt
 	.balign 4	# 2
-	ret
+	j	trap_early_handler   # Reserved
 	.balign 4	# 3
-	ret
+	j	trap_early_handler   # We shouldn't be able to catch machine interrupts
 	.balign 4	# 4
-	ret
+	j	trap_early_handler   # User timer interrupt
 	.balign 4	# 5
-	ret
+	j	trap_early_handler   # Supervisor timer interrupt
 	.balign 4	# 6
-	ret
+	j	trap_early_handler   # Reserved
 	.balign 4	# 7
-	ret
+	j	trap_early_handler   # We shouldn't be able to catch machine interrupts
 	.balign 4	# 8
-	ret
+	j	trap_early_handler   # User external interrupt
 	.balign 4	# 9
-	ret
+	j	trap_early_handler   # Supervisor external interrupt
 	.balign 4	# 10
-	ret
+	j	trap_early_handler   # Reserved
 	.balign 4	# 11
-	ret
-	.balign 4	# 12
-	ret
-	.balign 4	# 13
-	ret
-	.balign 4	# 14
-	ret
-	.balign 4	# 15
-	ret
+	j	trap_early_handler   # We shouldn't be able to catch machine interrupts
 
 	.balign 4	# 0
 sync_trap_table:
-	ret
+	j	trap_early_handler	
 	.balign 4	# 1
-	ret
+	j	trap_early_handler	
 	.balign 4	# 2
-	ret
+	j	trap_early_handler	
 	.balign 4	# 3
-	ret
+	j	trap_early_handler	
 	.balign 4	# 4
-	ret
+	j	trap_early_handler	
 	.balign 4	# 5
-0:
-	j		0b
+	j	trap_early_handler	
 	.balign 4	# 6
-	ret
+	j	trap_early_handler
 	.balign 4	# 7
-	ret
+	j	trap_early_handler	
 	.balign 4	# 8
 	jal		trap_syscall
 	.balign 4	# 9
-	jal		trap_syscall
+	j	trap_early_handler # S-mode shouldn't be performing S syscalls
 	.balign 4	# 10
-	ret
+	j	trap_early_handler
 	.balign 4	# 11
-	jal		trap_syscall
+	j	trap_early_handler # We shouldn't be able to catch M-mode syscalls
 	.balign 4	# 12
-0:
-	j		0b
+	j	trap_early_handler
 	#ret
 	.balign 4	# 13
-	ret
+	j	trap_early_handler
 	.balign 4	# 14
-	ret
+	j	trap_early_handler
 	.balign 4	# 15
-0:
-	j		0b
+	j	trap_early_handler
 
 ## Default handler for traps
 trap_handler:
@@ -345,8 +335,8 @@ trap_syscall:
 ## Initialize the trap CSR and the interrupt table
 trap_init:
 	la		t0, interrupt_table
-	#ori		t0, t0, 1
-	csrw	STVEC, t0
+	ori		t0, t0, 1
+	csrw	stvec, t0
 	ret
 
 ## Early boot trap handler. It avoids any memory accesses outside the kernel
@@ -430,7 +420,7 @@ trap_print_lf:
 ## will halt immediately for ease of debugging.
 trap_early_init:
 	la		t0, trap_early_handler
-	csrw	STVEC, t0
+	csrw	stvec, t0
 	ret
 
 ## Save the program counter and fp registers, then jump into the executor task switching routine.

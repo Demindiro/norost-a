@@ -194,7 +194,7 @@ mod sys {
 		/// Resize the task's IPC buffers to be able to hold the given amount of entries.
 		[task] io_set_queues(packet_table, mask_bits, free_pages, free_pages_size) {
 			logcall!(
-				"io_set_queues 0x{:x}, {}, 0x{:x}, {}, 0x{:x}, {}",
+				"io_set_queues 0x{:x}, {}, 0x{:x}, {}",
 				packet_table,
 				mask_bits,
 				free_pages,

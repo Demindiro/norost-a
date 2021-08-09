@@ -10,6 +10,7 @@ pub const PCI_ADDRESS: NonNull<u8> = unsafe { NonNull::new_unchecked(0x2000_0000
 pub const PCI_MMIO_ADDRESS: NonNull<u8> = unsafe { NonNull::new_unchecked(0x3000_0000 as *mut _) };
 pub static mut PCI_MMIO_PHYSICAL: (usize, usize) = (0, 0);
 pub static mut PCI_SIZE: usize = 0;
+pub const PLIC_ADDRESS: NonNull<u32> = unsafe { NonNull::new_unchecked(0x4_0000_0000 as *mut _) };
 
 pub fn map_devices() {
 	let dtb = unsafe {
@@ -93,7 +94,7 @@ pub fn map_devices() {
 							kernel::sys_log!("  Found UART");
 							let reg = reg.unwrap();
 							let (addr, reg) = unpack_reg(reg, node.address_cells);
-							let (size, reg) = unpack_reg(reg, node.address_cells);
+							let (size, reg) = unpack_reg(reg, node.size_cells);
 							assert!(reg.is_empty());
 							let kernel::Return { status, .. } = unsafe {
 								kernel::sys_direct_alloc(
@@ -104,6 +105,23 @@ pub fn map_devices() {
 								)
 							};
 							assert_eq!(status, 0, "mapping UART failed");
+						}
+						b"plic" => {
+							let reg = reg.unwrap();
+							let (addr, reg) = unpack_reg(reg, node.address_cells);
+							let (size, reg) = unpack_reg(reg, node.size_cells);
+							assert!(reg.is_empty());
+							let ret = unsafe {
+								let addr = addr >> kernel::Page::OFFSET_BITS;
+								let size = (size + u128::try_from(kernel::Page::MASK).unwrap()) >> kernel::Page::OFFSET_BITS;
+								kernel::sys_direct_alloc(
+									PLIC_ADDRESS.as_ptr().cast(),
+									addr.try_into().unwrap(),
+									usize::try_from(size).unwrap(),
+									0b011,
+								)
+							};
+							assert_eq!(ret.status, 0, "mapping PLIC failed");
 						}
 						_ => (),
 					}

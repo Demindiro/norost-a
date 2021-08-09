@@ -68,8 +68,8 @@ pub struct Header0 {
 
 	_reserved: [u8; 7],
 
-	interrupt_line: VolatileCell<u8>,
-	interrupt_pin: VolatileCell<u8>,
+	pub interrupt_line: VolatileCell<u8>,
+	pub interrupt_pin: VolatileCell<u8>, // TODO is pub a good or bad idea?
 	min_grant: VolatileCell<u8>,
 	max_latency: VolatileCell<u8>,
 }

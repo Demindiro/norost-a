@@ -19,8 +19,10 @@ impl UART {
 	pub unsafe fn new(address: NonNull<u8>) -> Self {
 		let a = address.as_ptr();
 		// Copied from https://wiki.osdev.org/Serial_Ports
+		//a.add(0).write(0x00); // Enable DLAB (set baud rate divisor)
+		a.add(1).write(0x0f); // Enable all / some (?) interrupts
+		kernel::dbg!("Setup UART done");
 		/*
-		a.add(1).write(0x00); // Disable all interrupts
 		a.add(3).write(0x80); // Enable DLAB (set baud rate divisor)
 		a.add(0).write(0x03); // Set divisor to 3 (lo byte) 38400 baud
 		a.add(1).write(0x00); //                  (hi byte)
@@ -30,7 +32,14 @@ impl UART {
 		a.add(4).write(0x1e); // Set in loopback mode, test the serial chip
 		a.add(0).write(0xae); // Test serial chip (send byte 0xAE and check if serial returns same byte)
 		*/
-		Self { address }
+		let mut slf = Self { address };
+		slf.read();
+		slf.read();
+		slf.read();
+		slf.read();
+		slf.read();
+		slf.read();
+		slf
 	}
 
 	/// Check if any data to read is available.
