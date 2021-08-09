@@ -24,9 +24,21 @@ pub struct InvalidSource;
 pub struct InvalidContext;
 
 #[derive(Debug)]
-pub enum EnableError {
+pub enum InvalidContextOrSource {
 	InvalidSource,
 	InvalidContext,
+}
+
+impl From<InvalidSource> for InvalidContextOrSource {
+	fn from(_: InvalidSource) -> Self {
+		Self::InvalidSource
+	}
+}
+
+impl From<InvalidContext> for InvalidContextOrSource {
+	fn from(_: InvalidContext) -> Self {
+		Self::InvalidContext
+	}
 }
 
 impl PLIC {
@@ -36,9 +48,11 @@ impl PLIC {
 	const OFFSET_PENDING_BITS: usize = 0x1000 / mem::size_of::<u32>();
 	const OFFSET_ENABLE_BITS: usize = 0x2000 / mem::size_of::<u32>();
 	const OFFSET_PRIORITY_THRESHOLDS: usize = 0x20_0000 / mem::size_of::<u32>();
+	const OFFSET_CLAIM_COMPLETE: usize = 0x20_0004 / mem::size_of::<u32>();
 
-	const WIDTH_CONTEXT_ENABLE_BITS: usize = 0x80 / mem::size_of::<u32>();
-	const WIDTH_CONTEXT_PRIORITY_THRESHOLDS: usize = 0x1000 / mem::size_of::<u32>();
+	const STRIDE_ENABLE_BITS: usize = 0x80 / mem::size_of::<u32>();
+	const STRIDE_PRIORITY_THRESHOLDS: usize = 0x1000 / mem::size_of::<u32>();
+	const STRIDE_CLAIM_COMPLETE: usize = 0x1000 / mem::size_of::<u32>();
 
 	/// Setup a new PLIC controller.
 	///
@@ -78,15 +92,15 @@ impl PLIC {
 	}
 
 	/// Enable or disable an interrupt.
-	pub fn enable(&mut self, context: u16, source: NonZeroU16, enable: bool) -> Result<(), EnableError> {
-		Self::context_in_range(context).map_err(|_| EnableError::InvalidContext)?;
-		let (offt, bit) = Self::split_source(source).map_err(|_| EnableError::InvalidSource)?;
+	pub fn enable(&mut self, context: u16, source: NonZeroU16, enable: bool) -> Result<(), InvalidContextOrSource> {
+		Self::context_in_range(context)?;
+		let (offt, bit) = Self::split_source(source)?;
 		unsafe {
 			let addr = self
 				.base_address
 				.as_ptr()
 				.add(Self::OFFSET_ENABLE_BITS)
-				.add(usize::from(context) * Self::WIDTH_CONTEXT_ENABLE_BITS)
+				.add(usize::from(context) * Self::STRIDE_ENABLE_BITS)
 				.add(offt);
 			let val = ptr::read_volatile(addr);
 			ptr::write_volatile(addr, (val & !(1 << bit)) | (u32::from(enable) << bit));
@@ -102,14 +116,41 @@ impl PLIC {
 				.base_address
 				.as_ptr()
 				.add(Self::OFFSET_PRIORITY_THRESHOLDS)
-				.add(usize::from(context) * Self::WIDTH_CONTEXT_PRIORITY_THRESHOLDS);
+				.add(usize::from(context) * Self::STRIDE_PRIORITY_THRESHOLDS);
 			ptr::write_volatile(addr, threshold);
 			Ok(())
 		}
 	}
 
-	// TODO figure out how this claim/completion thing works exactly. The documentation suggests
-	// it is set by the PLIC automatically, but then what is it for?
+	/// Claim an interrupt.
+	pub fn claim(&mut self, context: u16) -> Result<Option<NonZeroU16>, InvalidContext> {
+		Self::context_in_range(context)?;
+		unsafe {
+			let addr = self
+				.base_address
+				.as_ptr()
+				.add(Self::OFFSET_CLAIM_COMPLETE)
+				.add(usize::from(context) * Self::STRIDE_CLAIM_COMPLETE);
+			let source = ptr::read_volatile(addr);
+			assert!(source < 1024, "source is out of range");
+			Ok(NonZeroU16::new(u16::try_from(source).unwrap()))
+		}
+	}
+
+	/// Mark an interrupt as completed.
+	pub fn complete(&mut self, context: u16, source: NonZeroU16) -> Result<(), InvalidContextOrSource> {
+		Self::context_in_range(context)?;
+		Self::source_in_range(source)?;
+		unsafe {
+			let addr = self
+				.base_address
+				.as_ptr()
+				.add(Self::OFFSET_CLAIM_COMPLETE)
+				.add(usize::from(context) * Self::STRIDE_CLAIM_COMPLETE);
+			let source = ptr::write_volatile(addr, source.get().into());
+			Ok(())
+		}
+	}
 
 	/// Ensure the source is in range, i.e. it is below 1024.
 	fn source_in_range(source: NonZeroU16) -> Result<(), InvalidSource> {

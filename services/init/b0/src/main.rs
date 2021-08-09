@@ -137,8 +137,35 @@ fn main() {
 		}
 	}
 
+	sys_log!("Press any key for magic");
+	let mut prev = None;
+	loop {
+		//kernel::dbg!(i);
+		continue;
+		let curr = plic.claim(context).unwrap();
+		if Some(curr) != prev {
+			kernel::dbg!(curr);
+			prev = Some(curr);
+		}
+		if let Some(curr) = curr {
+			/*
+			let mut buf = [0; 256];
+			let r = console.read(&mut buf);
+			console.write(b"You typed '");
+			console.write(&buf[..r]);
+			console.write(b"'\n");
+			*/
+			plic.complete(context, curr).unwrap();
+		}
+		/*
+		let mut k = 0;
+		for _ in 0..100_000_000 {
+			unsafe { core::ptr::write_volatile(&mut k, 0) };
+		}
+		*/
+	}
+
 	sys_log!("Listing binary addresses:");
-	loop {}
 
 	// SAFETY: all zeroes TaskSpawnMapping is valid.
 	let mut mappings =

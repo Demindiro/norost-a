@@ -39,6 +39,7 @@ impl Executor<'_> {
 
 			if let Ok(task) = group.task(id) {
 
+				/*
 if id == 1 {
 log!("Halting...");
 crate::arch::enable_supervisor_interrupts(true);
@@ -52,6 +53,7 @@ crate::arch::enable_timer_interrupts(false);
 crate::arch::enable_external_interrupts(false);
 log!("Done halting :)");
 }
+*/
 
 				task.process_io(Address::todo(id));
 				task.execute()

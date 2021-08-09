@@ -187,7 +187,7 @@ extern "C" fn main(
 
 
 crate::arch::enable_supervisor_interrupts(true);
-crate::arch::enable_timer_interrupts(true);
+//crate::arch::enable_timer_interrupts(true);
 crate::arch::enable_external_interrupts(true);
 //arch::riscv::sbi::set_timer(20_000_000);
 

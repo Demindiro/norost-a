@@ -117,11 +117,43 @@ interrupt_table:
 	.balign 4	# 8
 	j	trap_early_handler   # User external interrupt
 	.balign 4	# 9
-	j	trap_early_handler   # Supervisor external interrupt
+	j shuddup
+	#j	trap_early_handler   # Supervisor external interrupt
 	.balign 4	# 10
 	j	trap_early_handler   # Reserved
 	.balign 4	# 11
 	j	trap_early_handler   # We shouldn't be able to catch machine interrupts
+
+
+shuddup:
+	sret
+	# Save some integer registers.
+	csrrw	x31, sscratch, x31
+	beqz	x31, trap_early_handler
+
+	# Save registers
+	sd		x1, 1 * REGBYTES (x31)
+	sd		x2, 2 * REGBYTES (x31)
+
+	li		x1, ~0
+	csrw	stval, x1
+
+	li		x2, ~(1 << 9)
+	csrr	x1, sip
+	and		x1, x1, x2
+	csrw	sip, x1
+
+	li		x2, ~(1 << 5)
+	csrr	x1, sstatus
+	and		x1, x1, x2
+	csrw	sstatus, x1
+	
+	# Restore registers
+	ld		x1, 1 * REGBYTES (x31)
+	ld		x2, 2 * REGBYTES (x31)
+	csrrw	x31, sscratch, x31
+	
+	sret
 
 	.balign 4	# 0
 sync_trap_table:
@@ -220,7 +252,7 @@ trap_handler:
 	# Execute the appropriate routine
 	jalr	ra, x28						# jmp
 	# Restore all integer registers
-	csrr	x31, SSCRATCH
+	csrr	x31, sscratch
 	ld		x1, 1 * REGBYTES (x31)
 	ld		x2, 2 * REGBYTES (x31)
 	ld		x3, 3 * REGBYTES (x31)
