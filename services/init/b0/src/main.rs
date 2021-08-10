@@ -55,6 +55,8 @@ extern "C" fn notification_handler(typ: usize, value: usize) {
 	sys_log!("Got a notification!");
 	sys_log!("  type  :    0x{:x}", typ);
 	sys_log!("  value :    0x{:x}", value);
+	// Do not crash do not crash do not crash if we return everything will explode
+	loop {}
 }
 
 #[export_name = "main"]

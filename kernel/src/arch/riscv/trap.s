@@ -61,39 +61,51 @@ sv_ext_int_handler:
 	csrrw	x31, sscratch, x31
 	beqz	x31, trap_early_handler
 
-	# Save registers
-	sd		x1, 1 * REGBYTES (x31)
-	sd		x2, 2 * REGBYTES (x31)
+	# Save some registers so we can get to work (a0 == x10 && a1 == x11 && ...)
+	sd		a0, 10 * REGBYTES (x31)
+	sd		a1, 11 * REGBYTES (x31)
+	sd		a2, 12 * REGBYTES (x31)
+
+	# Set sepc to that of the notification handler.
+	ld		a0, (2 + 32) * REGBYTES (x31)
+	csrw	sepc, a0
 
 	# Some real fucking hacky shit to figure out how the fuck these motherfucking interrupts work.
 
 	# Enable SUM
-	csrr	x1, sstatus
-	li		x2, 1 << 18
-	or		x1, x1, x2
-	csrw	sstatus, x1
+	csrr	a0, sstatus
+	li		a1, 1 << 18
+	or		a0, a0, a1
+	csrw	sstatus, a0
 
-	# Claim shit
-	li		x1, 0x4 * 0x10000 * 0x10000 # The base address of the shit we mapped
-	li		x2, 0x20 * 0x10000 + 0x4 # The offset of the claim shit
-	add		x1, x1, x2				# Goto claim shit
-	li		x2, 0x1000 # Context stride
-	add		x1, x1, x2 # Add context stride shit
-	lw		x2, 0(x1) # Claim the source. Not doing this causes a loop.
-	#sw		x2, 0(x1) # Pretend we completed shit
+	# Claim shit and set value argument
+	li		a0, 0x4 * 0x10000 * 0x10000 # The base address of the shit we mapped
+	li		a1, 0x20 * 0x10000 + 0x4 # The offset of the claim shit
+	add		a0, a0, a1				# Goto claim shit
+	li		a1, 0x1000 # Context stride
+	add		a0, a0, a1 # Add context stride shit
+	lw		a1, 0(a0) # Claim the source. Not doing this causes a loop.
+	#sw		a1, 0(a0) # Pretend we completed shit
 
 	# Disable SUM
-	csrr	x1, sstatus
-	li		x2, ~(1 << 18)
-	and		x1, x1, x2
-	csrw	sstatus, x1
+	csrr	a2, sstatus
+	li		a0, ~(1 << 18)
+	and		a2, a2, a0
+	csrw	sstatus, a2
+
+	# Set type argument (0 == external interrupt)
+	mv		a0, zero
 	
-	# Restore registers
-	ld		x1, 1 * REGBYTES (x31)
-	ld		x2, 2 * REGBYTES (x31)
+	# Restore some registers
+	#ld		a0, 10 * REGBYTES (x31)
+	#ld		a1, 11 * REGBYTES (x31)
+	#ld		a2, 12 * REGBYTES (x31)
 	csrrw	x31, sscratch, x31
 
+	# Jump to notification handler
+	# FIXME check for the right TID dumbass.
 	sret
+
 
 	.balign 4	# 0
 sync_trap_table:
