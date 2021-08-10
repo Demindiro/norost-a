@@ -18,6 +18,7 @@
 //! it.
 
 pub mod ipc;
+pub mod notification;
 
 mod address;
 mod executor;
@@ -45,14 +46,6 @@ struct SharedState {
 }
 
 /// A single task.
-///
-/// Tasks are implemented as a circular linked list for a few reasons:
-/// - Removing the _current_ task can be done efficiently.
-/// - When one task is done running, you switch to the task immediately after (it doesn't need to
-///   be more complicated).
-/// - It is very easy to make it space-efficient if the number of tasks is low.
-/// - It goes on and on and on ... because it is circular. No need to go back to a "starting"
-///   pointer or whatever.
 #[repr(C)]
 pub struct TaskData {
 	/// The register state of this task. Needed for context switches.
@@ -62,6 +55,8 @@ pub struct TaskData {
 	/// The shared state of this task.
 	// TODO should be reference counted.
 	shared_state: SharedState,
+	/// The address of a notification handler.
+	notification_handler: Option<notification::Handler>,
 	/// IPC state to communicate with other tasks.
 	ipc: Option<ipc::IPC>,
 }
@@ -93,6 +88,7 @@ impl Task {
 					virtual_memory: vms,
 				},
 				ipc: None,
+				notification_handler: None,
 			});
 		}
 		unsafe { TASK_DATA_ADDRESS = TASK_DATA_ADDRESS.next().unwrap() };

@@ -159,6 +159,11 @@ pub mod ipc {
 	}
 }
 
+pub mod notification {
+	/// The handler function type
+	pub type Handler = extern "C" fn(typ: usize, value: usize);
+}
+
 #[repr(C)]
 pub struct TaskSpawnMapping {
 	pub task_address: *mut Page,
@@ -181,6 +186,11 @@ syscall!(
 	mask_bits: u8,
 	free_pages: *mut ipc::FreePage,
 	free_pages_size: usize
+);
+syscall!(
+	io_set_notify_handler,
+	2,
+	function: notification::Handler
 );
 
 syscall!(mem_alloc, 3, address: *mut Page, size: usize, flags: u8);

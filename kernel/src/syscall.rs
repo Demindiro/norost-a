@@ -35,7 +35,7 @@ pub const TABLE_LEN: usize = 16;
 pub static TABLE: [Syscall; TABLE_LEN] = [
 	sys::io_wait,                // 0
 	sys::io_set_queues,          // 1
-	sys::placeholder,            // 2
+	sys::io_set_notify_handler,  // 2
 	sys::mem_alloc,              // 3
 	sys::mem_dealloc,            // 4
 	sys::mem_get_flags,          // 5
@@ -214,6 +214,18 @@ mod sys {
 			};
 			task.set_queues(a);
 			Return(Status::Ok, 0)
+		}
+	}
+
+	sys! {
+		/// Set a handler for receiving notifications.
+		[task] io_set_notify_handler(function) {
+			logcall!("io_set_notify_handler 0x{:x}", function);
+			let handler = NonNull::new(function as *mut _)
+				.map(task::notification::Handler::new)
+				.map(Result::unwrap);
+			let prev = task.set_notification_handler(handler);
+			Return(Status::Ok, prev.map(|p| p.as_ptr() as usize).unwrap_or(0))
 		}
 	}
 

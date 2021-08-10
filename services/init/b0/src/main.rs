@@ -51,6 +51,12 @@ use core::convert::TryFrom;
 use kernel::sys_log;
 use xmas_elf::ElfFile;
 
+extern "C" fn notification_handler(typ: usize, value: usize) {
+	sys_log!("Got a notification!");
+	sys_log!("  type  :    0x{:x}", typ);
+	sys_log!("  value :    0x{:x}", value);
+}
+
 #[export_name = "main"]
 fn main() {
 	// GOD FUCKING DAMN IT RUST
@@ -101,9 +107,17 @@ fn main() {
 	let mut console = unsafe { console::Console::new(device_tree::UART_ADDRESS.cast()) };
 	let mut buf = [0; 256];
 
+	sys_log!("Setting up notification handler");
+	let ret = unsafe { kernel::io_set_notify_handler(notification_handler) };
+	assert_eq!(ret.status, 0);
+
 	sys_log!("Press any key for magic");
 	let mut prev = None;
 	plic.set_priority_threshold(context, 4).unwrap();
+
+	sys_log!("Waiting for notification of stuff");
+	loop {}
+
 	loop {
 	//for _ in 0..100 {
 		let curr = plic.claim(context).unwrap();
