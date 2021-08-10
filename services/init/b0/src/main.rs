@@ -74,8 +74,8 @@ fn main() {
 	// Presumably, since we're running on hart 0 (the only hart), we need to
 	// enable the interrupt in context 0x1 (S-mode).
 	plic.enable(context, source, true).unwrap();
-	plic.set_priority(source, 1).unwrap();
-	plic.set_priority_threshold(context, 0).unwrap();
+	plic.set_priority(source, 5).unwrap();
+	plic.set_priority_threshold(context, 6).unwrap();
 
 	sys_log!("Opening FAT FS");
 	let dev = unsafe { pci::BLK.as_mut().unwrap().downcast_mut().unwrap() };
@@ -103,18 +103,26 @@ fn main() {
 
 	sys_log!("Press any key for magic");
 	let mut prev = None;
-	for _ in 0..100 {
+	plic.set_priority_threshold(context, 4).unwrap();
+	loop {
+	//for _ in 0..100 {
 		let curr = plic.claim(context).unwrap();
+		//plic.set_priority_threshold(context, 6).unwrap();
 		if Some(curr) != prev {
-			kernel::dbg!(curr);
+			//kernel::dbg!(curr);
 			prev = Some(curr);
 		}
+		/*
 		if let Some(curr) = curr {
-			let r = console.read(&mut buf);
-			console.write(b"You typed '");
-			console.write(&buf[..r]);
-			console.write(b"'\n");
 			plic.complete(context, curr).unwrap();
+		}
+		*/
+		//let r = console.read(&mut buf);
+		if r > 0 {
+			plic.complete(context, source).unwrap();
+			//console.write(b"You typed '");
+			//console.write(&buf[..r]);
+			//console.write(b"'\n");
 		}
 	}
 

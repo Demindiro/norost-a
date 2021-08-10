@@ -48,8 +48,7 @@ interrupt_table:
 	.balign 4	# 8
 	j	trap_early_handler   # User external interrupt
 	.balign 4	# 9
-	j shuddup
-	#j	trap_early_handler   # Supervisor external interrupt
+	j	shuddup              # Supervisor external interrupt
 	.balign 4	# 10
 	j	trap_early_handler   # Reserved
 	.balign 4	# 11
@@ -57,7 +56,7 @@ interrupt_table:
 
 
 shuddup:
-	sret
+
 	# Save some integer registers.
 	csrrw	x31, sscratch, x31
 	beqz	x31, trap_early_handler
@@ -66,23 +65,49 @@ shuddup:
 	sd		x1, 1 * REGBYTES (x31)
 	sd		x2, 2 * REGBYTES (x31)
 
-	li		x1, ~0
-	csrw	stval, x1
-
-	li		x2, ~(1 << 9)
-	csrr	x1, sip
-	and		x1, x1, x2
-	csrw	sip, x1
-
-	li		x2, ~(1 << 5)
+	# Disable external interrupts in S-mode
+j	0f
 	csrr	x1, sstatus
+	li		x2, ~(1 << 5)
 	and		x1, x1, x2
 	csrw	sstatus, x1
+0:
+
+	# Some real fucking hacky shit to figure out how the fuck these motherfucking interrupts work.
+
+	# Enable SUM
+	csrr	x1, sstatus
+	li		x2, 1 << 18
+	or		x1, x1, x2
+	csrw	sstatus, x1
+
+	# Claim shit
+	li		x1, 0x4 * 0x10000 * 0x10000 # The base address of the shit we mapped
+	li		x2, 0x20 * 0x10000 + 0x4 # The offset of the claim shit
+	add		x1, x1, x2				# Goto claim shit
+	li		x2, 0x1000 # Context stride
+	add		x1, x1, x2 # Add context stride shit
+	lw		x2, 0(x1) # Claim the source. Not doing this causes a loop.
+	#sw		x2, 0(x1) # Pretend we completed shit
+
+	# Disable SUM
+	csrr	x1, sstatus
+	li		x2, ~(1 << 18)
+	and		x1, x1, x2
+	csrw	sstatus, x1
+
+
+	#li		x2, ~(1 << 5)
+	#csrr	x1, sstatus
+	#and	x1, x1, x2
+	#csrw	sstatus, x1
 	
 	# Restore registers
 	ld		x1, 1 * REGBYTES (x31)
 	ld		x2, 2 * REGBYTES (x31)
 	csrrw	x31, sscratch, x31
+
+	#j trap_early_handler
 	
 	sret
 
