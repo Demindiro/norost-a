@@ -117,7 +117,7 @@ fn main() {
 			plic.complete(context, curr).unwrap();
 		}
 		*/
-		//let r = console.read(&mut buf);
+		let r = console.read(&mut buf);
 		if r > 0 {
 			plic.complete(context, source).unwrap();
 			//console.write(b"You typed '");

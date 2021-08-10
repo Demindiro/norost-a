@@ -53,5 +53,7 @@ External Interrupt
 An interrupt emitted by an external source was caught.
 
 To pick these interrupts up, its ID needs to be specified using
-``io_add_external_interrupt_listener``. These can be removed afterwards using
-``io_remove_external_interrupt-listener``. 
+``io_add_interrupt_listener``. These can be removed afterwards using
+``io_remove_interrupt-listener``.
+
+To mark an interrupt as completed, ``io_complete_interrupt`` should be called.
