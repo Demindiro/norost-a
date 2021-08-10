@@ -51,12 +51,13 @@ use core::convert::TryFrom;
 use kernel::sys_log;
 use xmas_elf::ElfFile;
 
+static mut NEW_DATA: bool = false;
+
 extern "C" fn notification_handler(typ: usize, value: usize) {
 	sys_log!("Got a notification!");
 	sys_log!("  type  :    0x{:x}", typ);
 	sys_log!("  value :    0x{:x}", value);
-	// Do not crash do not crash do not crash if we return everything will explode
-	loop {}
+	unsafe { NEW_DATA = true };
 }
 
 #[export_name = "main"]
@@ -118,7 +119,15 @@ fn main() {
 	plic.set_priority_threshold(context, 4).unwrap();
 
 	sys_log!("Waiting for notification of stuff");
-	loop {}
+	loop {
+		if unsafe { core::mem::replace(&mut NEW_DATA, false) } {
+			let r = console.read(&mut buf);
+			plic.complete(context, source).unwrap();
+			console.write(b"You typed '");
+			console.write(&buf[..r]);
+			console.write(b"'\n");
+		}
+	}
 
 	loop {
 	//for _ in 0..100 {
