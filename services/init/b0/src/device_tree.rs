@@ -15,11 +15,9 @@ pub const PLIC_ADDRESS: NonNull<u32> = unsafe { NonNull::new_unchecked(0x4_0000_
 pub fn map_devices() {
 	let dtb = unsafe {
 		let dtb = 0x100_0000 as *mut _;
-		let kernel::Return {
-			status,
-			value: count,
-		} = kernel::sys_platform_info(dtb, 16);
-		core::slice::from_raw_parts(dtb.cast(), count << 10)
+		let ret = kernel::sys_platform_info(dtb, 16);
+		assert_eq!(ret.status, 0);
+		core::slice::from_raw_parts(dtb.cast(), ret.value << 10)
 	};
 	let dtb = device_tree::DeviceTree::parse(dtb).unwrap();
 	kernel::sys_log!("Iterating DTB");
@@ -27,11 +25,11 @@ pub fn map_devices() {
 		for node in node.children() {
 			if node.name == b"soc" {
 				for node in node.children() {
-					let mut ranges = None;
+					//let mut ranges = None;
 					let mut reg = None;
 					for p in node.properties() {
 						match p.name {
-							b"ranges" => ranges = Some(p.value),
+							//b"ranges" => ranges = Some(p.value),
 							b"reg" => reg = Some(p.value),
 							_ => (),
 						}
@@ -45,7 +43,9 @@ pub fn map_devices() {
 							let mut child_address_cells = None;
 							for p in node.properties() {
 								match p.name {
-									b"compatible" => compatible = p.value == b"pci-host-ecam-generic\0",
+									b"compatible" => {
+										compatible = p.value == b"pci-host-ecam-generic\0"
+									}
 									b"ranges" => ranges = Some(p.value),
 									b"reg" => reg = Some(p.value),
 									b"#address-cells" => {
@@ -68,12 +68,26 @@ pub fn map_devices() {
 							let reg = reg.expect("No reg property");
 							let (start, reg) = unpack_reg(reg, node.address_cells);
 							let (size, _) = unpack_reg(reg, node.size_cells);
-							let (start, size) = (usize::try_from(start).unwrap(), usize::try_from(size).unwrap());
-							unsafe {
-								kernel::sys_direct_alloc(addr.as_ptr(), start >> 12, size >> 12, 0b011);
-							}
+							let (start, size) = (
+								usize::try_from(start).unwrap(),
+								usize::try_from(size).unwrap(),
+							);
+							let ret = unsafe {
+								kernel::sys_direct_alloc(
+									addr.as_ptr(),
+									start >> 12,
+									size >> 12,
+									0b011,
+								)
+							};
+							assert_eq!(ret.status, 0);
 							unsafe { PCI_SIZE = size };
-							kernel::sys_log!("    Address {:p} -> 0x{:x} - 0x{:x}", addr, start, size);
+							kernel::sys_log!(
+								"    Address {:p} -> 0x{:x} - 0x{:x}",
+								addr,
+								start,
+								size
+							);
 
 							// Map MMIO
 							let addr = PCI_MMIO_ADDRESS.cast();
@@ -83,11 +97,25 @@ pub fn map_devices() {
 							let r = &ranges[child_address_cells.unwrap() as usize * 4..];
 							let (start, r) = unpack_reg(r, node.address_cells);
 							let (size, _) = unpack_reg(r, node.size_cells);
-							let (start, size) = (usize::try_from(start).unwrap(), usize::try_from(size).unwrap());
-							unsafe {
-								kernel::sys_direct_alloc(addr.as_ptr(), start >> 12, size >> 12, 0b011);
-							}
-							kernel::sys_log!("    MMIO    {:p} -> 0x{:x} - 0x{:x}", addr, start, size);
+							let (start, size) = (
+								usize::try_from(start).unwrap(),
+								usize::try_from(size).unwrap(),
+							);
+							let ret = unsafe {
+								kernel::sys_direct_alloc(
+									addr.as_ptr(),
+									start >> 12,
+									size >> 12,
+									0b011,
+								)
+							};
+							assert_eq!(ret.status, 0);
+							kernel::sys_log!(
+								"    MMIO    {:p} -> 0x{:x} - 0x{:x}",
+								addr,
+								start,
+								size
+							);
 							unsafe { PCI_MMIO_PHYSICAL = (start, size) };
 						}
 						b"uart" => {
@@ -113,7 +141,8 @@ pub fn map_devices() {
 							assert!(reg.is_empty());
 							let ret = unsafe {
 								let addr = addr >> kernel::Page::OFFSET_BITS;
-								let size = (size + u128::try_from(kernel::Page::MASK).unwrap()) >> kernel::Page::OFFSET_BITS;
+								let size = (size + u128::try_from(kernel::Page::MASK).unwrap())
+									>> kernel::Page::OFFSET_BITS;
 								kernel::sys_direct_alloc(
 									PLIC_ADDRESS.as_ptr().cast(),
 									addr.try_into().unwrap(),

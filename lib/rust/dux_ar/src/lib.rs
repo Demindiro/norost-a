@@ -4,5 +4,5 @@
 
 mod ffi;
 mod ipc;
-mod panic;
 mod mem;
+mod panic;

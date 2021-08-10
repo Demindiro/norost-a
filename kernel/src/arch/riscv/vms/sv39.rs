@@ -338,7 +338,12 @@ impl Sv39 {
 		let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
 		unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 		Self::flush_highmem_a();
-		let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).as_non_null_ptr().cast::<[Entry; 512]>().as_mut() };
+		let tbl = unsafe {
+			Self::translate_highmem_a(ppn.as_raw())
+				.as_non_null_ptr()
+				.cast::<[Entry; 512]>()
+				.as_mut()
+		};
 		let pte = &mut tbl[va.ppn_1()];
 		if !pte.is_table() {
 			todo!();
@@ -348,7 +353,12 @@ impl Sv39 {
 		let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
 		unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 		Self::flush_highmem_a();
-		let tbl = unsafe { Self::translate_highmem_a(ppn.as_raw()).as_non_null_ptr().cast::<[Leaf; 512]>().as_mut() };
+		let tbl = unsafe {
+			Self::translate_highmem_a(ppn.as_raw())
+				.as_non_null_ptr()
+				.cast::<[Leaf; 512]>()
+				.as_mut()
+		};
 		let pte = &mut tbl[va.ppn_0()];
 		Ok(NonNull::from(pte))
 	}
@@ -373,7 +383,12 @@ impl Sv39 {
 		let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
 		unsafe { Self::map_highmem_b(Some(&ppn)) };
 		Self::flush_highmem_b();
-		let tbl = unsafe { Self::translate_highmem_b(ppn.as_raw()).as_non_null_ptr().cast::<[Entry; 512]>().as_mut() };
+		let tbl = unsafe {
+			Self::translate_highmem_b(ppn.as_raw())
+				.as_non_null_ptr()
+				.cast::<[Entry; 512]>()
+				.as_mut()
+		};
 		let pte = &mut tbl[va.ppn_1()];
 		if !pte.is_valid() {
 			let ppn = memory::allocate().map_err(AddError::AllocateError)?;
@@ -386,7 +401,12 @@ impl Sv39 {
 		let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
 		unsafe { Self::map_highmem_b(Some(&ppn)) };
 		Self::flush_highmem_b();
-		let tbl = unsafe { Self::translate_highmem_b(ppn.as_raw()).as_non_null_ptr().cast::<[Leaf; 512]>().as_mut() };
+		let tbl = unsafe {
+			Self::translate_highmem_b(ppn.as_raw())
+				.as_non_null_ptr()
+				.cast::<[Leaf; 512]>()
+				.as_mut()
+		};
 		let pte = &mut tbl[va.ppn_0()];
 		Ok(NonNull::from(pte))
 	}
@@ -413,7 +433,11 @@ impl Sv39 {
 		let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
 		unsafe { Self::map_highmem_b(Some(&ppn)) };
 		Self::flush_highmem_b();
-		let tbl = unsafe { Self::translate_highmem_b(ppn.as_raw()).as_ptr().cast::<[Leaf; 512]>() };
+		let tbl = unsafe {
+			Self::translate_highmem_b(ppn.as_raw())
+				.as_ptr()
+				.cast::<[Leaf; 512]>()
+		};
 		let tbl = &mut unsafe { &mut *tbl };
 		let pte = &mut tbl[va.ppn_1()];
 		Ok(NonNull::from(pte))
@@ -521,7 +545,8 @@ impl VirtualMemorySystem for Sv39 {
 			let curr = ROOT.cast::<[u64; 512]>().as_mut();
 			Self::map_highmem_a(Some(ppn_2.as_raw()));
 			let new = Self::translate_highmem_a(ppn_2.as_raw())
-				.as_non_null_ptr().cast::<[u64; 512]>()
+				.as_non_null_ptr()
+				.cast::<[u64; 512]>()
 				.as_mut();
 			for i in GLOBAL_KERNEL_TABLE_START_INDEX..512 {
 				new[i] = curr[i];
@@ -538,7 +563,8 @@ impl VirtualMemorySystem for Sv39 {
 			Self::map_highmem_a(Some(ppn_0.as_raw()));
 			Self::flush_highmem_a();
 			Self::translate_highmem_a(ppn_0.as_raw())
-				.as_non_null_ptr().cast::<[Leaf; 512]>()
+				.as_non_null_ptr()
+				.cast::<[Leaf; 512]>()
 				.as_mut()[va.ppn_0()]
 			.set(
 				Map::Private(ppn_2_alias),
@@ -551,14 +577,16 @@ impl VirtualMemorySystem for Sv39 {
 			Self::map_highmem_a(Some(ppn_1.as_raw()));
 			Self::flush_highmem_a();
 			Self::translate_highmem_a(ppn_1.as_raw())
-				.as_non_null_ptr().cast::<[Entry; 512]>()
+				.as_non_null_ptr()
+				.cast::<[Entry; 512]>()
 				.as_mut()[va.ppn_1()] = Entry::new_table(ppn_0);
 
 			// Add a PTE pointing to VPN[1] in VPN[2]
 			Self::map_highmem_a(Some(ppn_2.as_raw()));
 			Self::flush_highmem_a();
 			Self::translate_highmem_a(ppn_2.as_raw())
-				.as_non_null_ptr().cast::<[Entry; 512]>()
+				.as_non_null_ptr()
+				.cast::<[Entry; 512]>()
 				.as_mut()[va.ppn_2()] = Entry::new_table(ppn_1);
 		}
 
@@ -593,15 +621,11 @@ impl VirtualMemorySystem for Sv39 {
 	}
 
 	/// Deallocate the given range of pages.
-	fn deallocate(
-		&mut self,
-		virtual_address: Page,
-		count: usize,
-	) -> Result<(), ()> {
+	fn deallocate(&mut self, virtual_address: Page, count: usize) -> Result<(), ()> {
 		let mut va = virtual_address;
 		// FIXME deallocate pages on failure.
 		for _ in 0..count {
-			Self::remove(va);
+			Self::remove(va).unwrap();
 			va = va.next().unwrap();
 		}
 		Ok(())
@@ -748,7 +772,9 @@ impl VirtualMemorySystem for Sv39 {
 			unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 			Self::flush_highmem_a();
 			let tbl = unsafe {
-				Self::translate_highmem_a(ppn.as_raw()).as_non_null_ptr().cast::<[Entry; 512]>()
+				Self::translate_highmem_a(ppn.as_raw())
+					.as_non_null_ptr()
+					.cast::<[Entry; 512]>()
 			};
 			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_1()];
@@ -763,8 +789,11 @@ impl VirtualMemorySystem for Sv39 {
 			let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
 			unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 			Self::flush_highmem_a();
-			let tbl =
-				unsafe { Self::translate_highmem_a(ppn.as_raw()).as_non_null_ptr().cast::<[Leaf; 512]>() };
+			let tbl = unsafe {
+				Self::translate_highmem_a(ppn.as_raw())
+					.as_non_null_ptr()
+					.cast::<[Leaf; 512]>()
+			};
 			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_0()];
 			*s = ((pte.0 & !0x3ff) << 2) as usize;
@@ -839,7 +868,11 @@ impl VirtualMemorySystem for Sv39 {
 			let ppn = (pte.0 >> 10) as u32;
 			unsafe { Self::map_highmem_a(Some(ppn)) };
 			Self::flush_highmem_a();
-			let tbl = unsafe { Self::translate_highmem_a(ppn).as_non_null_ptr().cast::<[Entry; 512]>() };
+			let tbl = unsafe {
+				Self::translate_highmem_a(ppn)
+					.as_non_null_ptr()
+					.cast::<[Entry; 512]>()
+			};
 			let tbl = &mut unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_1()];
 			if !pte.is_valid() {
@@ -853,8 +886,11 @@ impl VirtualMemorySystem for Sv39 {
 			let ppn = unsafe { PPN::from_raw((pte.0 >> 10) as u32) };
 			unsafe { Self::map_highmem_a(Some(ppn.as_raw())) };
 			Self::flush_highmem_a();
-			let tbl =
-				unsafe { Self::translate_highmem_a(ppn.as_raw()).as_non_null_ptr().cast::<[Leaf; 512]>() };
+			let tbl = unsafe {
+				Self::translate_highmem_a(ppn.as_raw())
+					.as_non_null_ptr()
+					.cast::<[Leaf; 512]>()
+			};
 			let tbl = unsafe { &mut *tbl.as_ptr() };
 			let pte = &mut tbl[va.ppn_0()];
 			pte.set(Map::Private(f()), RWX::RW, Accessibility::KernelGlobal)
@@ -905,7 +941,9 @@ impl VirtualMemorySystem for Sv39 {
 		// Use HIGHMEM_B
 		let ppn = unsafe { PPN::from_raw(self.0 as u32) };
 		unsafe { Self::map_highmem_b(Some(&ppn)) };
-		let root = unsafe { Self::translate_highmem_b(ppn.as_raw()) }.as_non_null_ptr().cast();
+		let root = unsafe { Self::translate_highmem_b(ppn.as_raw()) }
+			.as_non_null_ptr()
+			.cast();
 		Self::flush_highmem_b();
 		mem::forget(ppn);
 

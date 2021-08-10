@@ -184,7 +184,6 @@ mod sys {
 		[_] io_wait(flags, time) {
 			logcall!("io_wait 0b{:b}, {}", flags, time);
 			// FIXME actually wait for I/O
-			//unsafe { crate::arch::trap_next_task(task); }
 			// FIXME lol, lmao
 			crate::task::Executor::default().next()
 		}

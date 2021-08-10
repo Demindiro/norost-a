@@ -185,12 +185,10 @@ extern "C" fn main(
 	#[cfg(feature = "dump-dtb")]
 	dump_dtb(&dtb);
 
-
-crate::arch::enable_supervisor_interrupts(true);
-//crate::arch::enable_timer_interrupts(true);
-crate::arch::enable_external_interrupts(true);
-//arch::riscv::sbi::set_timer(20_000_000);
-
+	crate::arch::enable_supervisor_interrupts(true);
+	//crate::arch::enable_timer_interrupts(true);
+	crate::arch::enable_external_interrupts(true);
+	//arch::riscv::sbi::set_timer(20_000_000);
 
 	let mut interpreter = dtb.interpreter();
 	let mut root = interpreter.next_node().expect("No root node");
@@ -435,7 +433,13 @@ crate::arch::enable_external_interrupts(true);
 		let mut a = s.address;
 		while let Some(ppn) = s.ppn.pop_base() {
 			let ppn = arch::Map::Private(ppn);
-			arch::VMS::add(a, ppn, /* s.flags */ arch::vms::RWX::RWX, arch::vms::Accessibility::UserLocal).unwrap();
+			arch::VMS::add(
+				a,
+				ppn,
+				/* s.flags */ arch::vms::RWX::RWX,
+				arch::vms::Accessibility::UserLocal,
+			)
+			.unwrap();
 			a = a.next().unwrap();
 		}
 

@@ -1,6 +1,5 @@
 use alloc::prelude::v1::*;
 use core::alloc::Allocator;
-use core::any::Any;
 use core::fmt;
 use core::num::NonZeroU8;
 use core::ptr::NonNull;
@@ -19,14 +18,14 @@ pub type DeviceHandler<A> =
 	*/
 
 // Using a newtype because https://github.com/rust-lang/rust/issues/64552
-pub struct DeviceHandler<A: Allocator>
-(
-	pub for<'a> fn(
+pub struct DeviceHandler<A: Allocator>(
+	pub  for<'a> fn(
 		&'a CommonConfig,
 		&'a DeviceConfig,
 		&'a Notify,
 		A,
-	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>>);
+	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>>,
+);
 
 /*
 // TODO move this to a separate "sync" crate.
@@ -237,7 +236,9 @@ where
 	fn can_handle(&self, ty: DeviceType) -> bool;
 
 	/// Get a handler for a device of the given type.
-	fn handle(&self, device_type: DeviceType,
+	fn handle(
+		&self,
+		device_type: DeviceType,
 		common: &'a CommonConfig,
 		device: &'a DeviceConfig,
 		notify: &'a Notify,
@@ -248,16 +249,22 @@ where
 /// Setup a virtio device on a PCI bus.
 // TODO figure out how to get `A: Allocator` to work. I'm 99% certain there's a bug in the compiler
 // because static lifetimes keep slipping in somehow
-pub fn new_device<'a, A>(device: pci::Device<'a>, handlers: impl DeviceHandlers<'a, A>, allocator: A) -> Result<Box<dyn Device<A> + 'a, A>, SetupError<A>>
+pub fn new_device<'a, A>(
+	device: pci::Device<'a>,
+	handlers: impl DeviceHandlers<'a, A>,
+	allocator: A,
+) -> Result<Box<dyn Device<A> + 'a, A>, SetupError<A>>
 where
 	A: Allocator + 'a,
 {
 	let key = DeviceType::new(device.vendor_id(), device.device_id());
 
-	handlers.can_handle(key).then(|| ()).ok_or(SetupError::NoHandler(key))?;
+	handlers
+		.can_handle(key)
+		.then(|| ())
+		.ok_or(SetupError::NoHandler(key))?;
 
 	let cmd = pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK;
-	use core::fmt::Write;
 
 	let header = match device.header() {
 		pci::Header::H0(h) => h,
@@ -343,7 +350,8 @@ where
 					_ => (),
 				}
 			}
-		} else if cap.id() == 0x5 { // MSI
+		} else if cap.id() == 0x5 {
+			// MSI
 			kernel::dbg!("lesgo");
 			#[repr(C)]
 			struct MSI {
@@ -358,7 +366,8 @@ where
 			kernel::dbg!("set msi");
 			data.msg_ctrl.set([0x1, 0x0]);
 			kernel::dbg!("done msi");
-		} else if cap.id() == 0x11 { // MSI-X
+		} else if cap.id() == 0x11 {
+			// MSI-X
 			kernel::dbg!("LESGO");
 			#[repr(C)]
 			#[repr(packed)]
@@ -370,23 +379,27 @@ where
 			let data = unsafe { cap.data::<MSIX>() };
 			kernel::dbg!("set msi-x");
 
-			data.msg_ctrl.set(((1 << 15) | 1).into());
+			unsafe {
+				data.msg_ctrl.set(((1 << 15) | 1).into());
 
-			kernel::dbg!(data.msg_ctrl.get());
-			kernel::dbg!(data.table_offt_and_bir.get());
-			kernel::dbg!(data.pending_bit_offt_and_bir.get());
+				kernel::dbg!(data.msg_ctrl.get());
+				kernel::dbg!(data.table_offt_and_bir.get());
+				kernel::dbg!(data.pending_bit_offt_and_bir.get());
+			}
 
 			//data.table_offt_and_bir
 
 			kernel::dbg!("done msi-x");
 
-		match device.header() {
-			::pci::Header::H0(h) => {
-				kernel::dbg!("set msi-x h");
-				kernel::dbg!("done msi-x h");
+			/*
+			match device.header() {
+				::pci::Header::H0(h) => {
+					kernel::dbg!("set msi-x h");
+					kernel::dbg!("done msi-x h");
+				}
+				_ => panic!("bad header type"),
 			}
-			_ => panic!("bad header type"),
-		}
+			*/
 		}
 	}
 
@@ -437,7 +450,7 @@ where
 				.cast::<CommonConfig>()
 				.as_ref()
 		})
-	.expect("No common config map defined");
+		.expect("No common config map defined");
 
 	let device_config = device_config
 		.map(|cfg| unsafe {
@@ -445,7 +458,7 @@ where
 				.cast::<DeviceConfig>()
 				.as_ref()
 		})
-	.expect("No common config map defined");
+		.expect("No common config map defined");
 
 	let notify_config = notify_config
 		.map(|cfg| unsafe {
@@ -453,7 +466,7 @@ where
 				.cast::<Notify>()
 				.as_ref()
 		})
-	.expect("No common config map defined");
+		.expect("No common config map defined");
 
 	let isr_config = isr_config
 		.map(|cfg| unsafe {
@@ -461,13 +474,15 @@ where
 				.cast::<ISRConfig>()
 				.as_ref()
 		})
-	.expect("No isr config map defined");
+		.expect("No isr config map defined");
 
-		kernel::dbg!("set isr");
+	kernel::dbg!("set isr");
 	isr_config.status.set(0x0);
-		kernel::dbg!("done isr");
+	kernel::dbg!("done isr");
 
-	handlers.handle(key, common_config, device_config, notify_config, allocator).map_err(SetupError::Handler)
+	handlers
+		.handle(key, common_config, device_config, notify_config, allocator)
+		.map_err(SetupError::Handler)
 }
 
 /// # Safety
@@ -479,7 +494,7 @@ pub unsafe trait Device<A>
 where
 	A: Allocator,
 {
-    fn device_type(&self) -> DeviceType;
+	fn device_type(&self) -> DeviceType;
 }
 
 /// # Safety
@@ -496,7 +511,7 @@ where
 
 impl<'a, A> dyn Device<A> + 'a
 where
-	A: Allocator + 'a
+	A: Allocator + 'a,
 {
 	pub fn is<D: StaticDeviceType<A> + Device<A>>(&self) -> bool {
 		self.device_type() == D::device_type_of()

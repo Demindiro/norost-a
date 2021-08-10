@@ -1,7 +1,12 @@
 use core::convert::TryInto;
 use core::mem;
 
-#[cfg(not(any(target_pointer_width = "16", target_pointer_width = "32", target_pointer_width = "64", target_pointer_width = "128")))]
+#[cfg(not(any(
+	target_pointer_width = "16",
+	target_pointer_width = "32",
+	target_pointer_width = "64",
+	target_pointer_width = "128"
+)))]
 compile_error!("Please report your alien computer to the local authorities");
 
 /// A task ID, which is unique per task group.
@@ -46,16 +51,25 @@ pub struct GroupID(u64);
 pub struct Address(usize);
 
 impl Address {
+	#[allow(dead_code)]
 	pub fn new(task: TaskID, group: GroupID) -> Self {
 		Self(task.0 as usize | (group.0 << (mem::size_of::<usize>() * 4)) as usize)
 	}
 
 	pub fn task(&self) -> TaskID {
-		TaskID((self.0 & ((0x100 << mem::size_of::<TaskID>()) - 1)).try_into().unwrap())
+		TaskID(
+			(self.0 & ((0x100 << mem::size_of::<TaskID>()) - 1))
+				.try_into()
+				.unwrap(),
+		)
 	}
 
 	pub fn group(&self) -> GroupID {
-		GroupID((self.0 >> (mem::size_of::<usize>() * 4)).try_into().unwrap())
+		GroupID(
+			(self.0 >> (mem::size_of::<usize>() * 4))
+				.try_into()
+				.unwrap(),
+		)
 	}
 
 	pub(super) const fn todo(n: usize) -> Self {

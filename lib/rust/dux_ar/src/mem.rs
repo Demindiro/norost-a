@@ -9,15 +9,20 @@ struct ReservePagesStatus {
 }
 
 #[no_mangle]
-extern "C" fn dux_reserve_pages(address: Option<NonNull<kernel::Page>>, count: usize) -> ReservePagesStatus {
+extern "C" fn dux_reserve_pages(
+	address: Option<NonNull<kernel::Page>>,
+	count: usize,
+) -> ReservePagesStatus {
 	let addr = match address {
 		Some(addr) => match dux::Page::new(addr) {
 			Ok(addr) => Some(addr),
-			Err(dux::page::Unaligned) => return ReservePagesStatus {
-				address: None,
-				status: -2,
-			},
-		}
+			Err(dux::page::Unaligned) => {
+				return ReservePagesStatus {
+					address: None,
+					status: -2,
+				}
+			}
+		},
 		None => None,
 	};
 	match reserve_range(addr, count) {
@@ -43,7 +48,7 @@ extern "C" fn dux_unreserve_pages(address: *mut kernel::Page, count: usize) -> f
 			Ok(()) => 0,
 			Err(UnreserveError::InvalidAddress) => -2,
 			Err(UnreserveError::SizeTooLarge) => -3,
-		}
+		},
 		None => -1,
 	}
 }

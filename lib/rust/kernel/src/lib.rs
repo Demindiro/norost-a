@@ -29,9 +29,9 @@ pub struct Return {
 pub mod ipc {
 	use super::*;
 	use core::convert::TryFrom;
-	use core::ptr;
 	use core::mem;
 	use core::num::NonZeroU8;
+	use core::ptr;
 	use core::ptr::NonNull;
 
 	/// An UUID used to uniquely identify objects.
@@ -69,7 +69,12 @@ pub mod ipc {
 			write!(f, "{:02x}{:02x}", n as u8, (n >> 8) as u8)?;
 			for i in 1..8 {
 				"-".fmt(f)?;
-				write!(f, "{:02x}{:02x}", (n >> (16 * i)) as u8, (n >> (24 * i)) as u8)?;
+				write!(
+					f,
+					"{:02x}{:02x}",
+					(n >> (16 * i)) as u8,
+					(n >> (24 * i)) as u8
+				)?;
 			}
 			Ok(())
 		}
@@ -140,9 +145,14 @@ pub mod ipc {
 
 	impl fmt::Debug for FreePage {
 		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-			f
-				.debug_struct(stringify!(FreePage))
-				.field("address", &self.address.map(|p| p.as_ptr()).unwrap_or_else(ptr::null_mut))
+			f.debug_struct(stringify!(FreePage))
+				.field(
+					"address",
+					&self
+						.address
+						.map(|p| p.as_ptr())
+						.unwrap_or_else(ptr::null_mut),
+				)
 				.field("count", &self.count)
 				.finish()
 		}
@@ -279,7 +289,10 @@ impl TryFrom<PPN> for PhysicalAddress {
 	type Error = OutOfRange;
 
 	fn try_from(ppn: PPN) -> Result<Self, Self::Error> {
-		ppn.0.checked_shl(Page::OFFSET_BITS.into()).map(Self).ok_or(OutOfRange)
+		ppn.0
+			.checked_shl(Page::OFFSET_BITS.into())
+			.map(Self)
+			.ok_or(OutOfRange)
 	}
 }
 
@@ -287,7 +300,9 @@ impl TryFrom<PhysicalAddress> for PPN {
 	type Error = BadAlignment;
 
 	fn try_from(pa: PhysicalAddress) -> Result<Self, Self::Error> {
-		(pa.0 & Page::MASK == 0).then(|| Self(pa.0 >> Page::OFFSET_BITS)).ok_or(BadAlignment)
+		(pa.0 & Page::MASK == 0)
+			.then(|| Self(pa.0 >> Page::OFFSET_BITS))
+			.ok_or(BadAlignment)
 	}
 }
 

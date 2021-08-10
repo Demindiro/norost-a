@@ -39,8 +39,12 @@ static FUCK_OFF: GlobalFuckOff = GlobalFuckOff;
 struct GlobalFuckOff;
 
 unsafe impl alloc::alloc::GlobalAlloc for GlobalFuckOff {
-	unsafe fn alloc(&self, _layout: core::alloc::Layout) -> *mut u8 { todo!("Fuck off") }
-	unsafe fn dealloc(&self, ptr: *mut u8, _layout: core::alloc::Layout) { todo!("Fuck off") }
+	unsafe fn alloc(&self, _layout: core::alloc::Layout) -> *mut u8 {
+		todo!("Fuck off")
+	}
+	unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {
+		todo!("Fuck off")
+	}
 }
 
 use core::convert::TryFrom;
@@ -49,7 +53,6 @@ use xmas_elf::ElfFile;
 
 #[export_name = "main"]
 fn main() {
-
 	// GOD FUCKING DAMN IT RUST
 	//
 	// WHY ARE YOU STRIPPING THE __dux_init SYMBOL
@@ -70,13 +73,13 @@ fn main() {
 	// https://static.dev.sifive.com/U54-MC-RVCoreIP.pdf
 	// Presumably, since we're running on hart 0 (the only hart), we need to
 	// enable the interrupt in context 0x1 (S-mode).
-	plic.enable(context, source, true);
-	plic.set_priority(source, 1);
-	plic.set_priority_threshold(context, 0);
+	plic.enable(context, source, true).unwrap();
+	plic.set_priority(source, 1).unwrap();
+	plic.set_priority_threshold(context, 0).unwrap();
 
 	sys_log!("Opening FAT FS");
-	let mut dev = unsafe { pci::BLK.as_mut().unwrap().downcast_mut().unwrap() };
-	let mut fs = match fs::open(virtio_block::Proxy::new(dev)) {
+	let dev = unsafe { pci::BLK.as_mut().unwrap().downcast_mut().unwrap() };
+	let fs = match fs::open(virtio_block::Proxy::new(dev)) {
 		Ok(fs) => {
 			sys_log!("Successfully opened FAT FS");
 			fs
@@ -97,72 +100,22 @@ fn main() {
 	sys_log!("Creating console");
 	let mut console = unsafe { console::Console::new(device_tree::UART_ADDRESS.cast()) };
 	let mut buf = [0; 256];
-	let mut i = 0;
-	while false {
-		if let Some(c) = console.uart.read() {
-			// TODO why tf does QEMU send a CR to us instead of LF?
-			if c == b'\r' {
-				use core::fmt::Write;
-				writeln!(console);
-
-				let buf = &buf[..i];
-				match core::str::from_utf8(buf) {
-					Ok(buf) => {
-						let mut args = buf.split(|c: char| c == ' ').filter(|a| !a.is_empty());
-						if let Some(cmd) = args.next() {
-							match cmd {
-								"echo" => {
-									args.next().map(|a| console.write_str(a));
-									for a in args {
-										console.write_str(" ");
-										console.write_str(a);
-									}
-									console.write_str("\n");
-								}
-								cmd => writeln!(console, "Unknown command '{}'", cmd).unwrap(),
-							}
-						}
-					}
-					Err(e) => writeln!(console, "Invalid command: {:?}", e).unwrap(),
-				}
-
-				i = 0;
-
-				write!(console, "INIT >> ");
-			} else {
-				buf[i] = c;
-				i += 1;
-				console.uart.write(c);
-			}
-		}
-	}
 
 	sys_log!("Press any key for magic");
 	let mut prev = None;
-	loop {
-		//kernel::dbg!(i);
-		continue;
+	for _ in 0..100 {
 		let curr = plic.claim(context).unwrap();
 		if Some(curr) != prev {
 			kernel::dbg!(curr);
 			prev = Some(curr);
 		}
 		if let Some(curr) = curr {
-			/*
-			let mut buf = [0; 256];
 			let r = console.read(&mut buf);
 			console.write(b"You typed '");
 			console.write(&buf[..r]);
 			console.write(b"'\n");
-			*/
 			plic.complete(context, curr).unwrap();
 		}
-		/*
-		let mut k = 0;
-		for _ in 0..100_000_000 {
-			unsafe { core::ptr::write_volatile(&mut k, 0) };
-		}
-		*/
 	}
 
 	sys_log!("Listing binary addresses:");
@@ -270,31 +223,44 @@ fn main() {
 	drop(list_builder);
 
 	// Allocate a single page for transmitting data.
-	let raw = dux::mem::reserve_range(None, 1).unwrap().as_ptr().cast::<u8>();
+	let raw = dux::mem::reserve_range(None, 1)
+		.unwrap()
+		.as_ptr()
+		.cast::<u8>();
 	let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
 	assert_eq!(ret.status, 0);
 
 	loop {
 		// Read received data & write it to UART
 		if let Some(rxq) = dux::ipc::try_receive() {
-
 			let op = rxq.opcode.unwrap();
 			match kernel::ipc::Op::try_from(op) {
 				Ok(kernel::ipc::Op::Read) => {
-
 					// Figure out object to read.
-					let data = unsafe { core::slice::from_raw_parts_mut(rxq.data.unwrap().as_ptr().cast(), rxq.length) };
-					let path = rxq.name.map(|name| unsafe { core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into()) });
+					let data = unsafe {
+						core::slice::from_raw_parts_mut(
+							rxq.data.unwrap().as_ptr().cast(),
+							rxq.length,
+						)
+					};
+					let path = rxq.name.map(|name| unsafe {
+						core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
+					});
 
 					let length = if let Some(path) = path {
 						// Read data from file
-						let mut f = fs.root_dir().open_file(core::str::from_utf8(path).unwrap()).unwrap();
+						let mut f = fs
+							.root_dir()
+							.open_file(core::str::from_utf8(path).unwrap())
+							.unwrap();
 						use fatfs::Read;
 						f.read(data).unwrap()
 					} else {
 						// Read data from UART
 						let read = console.read(data);
-						data.iter_mut().filter(|b| **b == b'\r').for_each(|b| *b = b'\n');
+						data.iter_mut()
+							.filter(|b| **b == b'\r')
+							.for_each(|b| *b = b'\n');
 						read
 					};
 
@@ -316,22 +282,32 @@ fn main() {
 					let ret = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
 					assert_eq!(ret.status, 0);
 					dux::ipc::add_free_range(
-						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
+						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap())
+							.unwrap(),
 						dux::Page::min_pages_for_range(rxq.length),
-					);
+					)
+					.unwrap();
 					if let Some(name) = rxq.name {
 						let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, 1) };
 						assert_eq!(ret.status, 0);
 						dux::ipc::add_free_range(
-							dux::Page::new(core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap()).unwrap(),
+							dux::Page::new(
+								core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap(),
+							)
+							.unwrap(),
 							dux::Page::min_pages_for_range(rxq.name_len.into()),
-						);
+						)
+						.unwrap();
 					}
 				}
 				Ok(kernel::ipc::Op::Write) => {
 					// Figure out object to write to.
-					let data = unsafe { core::slice::from_raw_parts(rxq.data.unwrap().as_ptr().cast(), rxq.length) };
-					let path = rxq.name.map(|name| unsafe { core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into()) });
+					let data = unsafe {
+						core::slice::from_raw_parts(rxq.data.unwrap().as_ptr().cast(), rxq.length)
+					};
+					let path = rxq.name.map(|name| unsafe {
+						core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
+					});
 
 					// Write data
 					let len = if path.is_none() {
@@ -343,7 +319,7 @@ fn main() {
 							Ok(f) => f,
 							Err(_) => fs.root_dir().create_file(name).unwrap(),
 						};
-						use fatfs::{Write, Seek, SeekFrom};
+						use fatfs::{Seek, SeekFrom, Write};
 						f.seek(SeekFrom::Start(rxq.offset)).unwrap();
 						f.write(data).unwrap()
 					};
@@ -352,16 +328,22 @@ fn main() {
 					let ret = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
 					assert_eq!(ret.status, 0);
 					dux::ipc::add_free_range(
-						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
+						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap())
+							.unwrap(),
 						dux::Page::min_pages_for_range(rxq.length),
-					);
+					)
+					.unwrap();
 					if let Some(name) = rxq.name {
 						let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, 1) };
 						assert_eq!(ret.status, 0);
 						dux::ipc::add_free_range(
-							dux::Page::new(core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap()).unwrap(),
+							dux::Page::new(
+								core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap(),
+							)
+							.unwrap(),
 							dux::Page::min_pages_for_range(rxq.name_len.into()),
-						);
+						)
+						.unwrap();
 					}
 
 					// Confirm reception.
@@ -380,7 +362,8 @@ fn main() {
 					unsafe { kernel::io_wait(0, 0) };
 				}
 				Ok(kernel::ipc::Op::List) => {
-					let mut list_builder = dux::ipc::list::Builder::new(fs.root_dir().iter().count(), 50).unwrap();
+					let mut list_builder =
+						dux::ipc::list::Builder::new(fs.root_dir().iter().count(), 50).unwrap();
 					for f in fs.root_dir().iter() {
 						let f = f.unwrap();
 						let uuid = kernel::ipc::UUID::from(0);
@@ -388,7 +371,6 @@ fn main() {
 						let size = f.len();
 						list_builder.add(uuid, name, size).unwrap();
 					}
-					let list = dux::ipc::list::List::new(list_builder.data());
 
 					let data = Some(core::ptr::NonNull::from(list_builder.data()).cast());
 

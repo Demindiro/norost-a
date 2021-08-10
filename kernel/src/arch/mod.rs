@@ -121,6 +121,7 @@ pub fn enable_supervisor_interrupts(enable: bool) {
 }
 
 #[inline]
+#[allow(dead_code)]
 pub fn enable_timer_interrupts(enable: bool) {
 	// Enable supervisor timer interrupts.
 	let stie_bit = 1 << 5;
@@ -144,9 +145,4 @@ pub fn enable_external_interrupts(enable: bool) {
 	sie |= seie_bit * usize::from(u8::from(enable));
 	log!("sie: 0x{:x}", sie);
 	unsafe { asm!("csrw sie, {0}", in(reg) sie) };
-}
-
-#[inline]
-pub fn clear_pending_interrupts() {
-	unsafe { asm!("csrw sip, zero") };
 }

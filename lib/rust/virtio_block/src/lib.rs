@@ -1,41 +1,47 @@
 #![no_std]
-
 #![feature(allocator_api)]
 #![feature(alloc_prelude)]
 
 extern crate alloc;
 
-mod sector;
 #[cfg(feature = "fatfs_io")]
 mod fatfs;
+mod sector;
 
-pub use sector::Sector;
 #[cfg(feature = "fatfs_io")]
 pub use crate::fatfs::Proxy;
+pub use sector::Sector;
 
 use alloc::prelude::v1::*;
 
-use virtio::pci::{CommonConfig, DeviceConfig, Notify};
-use virtio::queue;
 use core::alloc::Allocator;
 use core::fmt;
 use core::mem;
 use simple_endian::{u16le, u32le, u64le};
-use vcell::VolatileCell;
+use virtio::pci::{CommonConfig, DeviceConfig, Notify};
+use virtio::queue;
 
 const SIZE_MAX: u32 = 1 << 1;
 const SEG_MAX: u32 = 1 << 2;
 const GEOMETRY: u32 = 1 << 4;
+#[allow(dead_code)]
 const RO: u32 = 1 << 5;
 const BLK_SIZE: u32 = 1 << 6;
+#[allow(dead_code)]
 const FLUSH: u32 = 1 << 9;
 const TOPOLOGY: u32 = 1 << 10;
+#[allow(dead_code)]
 const CONFIG_WCE: u32 = 1 << 11;
+#[allow(dead_code)]
 const DISCARD: u32 = 1 << 13;
+#[allow(dead_code)]
 const WRITE_ZEROES: u32 = 1 << 14;
 
+#[allow(dead_code)]
 const ANY_LAYOUT: u32 = 1 << 27;
+#[allow(dead_code)]
 const EVENT_IDX: u32 = 1 << 28;
+#[allow(dead_code)]
 const INDIRECT_DESC: u32 = 1 << 29;
 
 /// A driver for a virtio block device.
@@ -97,11 +103,6 @@ impl RequestHeader {
 }
 
 #[repr(C)]
-struct RequestData {
-	data: [u8; 512],
-}
-
-#[repr(C)]
 struct RequestStatus {
 	status: u8,
 }
@@ -121,20 +122,19 @@ where
 		notify: &'a Notify,
 		allocator: A,
 	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>> {
-		use core::fmt::Write;
-
 		let features = SIZE_MAX | SEG_MAX | GEOMETRY | BLK_SIZE | TOPOLOGY;
 		common.device_feature_select.set(0.into());
 
 		let features = u32le::from(features) & common.device_feature.get();
 		common.device_feature.set(features);
+		#[allow(dead_code)]
 		const STATUS_DRIVER_OK: u8 = 0x4;
 
 		common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE
-			| CommonConfig::STATUS_DRIVER
-			| CommonConfig::STATUS_FEATURES_OK,
-			);
+				| CommonConfig::STATUS_DRIVER
+				| CommonConfig::STATUS_FEATURES_OK,
+		);
 		// TODO check device status to ensure features were enabled correctly.
 
 		let blk_cfg = unsafe { device.cast::<Config>() };
@@ -144,23 +144,28 @@ where
 
 		common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE
-			| CommonConfig::STATUS_DRIVER
-			| CommonConfig::STATUS_FEATURES_OK
-			| CommonConfig::STATUS_DRIVER_OK,
-			);
+				| CommonConfig::STATUS_DRIVER
+				| CommonConfig::STATUS_FEATURES_OK
+				| CommonConfig::STATUS_DRIVER_OK,
+		);
 
-		Ok(Box::new_in(Self {
-			queue,
-			notify,
-			capacity: blk_cfg.capacity.into(),
-			_p: core::marker::PhantomData,
-		}, allocator))
+		Ok(Box::new_in(
+			Self {
+				queue,
+				notify,
+				capacity: blk_cfg.capacity.into(),
+				_p: core::marker::PhantomData,
+			},
+			allocator,
+		))
 	}
 
 	/// Write out sectors
-	pub fn write<'s>(&'s mut self, data: impl AsRef<[Sector]> + 's, sector_start: u64) -> Result<(), WriteError> {
-		let sector_count = data.as_ref().len();
-
+	pub fn write<'s>(
+		&'s mut self,
+		data: impl AsRef<[Sector]> + 's,
+		sector_start: u64,
+	) -> Result<(), WriteError> {
 		let header = RequestHeader {
 			typ: RequestHeader::WRITE.into(),
 			reserved: 0.into(),
@@ -186,10 +191,13 @@ where
 
 		let data = [
 			(phys_header + ho, mem::size_of::<RequestHeader>(), false),
-			(phys_data + d_, data.as_ref().len() * mem::size_of::<Sector>(), false),
+			(
+				phys_data + d_,
+				data.as_ref().len() * mem::size_of::<Sector>(),
+				false,
+			),
 			(phys_status + so, mem::size_of::<RequestStatus>(), true),
 		];
-		use core::fmt::Write;
 
 		self.queue
 			.send(data.iter().copied())
@@ -203,9 +211,11 @@ where
 	}
 
 	/// Read in sectors
-	pub fn read<'s>(&'s mut self, mut data: impl AsMut<[Sector]> + 's, sector_start: u64) -> Result<(), WriteError> {
-		let sector_count = data.as_mut().len();
-
+	pub fn read<'s>(
+		&'s mut self,
+		mut data: impl AsMut<[Sector]> + 's,
+		sector_start: u64,
+	) -> Result<(), WriteError> {
 		let header = RequestHeader {
 			typ: RequestHeader::READ.into(),
 			reserved: 0.into(),
@@ -231,7 +241,11 @@ where
 
 		let data = [
 			(phys_header + ho, mem::size_of::<RequestHeader>(), false),
-			(phys_data + d_, data.as_mut().len() * mem::size_of::<Sector>(), true),
+			(
+				phys_data + d_,
+				data.as_mut().len() * mem::size_of::<Sector>(),
+				true,
+			),
 			(phys_status + so, mem::size_of::<RequestStatus>(), true),
 		];
 
@@ -253,7 +267,7 @@ where
 
 impl<A> Drop for BlockDevice<'_, A>
 where
-	A: Allocator
+	A: Allocator,
 {
 	fn drop(&mut self) {
 		todo!("ensure the device doesn't read/write memory after being dropped");
@@ -278,22 +292,20 @@ where
 	}
 }
 
-
 pub enum SetupError {}
 
 impl fmt::Debug for SetupError {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str(match self {
-			_ => unreachable!(),
-		})
+	fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
+		//f.write_str(match self {
+		//})
+		Ok(())
 	}
 }
 
-pub enum WriteError {
-}
+pub enum WriteError {}
 
 impl fmt::Debug for WriteError {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
 		/*
 		f.write_str(match self {
 		})

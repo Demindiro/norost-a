@@ -20,8 +20,7 @@ impl UART {
 		let a = address.as_ptr();
 		// Copied from https://wiki.osdev.org/Serial_Ports
 		//a.add(0).write(0x00); // Enable DLAB (set baud rate divisor)
-		//a.add(1).write(0x0f); // Enable all interrupts
-		a.add(1).write(0x01); // Disable all interrupts
+		a.add(1).write(0x01); // Enable data available interrupts
 		kernel::dbg!("Setup UART done");
 		/*
 		a.add(3).write(0x80); // Enable DLAB (set baud rate divisor)
@@ -33,14 +32,7 @@ impl UART {
 		a.add(4).write(0x1e); // Set in loopback mode, test the serial chip
 		a.add(0).write(0xae); // Test serial chip (send byte 0xAE and check if serial returns same byte)
 		*/
-		let mut slf = Self { address };
-		slf.read();
-		slf.read();
-		slf.read();
-		slf.read();
-		slf.read();
-		slf.read();
-		slf
+		Self { address }
 	}
 
 	/// Check if any data to read is available.

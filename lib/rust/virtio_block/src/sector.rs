@@ -12,7 +12,7 @@ pub struct Sector(pub [u8; 512]);
 
 impl Sector {
 	/// Return a slice of sectors as a byte array.
-	fn slice_as_u8<'a>(slice: &'a [Self]) -> &'a [u8] {
+	pub fn slice_as_u8<'a>(slice: &'a [Self]) -> &'a [u8] {
 		// SAFETY: the size matches in terms of bytes & the address is properly aligned.
 		unsafe {
 			let ratio = mem::size_of::<Self>() / mem::size_of::<u8>();
@@ -21,7 +21,7 @@ impl Sector {
 	}
 
 	/// Return a mutable slice of sectors as a byte array.
-	fn slice_as_u8_mut<'a>(slice: &'a mut [Self]) -> &'a mut [u8] {
+	pub fn slice_as_u8_mut<'a>(slice: &'a mut [Self]) -> &'a mut [u8] {
 		// SAFETY: the size matches in terms of bytes & the address is properly aligned.
 		unsafe {
 			let ratio = mem::size_of::<Self>() / mem::size_of::<u8>();

@@ -40,7 +40,7 @@ impl<'a> List<'a> {
 				name: start
 					.checked_add(e.name_length.into())
 					.and_then(|end| data.get(start..end)),
-				size: e.size
+				size: e.size,
 			}
 		})
 	}
@@ -74,9 +74,13 @@ impl fmt::Debug for Entry<'_> {
 		let mut d = f.debug_struct("Entry");
 		d.field("uuid", &self.uuid);
 		self.name.map(|name| {
-			str::from_utf8(name)
-				.map(|name| { d.field("name", &name); })
-				.map_err(|name| { d.field("name", &name); });
+			let _ = str::from_utf8(name)
+				.map(|name| {
+					d.field("name", &name);
+				})
+				.map_err(|name| {
+					d.field("name", &name);
+				});
 		});
 		d.field("size", &self.size);
 		d.finish()
@@ -163,7 +167,12 @@ impl Builder {
 
 	/// Add an entry
 	#[inline]
-	pub fn add(&mut self, uuid: kernel::ipc::UUID, name: &[u8], size: u64) -> Result<(), BuilderAddError> {
+	pub fn add(
+		&mut self,
+		uuid: kernel::ipc::UUID,
+		name: &[u8],
+		size: u64,
+	) -> Result<(), BuilderAddError> {
 		let name_length = name
 			.len()
 			.try_into()
@@ -174,13 +183,17 @@ impl Builder {
 			.ok_or(BuilderAddError::NameTooLong)?;
 
 		// TODO see struct definition.
-		self.max_entries.checked_sub(1).map(|e| self.max_entries = e).ok_or(BuilderAddError::MaxEntriesExceeded)?;
+		self.max_entries
+			.checked_sub(1)
+			.map(|e| self.max_entries = e)
+			.ok_or(BuilderAddError::MaxEntriesExceeded)?;
 
 		unsafe {
 			if self.page_count == 0 {
 				// Just allocate everything, I can't be bothered.
 				let addr = self.address.as_ptr();
 				let ret = kernel::mem_alloc(addr, self.max_pages, kernel::PROT_READ_WRITE);
+				assert_eq!(ret.status, 0);
 				self.page_count = self.max_pages;
 			}
 

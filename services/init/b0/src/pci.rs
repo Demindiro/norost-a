@@ -2,31 +2,39 @@
 struct StackAlloc(core::cell::UnsafeCell<[u8; 4096]>, core::cell::Cell<usize>);
 
 unsafe impl core::alloc::Allocator for StackAlloc {
-	fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
+	fn allocate(
+		&self,
+		layout: core::alloc::Layout,
+	) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
 		let s = self.1.get();
 		let heap = unsafe { &mut *self.0.get() };
 		let heap = &mut heap[s..];
 		let offt = heap.as_ptr() as usize & (layout.align() - 1);
 		let heap = &mut heap[offt..];
-		let (ret, rem) = heap.split_at_mut(layout.size());
+		let ret = &mut heap[..layout.size()];
 		self.1.set(s + offt + layout.size());
 		Ok(core::ptr::NonNull::from(ret))
 	}
 
-	unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
-	}
+	unsafe fn deallocate(&self, _ptr: core::ptr::NonNull<u8>, _layout: core::alloc::Layout) {}
 }
 
 unsafe impl Sync for StackAlloc {}
 
-static HEAP: StackAlloc = unsafe { StackAlloc(core::cell::UnsafeCell::new([0; 4096]), core::cell::Cell::new(0)) };
+static HEAP: StackAlloc = StackAlloc(
+	core::cell::UnsafeCell::new([0; 4096]),
+	core::cell::Cell::new(0),
+);
 
 // https://github.com/rust-lang/rust/issues/81270
 #[derive(Clone, Copy)]
 pub struct FuckingRust;
 
 unsafe impl core::alloc::Allocator for FuckingRust {
-	fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
+	fn allocate(
+		&self,
+		layout: core::alloc::Layout,
+	) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
 		HEAP.allocate(layout)
 	}
 
@@ -43,7 +51,6 @@ pub static mut BLK: Option<Box<dyn virtio::pci::Device<FuckingRust>, FuckingRust
 
 // TODO move this to a dedicated process.
 pub fn init_blk_device() {
-
 	struct Handler;
 
 	use alloc::prelude::v1::*;
@@ -57,12 +64,14 @@ pub fn init_blk_device() {
 			virtio_block::BlockDevice::<A>::device_type_of() == ty
 		}
 
-		fn handle(&self, ty: DeviceType,
+		fn handle(
+			&self,
+			ty: DeviceType,
 			common: &'a CommonConfig,
 			device: &'a DeviceConfig,
 			notify: &'a Notify,
 			allocator: A,
-	   ) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>> {
+		) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>> {
 			assert_eq!(virtio_block::BlockDevice::<A>::device_type_of(), ty);
 			virtio_block::BlockDevice::new(common, device, notify, allocator)
 		}
@@ -80,22 +89,7 @@ pub fn init_blk_device() {
 	}
 	for bus in unsafe { PCI.as_mut().unwrap() }.iter() {
 		for dev in bus.iter() {
-			if let Ok(mut vdev) = virtio::pci::new_device(dev, &Handler, FuckingRust) {
-				let dev = vdev.downcast_mut::<virtio_block::BlockDevice<FuckingRust>>().unwrap();
-				let mut data = virtio_block::Sector([0; 512]);
-
-				/*
-				// Read
-				dev.read(&mut data, 0);
-				let num = u32::from_be_bytes([data.0[0], data.0[1], data.0[2], data.0[3]]);
-				kernel::sys_log!("Read the number {}", num);
-
-				// Write
-				for (i, c) in (num + 1).to_be_bytes().iter().copied().enumerate() {
-					data.0[i] = c;
-				}
-				dev.write(&data, 0).unwrap();
-				*/
+			if let Ok(vdev) = virtio::pci::new_device(dev, &Handler, FuckingRust) {
 				unsafe {
 					BLK = Some(vdev);
 				}

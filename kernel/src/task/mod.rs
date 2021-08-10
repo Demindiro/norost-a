@@ -31,7 +31,6 @@ use crate::arch::vms::{self, VirtualMemorySystem, RWX};
 use crate::arch::{self, Map, Page};
 use crate::memory::{self, AllocateError};
 use core::ptr::NonNull;
-use core::sync::atomic;
 
 /// A wrapper around a task pointer.
 #[derive(Clone)]
@@ -130,14 +129,14 @@ impl Task {
 	/// Deallocate memory
 	pub fn deallocate_memory(&self, address: Page, count: usize) -> Result<(), ()> {
 		let _ = (address, count);
-		self.inner().shared_state.virtual_memory.deallocate(address, count)
+		self.inner()
+			.shared_state
+			.virtual_memory
+			.deallocate(address, count)
 	}
 
 	/// Set the task transmit & receive queue pointers and sizes.
-	pub fn set_queues(
-		&self,
-		buffers: Option<ipc::IPC>,
-	) {
+	pub fn set_queues(&self, buffers: Option<ipc::IPC>) {
 		self.inner().ipc = buffers;
 	}
 
@@ -145,16 +144,4 @@ impl Task {
 		// SAFETY: The task has been safely initialized.
 		unsafe { self.0.clone().as_mut() }
 	}
-}
-
-/// Begin executing the next task.
-// TODO figure out how to get this to work in `impl`s
-#[export_name = "executor_next_task"]
-#[linkage = "external"]
-extern "C" fn next(exec: Task) -> ! {
-	todo!();
-	/*
-	exec.process_io();
-	exec.execute()
-	*/
 }

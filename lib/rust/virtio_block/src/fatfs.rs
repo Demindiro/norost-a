@@ -10,7 +10,7 @@ use ::fatfs::*;
 /// sector.
 pub struct Proxy<'a, 'b, A>
 where
-	A: Allocator + 'a
+	A: Allocator + 'a,
 {
 	device: &'b mut BlockDevice<'a, A>,
 	position: u64,
@@ -49,7 +49,9 @@ where
 
 	fn fetch(&mut self) {
 		self.buffer_sector = self.seek_sector();
-		self.device.read(&mut self.buffer, self.buffer_sector).unwrap();
+		self.device
+			.read(&mut self.buffer, self.buffer_sector)
+			.unwrap();
 	}
 
 	fn max_seek(&self) -> u64 {
@@ -59,14 +61,14 @@ where
 
 impl<'a, A> IoBase for Proxy<'a, '_, A>
 where
-	A: Allocator + 'a
+	A: Allocator + 'a,
 {
 	type Error = ();
 }
 
 impl<'a, A> Read for Proxy<'a, '_, A>
 where
-	A: Allocator + 'a
+	A: Allocator + 'a,
 {
 	fn read(&mut self, data: &mut [u8]) -> Result<usize, Self::Error> {
 		let mut i = 0;
@@ -75,7 +77,7 @@ where
 				break;
 			}
 			if self.seek_sector() != self.buffer_sector() {
-				self.flush();
+				self.flush()?;
 				self.fetch();
 				assert_eq!(self.seek_sector(), self.buffer_sector());
 			}
@@ -90,16 +92,16 @@ where
 
 impl<'a, A> Write for Proxy<'a, '_, A>
 where
-	A: Allocator + 'a
+	A: Allocator + 'a,
 {
-	fn write(&mut self, mut data: &[u8]) -> Result<usize, Self::Error> {
+	fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
 		let mut i = 0;
 		while i < data.len() {
 			if self.position >= self.max_seek() {
 				break;
 			}
 			if self.seek_sector() != self.buffer_sector() {
-				self.flush();
+				self.flush()?;
 				if data.len() <= self.buffer.len() {
 					self.fetch();
 					assert_eq!(self.seek_sector(), self.buffer_sector());
@@ -116,7 +118,9 @@ where
 
 	fn flush(&mut self) -> Result<(), Self::Error> {
 		if self.dirty {
-			self.device.write(&mut self.buffer, self.buffer_sector);
+			self.device
+				.write(&mut self.buffer, self.buffer_sector)
+				.map_err(|_| ())?;
 			self.dirty = false;
 		}
 		Ok(())
@@ -125,15 +129,17 @@ where
 
 impl<'a, A> Seek for Proxy<'a, '_, A>
 where
-	A: Allocator + 'a
+	A: Allocator + 'a,
 {
 	fn seek(&mut self, pos: SeekFrom) -> Result<u64, Self::Error> {
 		self.position = match pos {
 			SeekFrom::Start(p) => p,
-			SeekFrom::Current(p) => if p > 0 {
-				self.position.checked_add(p as u64).unwrap_or(u64::MAX)
-			} else {
-				self.position.checked_sub((-p) as u64).ok_or(())?
+			SeekFrom::Current(p) => {
+				if p > 0 {
+					self.position.checked_add(p as u64).unwrap_or(u64::MAX)
+				} else {
+					self.position.checked_sub((-p) as u64).ok_or(())?
+				}
 			}
 			SeekFrom::End(p) => self.max_seek().checked_sub((-p) as u64).ok_or(())?,
 		};
@@ -143,9 +149,13 @@ where
 
 impl<'a, A> Drop for Proxy<'a, '_, A>
 where
-	A: Allocator + 'a
+	A: Allocator + 'a,
 {
 	fn drop(&mut self) {
-		self.flush();
+		// Panicking is tempting, but also a bad idea in a Drop handler
+		match self.flush() {
+			Ok(()) => (),
+			Err(()) => kernel::sys_log!("failed to flush device on drop"),
+		}
 	}
 }

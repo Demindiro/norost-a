@@ -75,7 +75,7 @@ where
 /// A guard for a spin lock.
 pub struct SpinLockGuard<'a, T>
 where
-	T: Atomic
+	T: Atomic,
 {
 	/// The actual lock.
 	lock: &'a T,
@@ -107,10 +107,7 @@ where
 
 			// Try to get the lock
 			match lock.compare_exchange_weak(val, value, Ordering::Acquire, Ordering::Acquire) {
-				Ok(v) => return Self {
-					lock,
-					value: v,
-				},
+				Ok(v) => return Self { lock, value: v },
 				Err(v) => val = v,
 			}
 		}
@@ -156,7 +153,7 @@ where
 
 impl<T> Drop for SpinLockGuard<'_, T>
 where
-	T: Atomic
+	T: Atomic,
 {
 	fn drop(&mut self) {
 		self.lock.store(self.value, Ordering::Release);

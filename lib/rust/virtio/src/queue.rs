@@ -20,7 +20,9 @@ struct Descriptor {
 impl Descriptor {
 	const NEXT: u16 = 0x1;
 	const WRITE: u16 = 0x2;
+	#[allow(dead_code)]
 	const AVAIL: u16 = 1 << 7;
+	#[allow(dead_code)]
 	const USED: u16 = 1 << 15;
 }
 
@@ -63,9 +65,8 @@ struct UsedTail {
 }
 
 pub struct Queue<'a> {
-	config: &'a super::pci::CommonConfig,
+	_config: &'a super::pci::CommonConfig,
 	mask: u16,
-	last_available: u16,
 	last_used: u16,
 	free_descriptors: [u16; 8],
 	free_count: u16,
@@ -105,10 +106,7 @@ macro_rules! descriptors_table {
 unsafe fn return_ring<'s, R, H, E>(ptr: &'s mut NonNull<R>, mask: u16) -> (&'s mut H, &'s mut [E]) {
 	let size = usize::from(mask) + 1;
 	let head = &mut *ptr.as_ptr().cast::<H>();
-	let ring = ptr
-		.as_ptr()
-		.cast::<u8>()
-		.add(mem::size_of::<H>());
+	let ring = ptr.as_ptr().cast::<u8>().add(mem::size_of::<H>());
 	let ring = slice::from_raw_parts_mut(ring.cast(), size);
 	(head, ring)
 }
@@ -158,8 +156,12 @@ impl<'a> Queue<'a> {
 		let used = unsafe {
 			NonNull::<Used>::new_unchecked(mem.add(align(desc_size + avail_size)).cast())
 		};
-		
-		unsafe { for i in 0..size { *used.as_ptr().cast::<UsedHead>().add(1).cast::<u16>().add(i) = 0xffff }; }
+
+		unsafe {
+			for i in 0..size {
+				*used.as_ptr().cast::<UsedHead>().add(1).cast::<u16>().add(i) = 0xffff
+			}
+		}
 
 		let mut free_descriptors = [0; 8];
 		for (i, u) in free_descriptors.iter_mut().enumerate() {
@@ -169,8 +171,8 @@ impl<'a> Queue<'a> {
 		let free_count = 8;
 
 		let mut phys = 0;
-		let mem = unsafe { kernel::mem_physical_address(mem.cast(), &mut phys as *mut _, 1).value };
-		assert_eq!(status, 0, "Failed DMA get phys address");
+		let ret = unsafe { kernel::mem_physical_address(mem.cast(), &mut phys as *mut _, 1) };
+		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 
 		let d_phys = phys;
 		let a_phys = phys + desc_size;
@@ -183,12 +185,9 @@ impl<'a> Queue<'a> {
 		config.queue_size.set((size as u16).into());
 		config.queue_enable.set(1.into());
 
-		use core::fmt::Write;
-
 		Ok(Queue {
-			config,
+			_config: config,
 			mask: size as u16 - 1,
-			last_available: 0,
 			last_used: 0,
 			free_descriptors,
 			free_count,
@@ -215,32 +214,26 @@ impl<'a> Queue<'a> {
 			(self.free_count < count).then(|| ()).ok_or(NoBuffers)?;
 		}
 
-		unsafe {
-			let desc = descriptors_table!(self);
-			let (avail_head, avail_ring) = available_ring!(self);
-			let (used_head, used_ring) = used_ring!(self);
+		let desc = descriptors_table!(self);
+		let (avail_head, avail_ring) = available_ring!(self);
 
-			let mut id = self.last_used;
-			let mut head = u16le::from(0);
-			let mut prev_next = &mut head;
-			let mut iterator = iterator.peekable();
-			while let Some((address, length, write)) = iterator.next() {
-				self.free_count -= 1;
-				let i = usize::from(self.free_descriptors[usize::from(self.free_count)]);
-				desc[i].address =
-					u64le::from(u64::try_from(address).expect("Address out of bounds"));
-				desc[i].length = u32le::from(u32::try_from(length).expect("Length too large"));
-				desc[i].flags = u16le::from(u16::from(write) * Descriptor::WRITE);
-				desc[i].flags |=
-					u16le::from(u16::from(iterator.peek().is_some()) * Descriptor::NEXT);
-				*prev_next = u16le::from(i as u16);
-				prev_next = &mut desc[i].next;
-			}
-
-			avail_ring[usize::from(u16::from(avail_head.index) & self.mask)].index = head;
-			atomic::fence(Ordering::AcqRel);
-			avail_head.index = u16::from(avail_head.index).wrapping_add(1).into();
+		let mut head = u16le::from(0);
+		let mut prev_next = &mut head;
+		let mut iterator = iterator.peekable();
+		while let Some((address, length, write)) = iterator.next() {
+			self.free_count -= 1;
+			let i = usize::from(self.free_descriptors[usize::from(self.free_count)]);
+			desc[i].address = u64le::from(u64::try_from(address).expect("Address out of bounds"));
+			desc[i].length = u32le::from(u32::try_from(length).expect("Length too large"));
+			desc[i].flags = u16le::from(u16::from(write) * Descriptor::WRITE);
+			desc[i].flags |= u16le::from(u16::from(iterator.peek().is_some()) * Descriptor::NEXT);
+			*prev_next = u16le::from(i as u16);
+			prev_next = &mut desc[i].next;
 		}
+
+		avail_ring[usize::from(u16::from(avail_head.index) & self.mask)].index = head;
+		atomic::fence(Ordering::AcqRel);
+		avail_head.index = u16::from(avail_head.index).wrapping_add(1).into();
 
 		Ok(())
 	}
@@ -249,7 +242,6 @@ impl<'a> Queue<'a> {
 	///
 	/// Returns the amount of buffers collected.
 	pub fn collect_used(&mut self) -> usize {
-
 		loop {
 			atomic::fence(Ordering::AcqRel);
 			let (avail, _) = available_ring!(self);

@@ -291,7 +291,7 @@ impl PCI {
 	/// ## Notes
 	///
 	/// Currently all memory will be 16K byte aligned. Higher granulity will be supported later.
-	pub fn allocate_mmio(&self, size: usize, flags: u8) -> Result<MMIO<'_>, ()> {
+	pub fn allocate_mmio(&self, size: usize, _flags: u8) -> Result<MMIO<'_>, ()> {
 		assert!(size <= 1 << 16, "TODO");
 		let size = 1 << 16;
 		let c = self.alloc_counter.get();
@@ -411,11 +411,6 @@ pub struct IterDevice<'a> {
 	function: u8,
 }
 
-fn log(msg: &str) {
-	let (a, l) = (msg.as_bytes() as *const [u8]).to_raw_parts();
-	unsafe { kernel::sys_log(a.cast(), l) };
-}
-
 impl<'a> Iterator for IterPCI<'a> {
 	type Item = Bus<'a>;
 
@@ -504,16 +499,4 @@ impl<'a> Iterator for IterDevice<'a> {
 			}
 		}
 	}
-}
-
-fn log_u16(n: u16) {
-	let mut buf = [0u8; 4];
-	buf[0] = ((n >> 12) & 0xf) as u8;
-	buf[1] = ((n >> 8) & 0xf) as u8;
-	buf[2] = ((n >> 4) & 0xf) as u8;
-	buf[3] = ((n >> 0) & 0xf) as u8;
-	for c in buf.iter_mut() {
-		*c += if *c < 10 { b'0' } else { b'a' - 10 };
-	}
-	log(core::str::from_utf8(&buf).unwrap());
 }

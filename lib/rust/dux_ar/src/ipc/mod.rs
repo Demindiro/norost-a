@@ -5,13 +5,16 @@ use core::ptr::NonNull;
 use dux::ipc::*;
 
 #[no_mangle]
-extern "C" fn dux_add_free_range(address: Option<NonNull<kernel::Page>>, count: usize) -> ffi::c_int {
+extern "C" fn dux_add_free_range(
+	address: Option<NonNull<kernel::Page>>,
+	count: usize,
+) -> ffi::c_int {
 	kernel::dbg!(address, count);
 	match address.and_then(|addr| dux::Page::new(addr).ok()) {
 		Some(addr) => match add_free_range(addr, count) {
 			Ok(()) => 0,
 			Err(()) => -2,
-		}
+		},
 		None => -1,
 	}
 }
@@ -42,6 +45,5 @@ unsafe extern "C" fn dux_pop_received_entry(slot: u16) {
 
 #[no_mangle]
 unsafe extern "C" fn dux_defer_received_entry(slot: u16) {
-	todo!();
 	ReceivedLock::from_raw(slot).defer();
 }

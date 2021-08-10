@@ -455,22 +455,6 @@ trap_early_init:
 	csrw	stvec, t0
 	ret
 
-## Save the program counter and fp registers, then jump into the executor task switching routine.
-##
-## It does not save the integer registers as those already have been saved.
-##
-## Arguments:
-## - a0: A pointer to the task structure.
-.globl trap_next_task
-trap_next_task:
-	# Save the program counter
-	csrr	t0, SEPC
-	sd		t0, 0 * REGBYTES (a0)
-	save_pc_register		a0, t0
-	# Save all float registers
-	save_float_registers	a0
-	j		executor_next_task
-	
 
 ## Load the task's saved registers, then start running the task using mret.
 ##

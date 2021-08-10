@@ -17,7 +17,6 @@ use core::ops;
 use core::ptr;
 use core::ptr::NonNull;
 use core::slice;
-use core::sync::atomic;
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 
 /// A single memory range.
@@ -27,19 +26,6 @@ struct MemoryMap {
 	/// end is *inclusive*, i.e. the offset bits are all `1`s.
 	end: Cell<*mut kernel::Page>,
 }
-
-/// A sorted list of reserved memory ranges.
-#[repr(C)]
-struct MemoryMapList {}
-
-struct IPCQueueIndex {
-	mask: u16,
-	index: u16,
-}
-
-/// An IPC queue
-#[repr(C)]
-struct IPCQueue {}
 
 /// Part of the global structure but separate to account for be able to account for memory size.
 #[repr(C)]
@@ -172,7 +158,10 @@ pub unsafe fn init() {
 		todo!()
 	}
 
-	GLOBAL.part.ipc_packets.set(addr.as_ptr().cast::<kernel::ipc::Packet>());
+	GLOBAL
+		.part
+		.ipc_packets
+		.set(addr.as_ptr().cast::<kernel::ipc::Packet>());
 	GLOBAL.part.last_received_index.set(0);
 	GLOBAL.part.ring_mask.set(packets_count - 1);
 
@@ -192,10 +181,13 @@ pub unsafe fn init() {
 	let free_ranges = addr.as_ptr().cast();
 	let free_ranges_len = 12;
 	GLOBAL.part.free_ranges.set(free_ranges);
-	GLOBAL.part.free_ranges_capacity.store(free_ranges_len, Ordering::Release);
+	GLOBAL
+		.part
+		.free_ranges_capacity
+		.store(free_ranges_len, Ordering::Release);
 
 	// Set a range to which pages can be mapped to.
-	let free_ranges = unsafe { slice::from_raw_parts_mut(free_ranges, free_ranges_len) };
+	let free_ranges = slice::from_raw_parts_mut(free_ranges, free_ranges_len);
 	let count = free_ranges_len; // The effective maximum right now.
 	let addr = reserve_range(None, count).unwrap();
 	ipc::add_free_range(addr, count).unwrap();
@@ -231,7 +223,6 @@ unsafe fn mem_insert_entry(
 	}
 	GLOBAL.part.reserved_count.set(count + 1);
 	// Shift all entries at and after the index up.
-	let entries = &GLOBAL.reserved_entries;
 	for i in (index + 1..=count).rev() {
 		let start = GLOBAL.reserved_entries[i - 1].start.get();
 		let end = GLOBAL.reserved_entries[i - 1].end.get();
@@ -254,7 +245,7 @@ pub enum ReserveError {
 
 pub fn reserve_range(address: Option<Page>, count: usize) -> Result<Page, ReserveError> {
 	util::spin_lock(&GLOBAL.part.reserved_capacity, 0, |capacity| {
-		if let Some(address) = address {
+		if let Some(_address) = address {
 			// Do a binary search, check if there is enough space & insert if so.
 			todo!()
 		} else {
@@ -297,8 +288,8 @@ pub enum UnreserveError {
 	SizeTooLarge,
 }
 
-pub fn unreserve_range(address: Page, count: usize) -> Result<(), UnreserveError> {
-	util::spin_lock(&GLOBAL.part.reserved_capacity, 0, |capacity| {
+pub fn unreserve_range(address: Page, _count: usize) -> Result<(), UnreserveError> {
+	util::spin_lock(&GLOBAL.part.reserved_capacity, 0, |_capacity| {
 		GLOBAL.reserved_entries[..GLOBAL.part.reserved_count.get()]
 			.binary_search_by(|e| {
 				e.start
@@ -323,30 +314,16 @@ pub(crate) mod ipc {
 	#[derive(Debug)]
 	pub struct NoFreeSlots;
 
-	/// Copy the data from one IPC packet to another packet while ensuring the opcode is written
-	/// last.
-	fn copy(from: &kernel::ipc::Packet, to: &mut kernel::ipc::Packet) {
-		to.uuid = from.uuid;
-		to.data = from.data;
-		to.offset = from.offset;
-		to.length = from.length;
-		to.address = from.address;
-		to.flags = from.flags;
-		to.id = from.id;
-		atomic::compiler_fence(Ordering::Release);
-		to.opcode = from.opcode;
-	}
-
 	/// Send an IPC packet to a task.
 	///
 	/// This will yield the task if no slots are available.
 	pub fn transmit() -> TransmitLock {
 		let _ = util::SpinLockGuard::new(&GLOBAL.part.transmit_lock, true).into_raw();
 		loop {
-			match unsafe { pop_free_slot() } {
+			match pop_free_slot() {
 				Ok(slot) => return TransmitLock { slot },
 				Err(NoFreeSlots) => unsafe {
-					kernel::io_wait(0, 0);
+					let _ = kernel::io_wait(0, 0);
 				},
 			}
 		}
@@ -355,7 +332,7 @@ pub(crate) mod ipc {
 	/// Attempt to reserve a slot for sendng an IPC packet to a task.
 	pub fn try_transmit() -> Result<TransmitLock, NoFreeSlots> {
 		let guard = util::SpinLockGuard::new(&GLOBAL.part.transmit_lock, true);
-		let slot = unsafe { pop_free_slot() }?;
+		let slot = pop_free_slot()?;
 		let _ = guard.into_raw();
 		Ok(TransmitLock { slot })
 	}
@@ -413,7 +390,9 @@ pub(crate) mod ipc {
 			let (index, entries) = unsafe { received_ring() };
 			let i = GLOBAL.part.last_received_index.get();
 			if i != index {
-				return ReceivedLock { slot: entries[usize::from(i & mask)].get() };
+				return ReceivedLock {
+					slot: entries[usize::from(i & mask)].get(),
+				};
 			}
 			let _ = unsafe { kernel::io_wait(0, 0) };
 		}
@@ -428,7 +407,9 @@ pub(crate) mod ipc {
 		let i = GLOBAL.part.last_received_index.get();
 		(i != index).then(|| {
 			let _ = guard.into_raw();
-			ReceivedLock { slot: entries[usize::from(i & mask)].get() }
+			ReceivedLock {
+				slot: entries[usize::from(i & mask)].get(),
+			}
 		})
 	}
 
@@ -487,7 +468,8 @@ pub(crate) mod ipc {
 	/// Add an address range the kernel is free to map pages into.
 	pub fn add_free_range(page: Page, count: usize) -> Result<(), ()> {
 		util::spin_lock(&GLOBAL.part.free_ranges_capacity, 0, |capacity| {
-			let ranges = unsafe { slice::from_raw_parts_mut(GLOBAL.part.free_ranges.get(), *capacity) };
+			let ranges =
+				unsafe { slice::from_raw_parts_mut(GLOBAL.part.free_ranges.get(), *capacity) };
 			// FIXME return an error if a double page is being added.
 			ranges
 				.iter()
@@ -495,7 +477,7 @@ pub(crate) mod ipc {
 				.for_each(|addr| assert_ne!(addr, Some(page.as_non_null_ptr())));
 			// TODO merge fragmented ranges.
 			// This should be done by sorting the free range list.
-			for (i, range) in ranges.iter_mut().enumerate() {
+			for range in ranges.iter_mut() {
 				if range.count == 0 {
 					range.address = Some(page.as_non_null_ptr());
 					range.count = count;
@@ -530,12 +512,7 @@ pub(crate) mod ipc {
 	unsafe fn transmit_ring<'a>() -> (&'a mut u16, &'a mut [u16]) {
 		let len = usize::from(ring_len());
 		// Skip table
-		let addr = GLOBAL
-			.part
-			.ipc_packets
-			.get()
-			.add(len)
-			.cast::<u16>();
+		let addr = GLOBAL.part.ipc_packets.get().add(len).cast::<u16>();
 		let index = &mut *addr;
 		let slice = slice::from_raw_parts_mut(addr.cast::<u16>().add(1), len);
 		(index, slice)
@@ -567,9 +544,8 @@ pub(crate) mod ipc {
 	/// Try to get an unused slot from the free stack.
 	fn pop_free_slot() -> Result<u16, NoFreeSlots> {
 		let (top, entries) = unsafe { free_stack() };
-		util::spin_lock(top, u16::MAX, |top| { 
-			top
-				.checked_sub(1)
+		util::spin_lock(top, u16::MAX, |top| {
+			top.checked_sub(1)
 				.map(|t| {
 					*top = t;
 					entries[usize::from(t)].get()
@@ -585,7 +561,7 @@ pub(crate) mod ipc {
 	/// The index must be in range and not already present on the stack.
 	pub(super) unsafe fn push_free_slot(slot: u16) {
 		let (top, entries) = free_stack();
-		util::spin_lock(top, u16::MAX, |top| { 
+		util::spin_lock(top, u16::MAX, |top| {
 			assert!(*top < ring_len(), "free stack overflow");
 			entries[usize::from(*top)].set(slot);
 			*top += 1;
