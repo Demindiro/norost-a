@@ -1,17 +1,7 @@
-.line 0
-## Trap handling routines
-##
-## These are implemented separately due to naked functions being too inflexible and cumbersome.
-
-#.include	"registers.s"
+# Trap handling routines
 
 .equ		SYSCALL_MAX,			16
 .equ		SYSCALL_ERR_NOCALL, 	1
-
-.globl trap_handler
-.globl trap_init
-.globl trap_stop_task
-.globl trap_start_task
 
 .section .text.hot
 	.balign 4	# 0

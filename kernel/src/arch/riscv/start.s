@@ -1,4 +1,3 @@
-.globl __stack_pointer
 .globl _start
 
 .section .initelf, "a"
