@@ -5,25 +5,21 @@
 
 external_interrupt_handler:
 
-	# Save some integer registers.
-	csrrw	x31, sscratch, x31
-
-	# Save some registers so we can get to work (a0-2 == x10-12)
-	save_gp_regs	10, 12, x31
+	# Save _all_ the general purpose registers.
+	# This isn't strictly necessary when the interrupt is addressed at the
+	# active task, but a branch to compare the TID is likely more expensive
+	# anyways.
+	csrrw			x31, sscratch, x31
+	save_gp_regs	1, 30, x31
+	# Save the remaining x31 register and restore sscratch as well.
+	csrrw			x30, sscratch, x31
+	gp_store		x30, 31 * GP_REGBYTES, x31
 
 	# Set sepc to that of the notification handler.
 	gp_load		a0, 2 * GP_REGBYTES + REGSTATE_SIZE, x31
 	csrw		sepc, a0
 
-	# Some real fucking hacky shit to figure out how the fuck these motherfucking interrupts work.
-
-	# Enable SUM
-	csrr	a0, sstatus
-	li		a1, 1 << 18
-	or		a0, a0, a1
-	csrw	sstatus, a0
-
-	# Find the offset of the claim register.
+	# Claim the interrupt.
 	# We need to do this now because we can't return to userspace otherwise.
 
 	# Load PLIC base address
@@ -41,21 +37,22 @@ external_interrupt_handler:
 	add		a0, a0, a1
 
 	# Claim the source
-	lw		a1, 0(a0)
+	lw		a2, 0(a0)
 
-	# Disable SUM
-	csrr	a2, sstatus
-	li		a0, ~(1 << 18)
-	and		a2, a2, a0
-	csrw	sstatus, a2
+	# Figure out which task to send a notification to.
 
 	# Set type argument (0 == external interrupt)
-	mv		a0, zero
+	li		a1, 0
+	# Set address, which is -1 for the kernel
+	li		a0, -1
+
+	# Restore the stack (x2, sp), global (x3, gp), & thread (x4, tp) pointer
+	load_gp_regs 2, 4, x31
 	
-	# Restore some registers
-	#load_gp_regs	10, 12, x31
-	csrrw	x31, sscratch, x31
+	# Clear all the other registers (i.e. _not_ x10-x12 / a0-a2)
+	clear_gp_regs 1, 1
+	clear_gp_regs 5, 9
+	clear_gp_regs 13, 31
 
 	# Jump to notification handler
-	# FIXME check for the right TID dumbass.
 	sret

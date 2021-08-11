@@ -151,6 +151,17 @@ pub fn map_devices() {
 								)
 							};
 							assert_eq!(ret.status, 0, "mapping PLIC failed");
+
+							let ret = unsafe {
+								let addr = addr >> kernel::Page::OFFSET_BITS;
+								let size = (size + u128::try_from(kernel::Page::MASK).unwrap())
+									>> kernel::Page::OFFSET_BITS;
+								kernel::sys_set_interrupt_controller(
+									addr.try_into().unwrap(),
+									usize::try_from(size).unwrap(),
+								)
+							};
+							assert_eq!(ret.status, 0, "registering PLIC failed");
 						}
 						_ => (),
 					}

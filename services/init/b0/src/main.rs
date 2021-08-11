@@ -53,10 +53,11 @@ use xmas_elf::ElfFile;
 
 static mut NEW_DATA: bool = false;
 
-extern "C" fn notification_handler(typ: usize, value: usize) {
+extern "C" fn notification_handler(address: usize, typ: usize, value: usize) {
 	sys_log!("Got a notification!");
-	sys_log!("  type  :    0x{:x}", typ);
-	sys_log!("  value :    0x{:x}", value);
+	sys_log!("  address :  0x{:x}", typ);
+	sys_log!("  type    :  0x{:x}", typ);
+	sys_log!("  value   :  0x{:x}", value);
 	unsafe { NEW_DATA = true };
 }
 

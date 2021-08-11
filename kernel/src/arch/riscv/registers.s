@@ -25,6 +25,18 @@
 	.endif
 .endm
 
+# Clear the given range of general purpose registers
+.macro clear_gp_regs	from, to
+	.altmacro
+	# Ditto
+	.if		\to - \from > 0
+		clear_gp_regs	\from, %(\from + (\to - \from) / 2)
+		clear_gp_regs	%(\from + (\to - \from) / 2 + 1), \to
+	.elseif		\to - \from == 0
+		mv				x\from, zero
+	.endif
+.endm
+
 # Save all floating point registers
 .macro save_fp_regs storage
 	__index = 0

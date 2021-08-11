@@ -60,9 +60,14 @@ impl Range {
 		//    |
 		//    = note: casting pointers to integers in constants
 		use core::mem::transmute;
-		let s = unsafe { transmute::<_, usize>(self.end.as_ptr()) };
-		let e = unsafe { transmute::<_, usize>(self.start.as_ptr()) };
+		let e = unsafe { transmute::<_, usize>(self.end.as_ptr()) };
+		let s = unsafe { transmute::<_, usize>(self.start.as_ptr()) };
 		e + 1 - s
+	}
+
+	/// Return the size of the range in pages.
+	pub const fn page_count(&self) -> usize {
+		(self.byte_count() + Page::OFFSET_MASK) / Page::SIZE
 	}
 }
 
@@ -233,8 +238,8 @@ range! {
 // TODO find a way to get this included in assembly files as a constant.
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 #[export_name = "plic_address"]
-//static _PLIC: Page = PLIC.start;
-static _PLIC: Page = match Page::from_pointer(0x4_0000_0000 as *mut _) {
+static _PLIC: Page = PLIC.start;
+/*static _PLIC: Page = match Page::from_pointer(0x4_0000_0000 as *mut _) {
 	Ok(p) => p,
 	Err(_) => unreachable!(),
-};
+};*/

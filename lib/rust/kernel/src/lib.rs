@@ -161,7 +161,7 @@ pub mod ipc {
 
 pub mod notification {
 	/// The handler function type
-	pub type Handler = extern "C" fn(typ: usize, value: usize);
+	pub type Handler = extern "C" fn(address: usize, typ: usize, value: usize);
 }
 
 #[repr(C)]
@@ -200,6 +200,13 @@ syscall!(
 	7,
 	address: *const Page,
 	store: *mut usize,
+	count: usize
+);
+
+syscall!(
+	sys_set_interrupt_controller,
+	8,
+	ppn: usize,
 	count: usize
 );
 

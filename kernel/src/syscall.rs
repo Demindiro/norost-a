@@ -41,7 +41,7 @@ pub static TABLE: [Syscall; TABLE_LEN] = [
 	sys::mem_get_flags,          // 5
 	sys::mem_set_flags,          // 6
 	sys::mem_physical_addresses, // 7
-	sys::placeholder,            // 8
+	sys::sys_set_interrupt_controller,   // 8
 	sys::placeholder,            // 9
 	sys::placeholder,            // 10
 	sys::task_spawn,             // 11
@@ -444,6 +444,22 @@ mod sys {
 			let _ = write!(Log, "{:?}", BrokenStr(unsafe { slice::from_raw_parts(address as *const _, length) }));
 			arch::set_supervisor_userpage_access(false);
 
+			Return(Status::Ok, 0)
+		}
+	}
+
+	sys! {
+		/// Set the MMIO region where the interrupt controller is located.
+		///
+		/// This may only be called once.
+		[_] sys_set_interrupt_controller(ppn, page_count) {
+			logcall!("sys_set_interrupt_controller 0x{:x}, {}", (ppn as u128) << 12, page_count);
+			log!("sys_set_interrupt_controller 0x{:x}, {}", (ppn as u128) << 12, page_count);
+			use crate::memory::reserved::PLIC;
+			assert!(page_count <= PLIC.page_count());
+			let ppn = PPNBox::try_from(ppn).unwrap();
+			let ppn_range = PPNDirectRange::new(ppn, page_count).unwrap();
+			arch::VMS::add_range(PLIC.start, MapRange::Direct(ppn_range), RWX::RW, arch::vms::Accessibility::KernelGlobal).unwrap();
 			Return(Status::Ok, 0)
 		}
 	}
