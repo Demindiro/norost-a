@@ -5,6 +5,7 @@
 #![feature(alloc_prelude)]
 #![feature(default_alloc_error_handler)]
 #![feature(global_asm)]
+#![feature(naked_functions)]
 #![feature(option_result_unwrap_unchecked)]
 #![feature(panic_info_message)]
 #![feature(ptr_metadata)]
@@ -53,9 +54,58 @@ use xmas_elf::ElfFile;
 
 static mut NEW_DATA: bool = false;
 
+#[naked]
+extern "C" fn notification_handler_entry() {
+	unsafe {
+		asm!("
+			.equ	GP_REGBYTES, 8
+			addi	sp, sp, -16 * GP_REGBYTES
+			sd		t0, 0 * GP_REGBYTES (sp)
+			sd		t1, 1 * GP_REGBYTES (sp)
+			sd		t2, 2 * GP_REGBYTES (sp)
+			sd		t3, 3 * GP_REGBYTES (sp)
+			sd		t4, 4 * GP_REGBYTES (sp)
+			sd		t5, 5 * GP_REGBYTES (sp)
+			sd		t6, 6 * GP_REGBYTES (sp)
+			sd		a0, 7 * GP_REGBYTES (sp)
+			sd		a1, 8 * GP_REGBYTES (sp)
+			sd		a2, 9 * GP_REGBYTES (sp)
+			sd		a3, 10 * GP_REGBYTES (sp)
+			sd		a4, 11 * GP_REGBYTES (sp)
+			sd		a5, 12 * GP_REGBYTES (sp)
+			sd		a6, 13 * GP_REGBYTES (sp)
+			sd		a7, 14 * GP_REGBYTES (sp)
+			sd		ra, 15 * GP_REGBYTES (sp)
+			ld		a0, 16 * GP_REGBYTES (sp)
+			ld		a1, 17 * GP_REGBYTES (sp)
+			ld		a2, 18 * GP_REGBYTES (sp)
+			call	notification_handler
+			ld		t0, 0 * GP_REGBYTES (sp)
+			ld		t1, 1 * GP_REGBYTES (sp)
+			ld		t2, 2 * GP_REGBYTES (sp)
+			ld		t3, 3 * GP_REGBYTES (sp)
+			ld		t4, 4 * GP_REGBYTES (sp)
+			ld		t5, 5 * GP_REGBYTES (sp)
+			ld		t6, 6 * GP_REGBYTES (sp)
+			ld		a0, 7 * GP_REGBYTES (sp)
+			ld		a1, 8 * GP_REGBYTES (sp)
+			ld		a2, 9 * GP_REGBYTES (sp)
+			ld		a3, 10 * GP_REGBYTES (sp)
+			ld		a4, 11 * GP_REGBYTES (sp)
+			ld		a5, 12 * GP_REGBYTES (sp)
+			ld		a6, 13 * GP_REGBYTES (sp)
+			ld		a7, 14 * GP_REGBYTES (sp)
+			ld		ra, 15 * GP_REGBYTES (sp)
+			addi	sp, sp, (16 + 3) * GP_REGBYTES
+			ret
+		");
+	}
+}
+
+#[export_name = "notification_handler"]
 extern "C" fn notification_handler(address: usize, typ: usize, value: usize) {
 	sys_log!("Got a notification!");
-	sys_log!("  address :  0x{:x}", typ);
+	sys_log!("  address :  0x{:x}", address);
 	sys_log!("  type    :  0x{:x}", typ);
 	sys_log!("  value   :  0x{:x}", value);
 	unsafe { NEW_DATA = true };
@@ -112,7 +162,7 @@ fn main() {
 	let mut buf = [0; 256];
 
 	sys_log!("Setting up notification handler");
-	let ret = unsafe { kernel::io_set_notify_handler(notification_handler) };
+	let ret = unsafe { kernel::io_set_notify_handler(notification_handler_entry) };
 	assert_eq!(ret.status, 0);
 
 	sys_log!("Press any key for magic");

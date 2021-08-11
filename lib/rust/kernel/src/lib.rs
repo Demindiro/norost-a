@@ -161,7 +161,7 @@ pub mod ipc {
 
 pub mod notification {
 	/// The handler function type
-	pub type Handler = extern "C" fn(address: usize, typ: usize, value: usize);
+	pub type Handler = extern "C" fn();
 }
 
 #[repr(C)]

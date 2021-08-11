@@ -40,19 +40,35 @@ external_interrupt_handler:
 	lw		a2, 0(a0)
 
 	# Figure out which task to send a notification to.
+	# Pretend for now some context-switchy stuff is happening here.
 
-	# Set type argument (0 == external interrupt)
-	li		a1, 0
-	# Set address, which is -1 for the kernel
+	# Enable SUM
+	li		a1, 1 << 18
+	csrs	sstatus, a1
+
+	# Restore stack
+	load_gp_regs 2, 2, x31
+	# Push arguments onto the stack.
+	addi	sp, sp, -3 * GP_REGBYTES
+	# Push address, which is -1 for the kernel
 	li		a0, -1
+	gp_store	a0, 0 * GP_REGBYTES, sp
+	# Push type argument (0 == external interrupt)
+	gp_store	zero, 1 * GP_REGBYTES, sp
+	# Push value
+	gp_store	a2, 2 * GP_REGBYTES, sp
 
-	# Restore the stack (x2, sp), global (x3, gp), & thread (x4, tp) pointer
-	load_gp_regs 2, 4, x31
+	# Disable SUM
+	csrc	sstatus, a1
+
+	# Restore the global (x3, gp), & thread (x4, tp) pointer
+	load_gp_regs 3, 4, x31
 	
-	# Clear all the other registers (i.e. _not_ x10-x12 / a0-a2)
-	clear_gp_regs 1, 1
-	clear_gp_regs 5, 9
-	clear_gp_regs 13, 31
+	# Load all the other registers (i.e. _not_ x10-x12 / a0-a2)
+	load_gp_regs 1, 1, x31
+	load_gp_regs 5, 9, x31
+	load_gp_regs 10, 12, x31
+	load_gp_regs 13, 31, x31
 
 	# Jump to notification handler
 	sret
