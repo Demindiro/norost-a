@@ -79,6 +79,12 @@ pub mod elf {
 /// Module functions pertaining to setting up traps.
 mod trap {
 
+	#[cfg(target_arch = "riscv64")]
+	global_asm!("__RISCV64__:");
+	#[cfg(target_arch = "riscv32")]
+	global_asm!("__RISCV32__:");
+
+	global_asm!(include_str!("types.s"));
 	global_asm!(include_str!("registers.s"));
 	global_asm!(include_str!("trap.s"));
 

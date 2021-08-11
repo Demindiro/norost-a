@@ -1,3 +1,4 @@
+.line 0
 ## Trap handling routines
 ##
 ## These are implemented separately due to naked functions being too inflexible and cumbersome.
@@ -25,8 +26,6 @@ stval_msg:
 	.asciz	"stval   0x"
 
 .section .text
-
-trap_section_start:
 
 	.balign 4	# 0
 interrupt_table:
@@ -61,14 +60,12 @@ sv_ext_int_handler:
 	csrrw	x31, sscratch, x31
 	beqz	x31, trap_early_handler
 
-	# Save some registers so we can get to work (a0 == x10 && a1 == x11 && ...)
-	sd		a0, 10 * REGBYTES (x31)
-	sd		a1, 11 * REGBYTES (x31)
-	sd		a2, 12 * REGBYTES (x31)
+	# Save some registers so we can get to work (a0-2 == x10-12)
+	load_gp_regs	10, 12, x31
 
 	# Set sepc to that of the notification handler.
-	ld		a0, (2 + 32) * REGBYTES (x31)
-	csrw	sepc, a0
+	gp_load		a0, 2 * GP_REGBYTES + REGSTATE_SIZE, x31
+	csrw		sepc, a0
 
 	# Some real fucking hacky shit to figure out how the fuck these motherfucking interrupts work.
 
@@ -97,9 +94,7 @@ sv_ext_int_handler:
 	mv		a0, zero
 	
 	# Restore some registers
-	#ld		a0, 10 * REGBYTES (x31)
-	#ld		a1, 11 * REGBYTES (x31)
-	#ld		a2, 12 * REGBYTES (x31)
+	#save_gp_regs	10, 12, x31
 	csrrw	x31, sscratch, x31
 
 	# Jump to notification handler
@@ -151,93 +146,42 @@ trap_handler:
 	# Panic if sscratch is zero, which means we failed sometime after early boot
 	beqz	x31, trap_early_handler
 
-	# Save registers
-	sd		x1, 1 * REGBYTES (x31)
-	sd		x2, 2 * REGBYTES (x31)
-	sd		x3, 3 * REGBYTES (x31)
-	sd		x4, 4 * REGBYTES (x31)
-	sd		x5, 5 * REGBYTES (x31)
-	sd		x6, 6 * REGBYTES (x31)
-	sd		x7, 7 * REGBYTES (x31)
-	sd		x8, 8 * REGBYTES (x31)
-	sd		x9, 9 * REGBYTES (x31)
-	sd		x10, 10 * REGBYTES (x31)
-	sd		x11, 11 * REGBYTES (x31)
-	sd		x12, 12 * REGBYTES (x31)
-	sd		x13, 13 * REGBYTES (x31)
-	sd		x14, 14 * REGBYTES (x31)
-	sd		x15, 15 * REGBYTES (x31)
-	sd		x16, 16 * REGBYTES (x31)
-	sd		x17, 17 * REGBYTES (x31)
-	sd		x18, 18 * REGBYTES (x31)
-	sd		x19, 19 * REGBYTES (x31)
-	sd		x20, 20 * REGBYTES (x31)
-	sd		x20, 20 * REGBYTES (x31)
-	sd		x20, 20 * REGBYTES (x31)
-	sd		x21, 21 * REGBYTES (x31)
-	sd		x22, 22 * REGBYTES (x31)
-	sd		x23, 23 * REGBYTES (x31)
-	sd		x24, 24 * REGBYTES (x31)
-	sd		x25, 25 * REGBYTES (x31)
-	sd		x26, 26 * REGBYTES (x31)
-	sd		x27, 27 * REGBYTES (x31)
-	sd		x28, 28 * REGBYTES (x31)
-	sd		x29, 29 * REGBYTES (x31)
+	# Save registers x1 - x30
+	save_gp_regs	1, 30, x31
+
 	# Save program counter
 	# We increase the counter by 4 bytes as ecall is also 4 bytes long
 	# & we don't want to execute it again.
 	csrr	t0, sepc
 	addi	t0, t0, 4
-	sd		t0, 0 * REGBYTES (x31)
+	sd		t0, 0 * GP_REGBYTES (x31)
 
 	# Set pointer to task struct argument
 	mv		a6, x31
+
 	# An untested attempt at catering to pipelining
+	# Rereading this later, I am very sorry for trying to be a smartass, again
 	la		x28, sync_trap_table		# jmp
-	ld		sp, REGSTATE_SIZE + 0 * REGBYTES (x31)		# stack pointer
+	ld		sp, REGSTATE_SIZE + 0 * GP_REGBYTES (x31)		# stack pointer
 	csrr	x29, scause					# jmp
-	sd		x30, 30 * REGBYTES (x31)	# store A
+	sd		x30, 30 * GP_REGBYTES (x31)	# store A
 	slli	x29, x29, 2					# jmp
-	csrrw	x30, sscratch, x31			# store B	(restores original mscratch)
+
+	# Store the task's x31 register properly
+	# Use of the x30 register is intentional, as we still need x31 to point to
+	# the register storage
+	csrrw	x30, sscratch, x31			# store B	(restores original sscratch)
 	add		x28, x28, x29				# jmp
-	sd		x30, 31 * REGBYTES (x31)	# store B
+	sd		x30, 31 * GP_REGBYTES (x31)	# store B
+
 	# Execute the appropriate routine
 	jalr	ra, x28						# jmp
+
 	# Restore all integer registers
-	csrr	x31, sscratch
-	ld		x1, 1 * REGBYTES (x31)
-	ld		x2, 2 * REGBYTES (x31)
-	ld		x3, 3 * REGBYTES (x31)
-	ld		x4, 4 * REGBYTES (x31)
-	ld		x5, 5 * REGBYTES (x31)
-	ld		x6, 6 * REGBYTES (x31)
-	ld		x7, 7 * REGBYTES (x31)
-	ld		x8, 8 * REGBYTES (x31)
-	ld		x9, 9 * REGBYTES (x31)
-	ld		x10, 10 * REGBYTES (x31)
-	ld		x11, 11 * REGBYTES (x31)
-	ld		x12, 12 * REGBYTES (x31)
-	ld		x13, 13 * REGBYTES (x31)
-	ld		x14, 14 * REGBYTES (x31)
-	ld		x15, 15 * REGBYTES (x31)
-	ld		x16, 16 * REGBYTES (x31)
-	ld		x17, 17 * REGBYTES (x31)
-	ld		x18, 18 * REGBYTES (x31)
-	ld		x19, 19 * REGBYTES (x31)
-	ld		x20, 20 * REGBYTES (x31)
-	ld		x20, 20 * REGBYTES (x31)
-	ld		x20, 20 * REGBYTES (x31)
-	ld		x21, 21 * REGBYTES (x31)
-	ld		x22, 22 * REGBYTES (x31)
-	ld		x23, 23 * REGBYTES (x31)
-	ld		x24, 24 * REGBYTES (x31)
-	ld		x25, 25 * REGBYTES (x31)
-	ld		x26, 26 * REGBYTES (x31)
-	ld		x27, 27 * REGBYTES (x31)
-	ld		x28, 28 * REGBYTES (x31)
-	ld		x29, 29 * REGBYTES (x31)
-	ld		x30, 30 * REGBYTES (x31)
-	ld		x31, 31 * REGBYTES (x31)
+	csrr		x31, sscratch
+	load_gp_regs	1, 31, x31
+
+	# Continue in userspace
 	sret
 
 # Handler for syscalls.
@@ -249,7 +193,7 @@ trap_syscall:
 	csrrw	s0, satp, s0
 	sfence.vma
 
-	addi	sp, sp, -1 * REGBYTES
+	addi	sp, sp, -1 * GP_REGBYTES
 
 	# Skip the ecall instruction, which is always 4 bytes long (there is no
 	# compressed version of it).
@@ -263,7 +207,7 @@ trap_syscall:
 
 	# Look up the entry in the call table
 	la		t0, syscall_table
-	slli	a7, a7, REGORDER
+	slli	a7, a7, GP_REGORDER
 	add		t0, t0, a7
 	ld		t0, 0(t0)
 
@@ -277,40 +221,13 @@ trap_syscall:
 	# Restore all integer registers except a0 and a1, then return
 0:
 	csrr	x31, sscratch
-	ld		x1, 1 * REGBYTES (x31)
-	ld		x2, 2 * REGBYTES (x31)
-	ld		x3, 3 * REGBYTES (x31)
-	ld		x4, 4 * REGBYTES (x31)
-	ld		x5, 5 * REGBYTES (x31)
-	ld		x6, 6 * REGBYTES (x31)
-	ld		x7, 7 * REGBYTES (x31)
-	ld		x8, 8 * REGBYTES (x31)
-	ld		x9, 9 * REGBYTES (x31)
+	load_gp_regs	1, 9, x31
 	# x10 == a0 and x11 == a1, so skip
-	ld		x12, 12 * REGBYTES (x31)
-	ld		x13, 13 * REGBYTES (x31)
-	ld		x14, 14 * REGBYTES (x31)
-	ld		x15, 15 * REGBYTES (x31)
-	ld		x16, 16 * REGBYTES (x31)
-	ld		x17, 17 * REGBYTES (x31)
-	ld		x18, 18 * REGBYTES (x31)
-	ld		x19, 19 * REGBYTES (x31)
-	ld		x20, 20 * REGBYTES (x31)
-	ld		x20, 20 * REGBYTES (x31)
-	ld		x20, 20 * REGBYTES (x31)
-	ld		x21, 21 * REGBYTES (x31)
-	ld		x22, 22 * REGBYTES (x31)
-	ld		x23, 23 * REGBYTES (x31)
-	ld		x24, 24 * REGBYTES (x31)
-	ld		x25, 25 * REGBYTES (x31)
-	ld		x26, 26 * REGBYTES (x31)
-	ld		x27, 27 * REGBYTES (x31)
-	ld		x28, 28 * REGBYTES (x31)
-	ld		x29, 29 * REGBYTES (x31)
-	ld		x30, 30 * REGBYTES (x31)
-	ld		x31, 31 * REGBYTES (x31)
+	load_gp_regs	12, 31, x31
 	sret
 
+	# Since erroneous syscalls are presumably rare, put the error handling
+	# near the end to improve efficiency somewhat
 1:
 	li		a0, SYSCALL_ERR_NOCALL
 	j		0b
@@ -421,64 +338,19 @@ trap_start_task:
 	li		t0, 0 << 11
 	csrw	sstatus, t0
 	# Set up the VMS.
-	ld		t0, REGSTATE_SIZE + 1 * REGBYTES (a0)
+	ld		t0, REGSTATE_SIZE + 1 * GP_REGBYTES (a0)
 	csrw	satp, t0
 	sfence.vma
 	# Setup the scratch register.
 	csrw	sscratch, a0
 	# Restore the program counter
-	ld		t0, 0 * REGBYTES (a0)
+	ld		t0, 0 * GP_REGBYTES (a0)
 	csrw	sepc, t0
 	# Restore all float registers
-	load_float_registers	a0
+	load_fp_regs	a0
 	# Restore all integer registers
-	ld		x1, 1 * REGBYTES (a0)
-	ld		x2, 2 * REGBYTES (a0)
-	ld		x3, 3 * REGBYTES (a0)
-	ld		x4, 4 * REGBYTES (a0)
-	ld		x5, 5 * REGBYTES (a0)
-	ld		x6, 6 * REGBYTES (a0)
-	ld		x7, 7 * REGBYTES (a0)
-	ld		x8, 8 * REGBYTES (a0)
-	ld		x9, 9 * REGBYTES (a0)
-	# a0 == x10, so skip
-	ld		x11, 11 * REGBYTES (a0)
-	ld		x12, 12 * REGBYTES (a0)
-	ld		x13, 13 * REGBYTES (a0)
-	ld		x14, 14 * REGBYTES (a0)
-	ld		x15, 15 * REGBYTES (a0)
-	ld		x16, 16 * REGBYTES (a0)
-	ld		x17, 17 * REGBYTES (a0)
-	ld		x18, 18 * REGBYTES (a0)
-	ld		x19, 19 * REGBYTES (a0)
-	ld		x20, 20 * REGBYTES (a0)
-	ld		x20, 20 * REGBYTES (a0)
-	ld		x20, 20 * REGBYTES (a0)
-	ld		x21, 21 * REGBYTES (a0)
-	ld		x22, 22 * REGBYTES (a0)
-	ld		x23, 23 * REGBYTES (a0)
-	ld		x24, 24 * REGBYTES (a0)
-	ld		x25, 25 * REGBYTES (a0)
-	ld		x26, 26 * REGBYTES (a0)
-	ld		x27, 27 * REGBYTES (a0)
-	ld		x28, 28 * REGBYTES (a0)
-	ld		x29, 29 * REGBYTES (a0)
-	ld		x30, 30 * REGBYTES (a0)
-	ld		x31, 31 * REGBYTES (a0)
-	ld		a0, 10 * REGBYTES (a0)
+	load_gp_regs	1, 9, a0
+	# a0 == x10, so skip until end
+	load_gp_regs	11, 31, a0
+	load_gp_regs	10, 10, a0
 	sret
-
-trap_section_end:
-
-#.if		trap_section_end - trap_section_start <= 4096
-#	# OK
-#.else
-#	.err	"Trap section covers more than one page"
-#.abort
-#.endif
-#.if		(trap_section_start & ~0xfff) - (trap_section_end  & ~0xfff) == 0
-#	# OK
-#.else
-#	.err	"Trap section crosses page boundaries"
-#.abort
-#.endif
