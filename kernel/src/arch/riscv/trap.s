@@ -13,52 +13,39 @@
 .globl trap_stop_task
 .globl trap_start_task
 
-.section .data
-global_mapping:
-	.quad	0
-early_panic_msg:
-	.asciz	"Early panic!"
-scause_msg:
-	.asciz	"scause  0x"
-sepc_msg:
-	.asciz	"sepc    0x"
-stval_msg:
-	.asciz	"stval   0x"
-
-.section .text
-
+.section .text.hot
 	.balign 4	# 0
 interrupt_table:
 	jal		zero, trap_handler	# User software interrupt _or_ instruction misaligned
 	.balign 4	# 1
-	j	trap_early_handler   # Supervisor software interrupt
+	j	mini_panic   # Supervisor software interrupt
 	.balign 4	# 2
-	j	trap_early_handler   # Reserved
+	j	mini_panic   # Reserved
 	.balign 4	# 3
-	j	trap_early_handler   # We shouldn't be able to catch machine interrupts
+	j	mini_panic   # We shouldn't be able to catch machine interrupts
 	.balign 4	# 4
-	j	trap_early_handler   # User timer interrupt
+	j	mini_panic   # User timer interrupt
 	.balign 4	# 5
-	j	trap_early_handler   # Supervisor timer interrupt
+	j	mini_panic   # Supervisor timer interrupt
 	.balign 4	# 6
-	j	trap_early_handler   # Reserved
+	j	mini_panic   # Reserved
 	.balign 4	# 7
-	j	trap_early_handler   # We shouldn't be able to catch machine interrupts
+	j	mini_panic   # We shouldn't be able to catch machine interrupts
 	.balign 4	# 8
-	j	trap_early_handler   # User external interrupt
+	j	mini_panic   # User external interrupt
 	.balign 4	# 9
 	j	sv_ext_int_handler   # Supervisor external interrupt
 	.balign 4	# 10
-	j	trap_early_handler   # Reserved
+	j	mini_panic   # Reserved
 	.balign 4	# 11
-	j	trap_early_handler   # We shouldn't be able to catch machine interrupts
+	j	mini_panic   # We shouldn't be able to catch machine interrupts
 
 
 sv_ext_int_handler:
 
 	# Save some integer registers.
 	csrrw	x31, sscratch, x31
-	beqz	x31, trap_early_handler
+	beqz	x31, mini_panic
 
 	# Save some registers so we can get to work (a0-2 == x10-12)
 	load_gp_regs	10, 12, x31
@@ -104,38 +91,38 @@ sv_ext_int_handler:
 
 	.balign 4	# 0
 sync_trap_table:
-	j	trap_early_handler	
+	j	mini_panic	
 	.balign 4	# 1
-	j	trap_early_handler	
+	j	mini_panic	
 	.balign 4	# 2
-	j	trap_early_handler	
+	j	mini_panic	
 	.balign 4	# 3
-	j	trap_early_handler	
+	j	mini_panic	
 	.balign 4	# 4
-	j	trap_early_handler	
+	j	mini_panic	
 	.balign 4	# 5
-	j	trap_early_handler	
+	j	mini_panic	
 	.balign 4	# 6
-	j	trap_early_handler
+	j	mini_panic
 	.balign 4	# 7
-	j	trap_early_handler	
+	j	mini_panic	
 	.balign 4	# 8
 	jal		trap_syscall
 	.balign 4	# 9
-	j	trap_early_handler # S-mode shouldn't be performing S syscalls
+	j	mini_panic # S-mode shouldn't be performing S syscalls
 	.balign 4	# 10
-	j	trap_early_handler
+	j	mini_panic
 	.balign 4	# 11
-	j	trap_early_handler # We shouldn't be able to catch M-mode syscalls
+	j	mini_panic # We shouldn't be able to catch M-mode syscalls
 	.balign 4	# 12
-	j	trap_early_handler
+	j	mini_panic
 	#ret
 	.balign 4	# 13
-	j	trap_early_handler
+	j	mini_panic
 	.balign 4	# 14
-	j	trap_early_handler
+	j	mini_panic
 	.balign 4	# 15
-	j	trap_early_handler
+	j	mini_panic
 
 ## Default handler for traps
 trap_handler:
@@ -144,7 +131,7 @@ trap_handler:
 	csrrw	x31, sscratch, x31
 
 	# Panic if sscratch is zero, which means we failed sometime after early boot
-	beqz	x31, trap_early_handler
+	beqz	x31, mini_panic
 
 	# Save registers x1 - x30
 	save_gp_regs	1, 30, x31
@@ -239,91 +226,6 @@ trap_init:
 	ori		t0, t0, 1
 	csrw	stvec, t0
 	ret
-
-## Early boot trap handler. It avoids any memory accesses outside the kernel
-## image and enters a halt loop immediately. It also prints the scause, sepc
-## and stval registers.
-.align	2
-trap_early_handler:
-
-	# Print panic message
-	la		s0, early_panic_msg
-	call	trap_print_msg
-	call	trap_print_lf
-
-	# Print scause
-	la		s0, scause_msg
-	call	trap_print_msg
-	csrr	s0, scause
-	call	trap_print_num
-
-	# Print sepc
-	la		s0, sepc_msg
-	call	trap_print_msg
-	csrr	s0, sepc
-	call	trap_print_num
-
-	# Print stval
-	la		s0, stval_msg
-	call	trap_print_msg
-	csrr	s0, stval
-	call	trap_print_num
-
-	# Halt forever
-0:
-	wfi
-	j		0b
-
-	# String message printing routine
-	# s0: message
-trap_print_msg:
-	lb		a0, 0(s0)
-0:
-	li		a7, 1
-	li		a6, 0
-	ecall
-	addi	s0, s0, 1
-	lb		a0, 0(s0)
-	bnez	a0, 0b
-	ret
-
-	# Hexadecimal number printing routine
-	# Always 16 digits.
-	# Also prints newline
-	# s0: number
-trap_print_num:
-	li		s1, 60
-	li		s2, 10
-0:
-	srl		a0, s0, s1
-	andi	a0, a0, 0xf
-	blt		a0, s2, 1f
-	addi	a0, a0, 'a' - 10 - '0'
-1:
-	addi	a0, a0, '0'
-	li		a7, 1
-	li		a6, 0
-	ecall
-	addi	s1, s1, -4
-	bgez	s1, 0b
-
-	# Newline printing routine
-trap_print_lf:
-3:
-	li		a7, 1
-	li		a6, 0
-	li		a0, 0xa
-	ecall
-	ret
-
-
-## Setup trap handler for early init. The early trap handler
-## will halt immediately for ease of debugging.
-trap_early_init:
-	la		t0, trap_early_handler
-	csrw	stvec, t0
-	ret
-
 
 ## Load the task's saved registers, then start running the task using mret.
 ##

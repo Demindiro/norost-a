@@ -87,6 +87,7 @@ mod trap {
 	global_asm!(include_str!("types.s"));
 	global_asm!(include_str!("registers.s"));
 	global_asm!(include_str!("trap.s"));
+	global_asm!(include_str!("error.s"));
 
 	/// Initialize the trap CSR and the interrupt table.
 	#[inline(always)]
