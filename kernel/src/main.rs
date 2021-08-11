@@ -186,11 +186,6 @@ extern "C" fn main(
 	#[cfg(feature = "dump-dtb")]
 	dump_dtb(&dtb);
 
-	crate::arch::enable_supervisor_interrupts(true);
-	//crate::arch::enable_timer_interrupts(true);
-	crate::arch::enable_external_interrupts(true);
-	//arch::riscv::sbi::set_timer(20_000_000);
-
 	let mut interpreter = dtb.interpreter();
 	let mut root = interpreter.next_node().expect("No root node");
 
@@ -455,6 +450,9 @@ extern "C" fn main(
 	task::Group::new(init).expect("failed to create init task group");
 
 	let _ = (boot_args, stdout, model);
+
+	// Enable interrupts now that the important setup is done
+	arch::enable_interrupts(true);
 
 	let exec = task::Executor::new(hart_id);
 	exec.next();
