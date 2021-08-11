@@ -24,59 +24,11 @@ interrupt_table:
 	.balign 4	# 8
 	j	mini_panic   # User external interrupt
 	.balign 4	# 9
-	j	sv_ext_int_handler   # Supervisor external interrupt
+	j	external_interrupt_handler	# Supervisor external interrupt
 	.balign 4	# 10
 	j	mini_panic   # Reserved
 	.balign 4	# 11
 	j	mini_panic   # We shouldn't be able to catch machine interrupts
-
-
-sv_ext_int_handler:
-
-	# Save some integer registers.
-	csrrw	x31, sscratch, x31
-	beqz	x31, mini_panic
-
-	# Save some registers so we can get to work (a0-2 == x10-12)
-	load_gp_regs	10, 12, x31
-
-	# Set sepc to that of the notification handler.
-	gp_load		a0, 2 * GP_REGBYTES + REGSTATE_SIZE, x31
-	csrw		sepc, a0
-
-	# Some real fucking hacky shit to figure out how the fuck these motherfucking interrupts work.
-
-	# Enable SUM
-	csrr	a0, sstatus
-	li		a1, 1 << 18
-	or		a0, a0, a1
-	csrw	sstatus, a0
-
-	# Claim shit and set value argument
-	li		a0, 0x4 * 0x10000 * 0x10000 # The base address of the shit we mapped
-	li		a1, 0x20 * 0x10000 + 0x4 # The offset of the claim shit
-	add		a0, a0, a1				# Goto claim shit
-	li		a1, 0x1000 # Context stride
-	add		a0, a0, a1 # Add context stride shit
-	lw		a1, 0(a0) # Claim the source. Not doing this causes a loop.
-	#sw		a1, 0(a0) # Pretend we completed shit
-
-	# Disable SUM
-	csrr	a2, sstatus
-	li		a0, ~(1 << 18)
-	and		a2, a2, a0
-	csrw	sstatus, a2
-
-	# Set type argument (0 == external interrupt)
-	mv		a0, zero
-	
-	# Restore some registers
-	#save_gp_regs	10, 12, x31
-	csrrw	x31, sscratch, x31
-
-	# Jump to notification handler
-	# FIXME check for the right TID dumbass.
-	sret
 
 
 	.balign 4	# 0

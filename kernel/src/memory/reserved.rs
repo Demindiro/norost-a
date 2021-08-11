@@ -222,8 +222,19 @@ range! {
 	DEVICE_TREE => 1 << (16 - Page::OFFSET_BITS),
 	TASK_GROUPS => 1 << (20 - Page::OFFSET_BITS),
 	TASK_DATA => 1 << (30 - Page::OFFSET_BITS),
+	// https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic.adoc
+	PLIC => 0x4000000 >> Page::OFFSET_BITS,
 	[LOCAL]
 	HIGHMEM_A => 1 << (30 - Page::OFFSET_BITS),
 	HIGHMEM_B => 1 << (30 - Page::OFFSET_BITS),
 	VMM_ROOT => 1 << 0,
 }
+
+// TODO find a way to get this included in assembly files as a constant.
+#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+#[export_name = "plic_address"]
+//static _PLIC: Page = PLIC.start;
+static _PLIC: Page = match Page::from_pointer(0x4_0000_0000 as *mut _) {
+	Ok(p) => p,
+	Err(_) => unreachable!(),
+};

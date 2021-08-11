@@ -66,6 +66,8 @@ macro_rules! test {
 
 #[macro_use]
 mod log;
+#[macro_use]
+mod util;
 
 mod allocator;
 mod arch;
@@ -76,7 +78,6 @@ mod powerstate;
 mod sync;
 mod syscall;
 mod task;
-mod util;
 
 use core::cell::UnsafeCell;
 use core::convert::TryInto;

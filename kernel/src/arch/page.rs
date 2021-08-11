@@ -164,3 +164,7 @@ impl TryFrom<*mut PageData> for Page {
 		Self::from_pointer(ptr)
 	}
 }
+
+/// Working around Rust retardedness that will probably never be fixed
+unsafe impl Sync for Page {}
+
