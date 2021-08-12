@@ -58,8 +58,14 @@ static mut NEW_DATA: bool = false;
 extern "C" fn notification_handler_entry() {
 	unsafe {
 		asm!("
+			# a0: type
+			# a1: value
+			# a7: address
+			#
+			# The original a[0-2] are stored on the stack by the kernel.
 			.equ	GP_REGBYTES, 8
-			addi	sp, sp, -16 * GP_REGBYTES
+			.equ	NOTIFY_RETURN, 9
+			addi	sp, sp, -(13 + 3) * GP_REGBYTES
 			sd		t0, 0 * GP_REGBYTES (sp)
 			sd		t1, 1 * GP_REGBYTES (sp)
 			sd		t2, 2 * GP_REGBYTES (sp)
@@ -67,18 +73,13 @@ extern "C" fn notification_handler_entry() {
 			sd		t4, 4 * GP_REGBYTES (sp)
 			sd		t5, 5 * GP_REGBYTES (sp)
 			sd		t6, 6 * GP_REGBYTES (sp)
-			sd		a0, 7 * GP_REGBYTES (sp)
-			sd		a1, 8 * GP_REGBYTES (sp)
-			sd		a2, 9 * GP_REGBYTES (sp)
-			sd		a3, 10 * GP_REGBYTES (sp)
-			sd		a4, 11 * GP_REGBYTES (sp)
-			sd		a5, 12 * GP_REGBYTES (sp)
-			sd		a6, 13 * GP_REGBYTES (sp)
-			sd		a7, 14 * GP_REGBYTES (sp)
-			sd		ra, 15 * GP_REGBYTES (sp)
-			ld		a0, 16 * GP_REGBYTES (sp)
-			ld		a1, 17 * GP_REGBYTES (sp)
-			ld		a2, 18 * GP_REGBYTES (sp)
+			sd		a3, 7 * GP_REGBYTES (sp)
+			sd		a4, 8 * GP_REGBYTES (sp)
+			sd		a5, 9 * GP_REGBYTES (sp)
+			sd		a6, 10 * GP_REGBYTES (sp)
+			sd		a2, 11 * GP_REGBYTES (sp)
+			sd		ra, 12 * GP_REGBYTES (sp)
+			mv		a2, a7
 			call	notification_handler
 			ld		t0, 0 * GP_REGBYTES (sp)
 			ld		t1, 1 * GP_REGBYTES (sp)
@@ -87,23 +88,21 @@ extern "C" fn notification_handler_entry() {
 			ld		t4, 4 * GP_REGBYTES (sp)
 			ld		t5, 5 * GP_REGBYTES (sp)
 			ld		t6, 6 * GP_REGBYTES (sp)
-			ld		a0, 7 * GP_REGBYTES (sp)
-			ld		a1, 8 * GP_REGBYTES (sp)
-			ld		a2, 9 * GP_REGBYTES (sp)
-			ld		a3, 10 * GP_REGBYTES (sp)
-			ld		a4, 11 * GP_REGBYTES (sp)
-			ld		a5, 12 * GP_REGBYTES (sp)
-			ld		a6, 13 * GP_REGBYTES (sp)
-			ld		a7, 14 * GP_REGBYTES (sp)
-			ld		ra, 15 * GP_REGBYTES (sp)
-			addi	sp, sp, (16 + 3) * GP_REGBYTES
-			ret
+			ld		a3, 7 * GP_REGBYTES (sp)
+			ld		a4, 8 * GP_REGBYTES (sp)
+			ld		a5, 9 * GP_REGBYTES (sp)
+			ld		a6, 10 * GP_REGBYTES (sp)
+			ld		a2, 11 * GP_REGBYTES (sp)
+			ld		ra, 12 * GP_REGBYTES (sp)
+			addi	sp, sp, (13 + 3) * GP_REGBYTES
+			li		a7, NOTIFY_RETURN
+			ecall
 		");
 	}
 }
 
 #[export_name = "notification_handler"]
-extern "C" fn notification_handler(address: usize, typ: usize, value: usize) {
+extern "C" fn notification_handler(typ: usize, value: usize, address: usize) {
 	sys_log!("Got a notification!");
 	sys_log!("  address :  0x{:x}", address);
 	sys_log!("  type    :  0x{:x}", typ);

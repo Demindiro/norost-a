@@ -211,6 +211,11 @@ syscall!(
 );
 
 syscall!(
+	io_notify_return,
+	9
+);
+
+syscall!(
 	task_spawn,
 	11,
 	mappings: *const TaskSpawnMapping,

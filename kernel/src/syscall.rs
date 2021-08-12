@@ -42,7 +42,7 @@ pub static TABLE: [Syscall; TABLE_LEN] = [
 	sys::mem_set_flags,          // 6
 	sys::mem_physical_addresses, // 7
 	sys::sys_set_interrupt_controller,   // 8
-	sys::placeholder,            // 9
+	sys::io_notify_return,       // 9
 	sys::placeholder,            // 10
 	sys::task_spawn,             // 11
 	sys::dev_dma_alloc,          // 12
@@ -226,6 +226,14 @@ mod sys {
 				.map(Result::unwrap);
 			let prev = task.set_notification_handler(handler);
 			Return(Status::Ok, prev.map(|p| p.as_ptr() as usize).unwrap_or(0))
+		}
+	}
+
+	sys! {
+		/// Return from a notification handler.
+		[task] io_notify_return() {
+			logcall!("io_notify_return");
+			loop {}
 		}
 	}
 
