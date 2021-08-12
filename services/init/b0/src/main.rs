@@ -122,6 +122,10 @@ fn main() {
 	// WHYYYYYYYYYYYYYYYY
 	unsafe { dux::init() };
 
+	sys_log!("Setting up notification handler");
+	let ret = unsafe { kernel::io_set_notify_handler(notification_handler_entry) };
+	assert_eq!(ret.status, 0);
+
 	sys_log!("Mapping devices");
 	device_tree::map_devices();
 	pci::init_blk_device();
@@ -156,10 +160,6 @@ fn main() {
 	sys_log!("Creating console");
 	let mut console = unsafe { console::Console::new(device_tree::UART_ADDRESS.cast()) };
 	let mut buf = [0; 256];
-
-	sys_log!("Setting up notification handler");
-	let ret = unsafe { kernel::io_set_notify_handler(notification_handler_entry) };
-	assert_eq!(ret.status, 0);
 
 	sys_log!("Press any key for magic");
 
