@@ -28,7 +28,6 @@ mod console;
 mod device_tree;
 mod fs;
 mod pci;
-mod plic;
 mod rtbegin;
 mod uart;
 
@@ -109,7 +108,6 @@ extern "C" fn notification_handler(typ: usize, value: usize, address: usize) {
 	sys_log!("  value   :  0x{:x}", value);
 	let mut buf = [0; 16];
 	let r = unsafe { CONSOLE.as_mut().unwrap().read(&mut buf) };
-	kernel::dbg!();
 	sys_log!("Read '{}'", core::str::from_utf8(&buf[..r]).unwrap());
 }
 
@@ -129,17 +127,11 @@ fn main() {
 	pci::init_blk_device();
 
 	sys_log!("Setting up PLIC & enabling Interrupt 0");
-	let mut plic = unsafe { plic::PLIC::new(device_tree::PLIC_ADDRESS) };
 	let source = core::num::NonZeroU16::new(0xa).unwrap(); // UART
 	let context = 0x1; // Hart 0 S-mode
 
-	// The PLIC's behaviour should match that of SiFive's PLIC
-	// https://static.dev.sifive.com/U54-MC-RVCoreIP.pdf
-	// Presumably, since we're running on hart 0 (the only hart), we need to
-	// enable the interrupt in context 0x1 (S-mode).
-	plic.enable(context, source, true).unwrap();
-	plic.set_priority(source, 5).unwrap();
-	plic.set_priority_threshold(context, 6).unwrap();
+	let ret = unsafe { kernel::sys_reserve_interrupt(0xa) };
+	assert_eq!(ret.status, 0, "failed to reserve interrupt");
 
 	sys_log!("Opening FAT FS");
 	let dev = unsafe { pci::BLK.as_mut().unwrap().downcast_mut().unwrap() };
@@ -170,45 +162,13 @@ fn main() {
 	assert_eq!(ret.status, 0);
 
 	sys_log!("Press any key for magic");
-	let mut prev = None;
-	plic.set_priority_threshold(context, 4).unwrap();
 
 	unsafe { CONSOLE = Some(console) };
-	loop {}
-	let console = unsafe { CONSOLE.take().unwrap() };
-
 	sys_log!("Waiting for notification of stuff");
 	loop {
-		if unsafe { core::mem::replace(&mut NEW_DATA, false) } {
-			let r = console.read(&mut buf);
-			//plic.complete(context, source).unwrap();
-			console.write(b"You typed '");
-			console.write(&buf[..r]);
-			console.write(b"'\n");
-		}
+		unsafe { kernel::io_wait(0, 0) };
 	}
-
-	loop {
-	//for _ in 0..100 {
-		let curr = plic.claim(context).unwrap();
-		//plic.set_priority_threshold(context, 6).unwrap();
-		if Some(curr) != prev {
-			//kernel::dbg!(curr);
-			prev = Some(curr);
-		}
-		/*
-		if let Some(curr) = curr {
-			plic.complete(context, curr).unwrap();
-		}
-		*/
-		let r = console.read(&mut buf);
-		if r > 0 {
-			plic.complete(context, source).unwrap();
-			//console.write(b"You typed '");
-			//console.write(&buf[..r]);
-			//console.write(b"'\n");
-		}
-	}
+	let console = unsafe { CONSOLE.take().unwrap() };
 
 	sys_log!("Listing binary addresses:");
 

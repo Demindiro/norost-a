@@ -43,7 +43,7 @@ pub static TABLE: [Syscall; TABLE_LEN] = [
 	sys::mem_physical_addresses, // 7
 	sys::sys_set_interrupt_controller,   // 8
 	sys::io_notify_return,       // 9
-	sys::placeholder,            // 10
+	sys::sys_reserve_interrupt,  // 10
 	sys::task_spawn,             // 11
 	sys::dev_dma_alloc,          // 12
 	sys::sys_platform_info,      // 13
@@ -421,6 +421,16 @@ mod sys {
 	}
 
 	sys! {
+		/// Reserve an interrupt source. This will cause any interrupts from the given sources to
+		/// cause a notification to be sent to the calling task.
+		[_] sys_reserve_interrupt(interrupt) {
+			let address = task::Executor::current_address();
+			arch::interrupts::reserve(interrupt as u16, address).unwrap();
+			Return(Status::Ok, 0)
+		}
+	}
+
+	sys! {
 		/// Put a message in the kernel's stdout. Intended for low-level debugging.
 		[_] sys_log(address, length) {
 			logcall!("sys_log 0x{:x}, {}", address, length);
@@ -468,14 +478,15 @@ mod sys {
 		/// Set the MMIO region where the interrupt controller is located.
 		///
 		/// This may only be called once.
-		[_] sys_set_interrupt_controller(ppn, page_count) {
+		[_] sys_set_interrupt_controller(ppn, page_count, max_devices) {
 			logcall!("sys_set_interrupt_controller 0x{:x}, {}", (ppn as u128) << 12, page_count);
 			log!("sys_set_interrupt_controller 0x{:x}, {}", (ppn as u128) << 12, page_count);
 			use crate::memory::reserved::PLIC;
 			assert!(page_count <= PLIC.page_count());
 			let ppn = PPNBox::try_from(ppn).unwrap();
 			let ppn_range = PPNDirectRange::new(ppn, page_count).unwrap();
-			arch::VMS::add_range(PLIC.start, MapRange::Direct(ppn_range), RWX::RW, arch::vms::Accessibility::KernelGlobal).unwrap();
+			let max_devices = max_devices as u16;
+			unsafe { arch::interrupts::set_controller(MapRange::Direct(ppn_range), max_devices) };
 			Return(Status::Ok, 0)
 		}
 	}

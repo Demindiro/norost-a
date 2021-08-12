@@ -152,6 +152,12 @@ pub fn map_devices() {
 							};
 							assert_eq!(ret.status, 0, "mapping PLIC failed");
 
+							let max_devices = node
+								.properties()
+								.find(|p| p.name == b"riscv,ndev")
+								.expect("missing property riscv,ndev");
+							let (max_devices, _) = unpack_reg(max_devices.value, 1);
+
 							let ret = unsafe {
 								let addr = addr >> kernel::Page::OFFSET_BITS;
 								let size = (size + u128::try_from(kernel::Page::MASK).unwrap())
@@ -159,6 +165,7 @@ pub fn map_devices() {
 								kernel::sys_set_interrupt_controller(
 									addr.try_into().unwrap(),
 									usize::try_from(size).unwrap(),
+									max_devices as u16,
 								)
 							};
 							assert_eq!(ret.status, 0, "registering PLIC failed");

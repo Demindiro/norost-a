@@ -77,6 +77,18 @@ impl Address {
 	}
 }
 
+impl From<Address> for usize {
+	fn from(address: Address) -> Self {
+		address.0
+	}
+}
+
+impl From<usize> for Address {
+	fn from(n: usize) -> Self {
+		Self(n)
+	}
+}
+
 impl From<TaskID> for usize {
 	fn from(id: TaskID) -> Self {
 		id.0 as usize

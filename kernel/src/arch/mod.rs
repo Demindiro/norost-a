@@ -1,6 +1,7 @@
 pub mod map;
 pub mod page;
 pub mod vms;
+pub mod interrupts;
 
 pub use map::{Map, MapRange};
 pub use page::*;

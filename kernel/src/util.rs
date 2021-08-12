@@ -1,3 +1,5 @@
+use core::cell::UnsafeCell;
+use core::ops;
 use core::slice;
 
 /// This macro creates a big/little-endian wrapper for the given integer type.
@@ -47,3 +49,36 @@ pub unsafe fn cstr_to_str<'a>(cstr: *const u8) -> Result<&'a str, core::str::Utf
 	let s = slice::from_raw_parts(cstr, len);
 	core::str::from_utf8(s)
 }
+
+/// A cell that is meant to be set only once.
+pub struct OnceCell<T>(UnsafeCell<T>);
+
+impl<T> OnceCell<T> {
+	/// Create a new `OnceCell` with a default value.
+	pub const fn new(value: T) -> Self {
+		Self(UnsafeCell::new(value))
+	}
+
+	/// Set the value in this cell.
+	///
+	/// # Safety
+	///
+	/// Nothing may be referencing the inner value.
+	#[inline(always)]
+	pub unsafe fn set(&self, value: T) {
+		self.0.get().write(value);
+	}
+}
+
+impl<T> ops::Deref for OnceCell<T> {
+	type Target = T;
+
+	fn deref(&self) -> &T {
+		unsafe { &*self.0.get() }
+	}
+}
+
+unsafe impl<T> Sync for OnceCell<T>
+where
+	T: Sync
+{}

@@ -60,6 +60,12 @@ impl Executor<'_> {
 		}
 	}
 
+	/// Returns the address of the current task
+	pub fn current_address() -> Address {
+		// FIXME
+		Address::todo(unsafe { NEXT_ID })
+	}
+
 	/// Begin idling, i.e. do nothing
 	#[allow(dead_code)]
 	pub fn idle(&self) -> ! {

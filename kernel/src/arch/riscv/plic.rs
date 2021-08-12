@@ -1,13 +1,90 @@
-//! # RISC-V PLIC stub
+//! # PLIC handling module
 //!
 //! Implemented based on information from
 //! https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic.adoc
 
+use crate::arch::{MapRange, VMS};
+use crate::memory::reserved;
+use crate::task::Address;
+use crate::util::OnceCell;
 use core::convert::TryFrom;
 use core::mem;
 use core::num::NonZeroU16;
 use core::ptr;
 use core::ptr::NonNull;
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+
+/// The total amount of available interrupt sources.
+///
+/// This *excludes* the non-existent interrupt 0.
+static TOTAL_SOURCES: OnceCell<u16> = OnceCell::new(0);
+
+/// The list of reserved interrupts.
+///
+/// A value of usize::MAX indicates the slot is free.
+///
+/// Note that it is offset by one, i.e. slot 0 refers to interrupt 1.
+// Using 0 as using usize::MAX would cause RESERVATIONS to be stored in the
+// ELF file, bloating it.
+static RESERVATIONS: [AtomicUsize; 1023] = [STUPIDITY; 1023];
+
+const STUPIDITY: AtomicUsize = AtomicUsize::new(0);
+
+/// A PLIC abstraction with the base address set to where the PLIC is supposed to be mapped.
+const PLIC: PLIC = PLIC {
+	base_address: reserved::PLIC.start.as_non_null_ptr().cast(),
+};
+
+#[derive(Debug)]
+pub enum ReserveError {
+	Occupied,
+	NonExistent,
+}
+
+/// Set the interrupt controller.
+///
+/// # Safety
+///
+/// This may only be called once.
+///
+/// It must point to a PLIC MMIO area.
+pub unsafe fn set_controller(range: MapRange, max_devices: u16) {
+	TOTAL_SOURCES.set(max_devices);
+	use crate::arch::vms::{Accessibility, RWX, VirtualMemorySystem};
+	VMS::add_range(reserved::PLIC.start, range, RWX::RW, Accessibility::KernelGlobal).unwrap();
+	// Set up the reservations now.
+	for e in RESERVATIONS.iter() {
+		e.store(usize::MAX, Ordering::Relaxed);
+	}
+}
+
+/// Reserve an interrupt source
+pub fn reserve(source: u16, address: Address) -> Result<(), ReserveError> {
+	dbg!("Oh my", source, address);
+	let source = source.checked_sub(1).ok_or(ReserveError::NonExistent)?;
+	(source < *TOTAL_SOURCES).then(|| ()).ok_or(ReserveError::NonExistent)?;
+	let entry = &RESERVATIONS[usize::from(source)];
+	entry
+		.compare_exchange(usize::MAX, address.into(), Ordering::Relaxed, Ordering::Relaxed)
+		.map_err(|_| ReserveError::Occupied)?;
+
+	dbg!("harhar");
+
+	// The PLIC's behaviour should match that of SiFive's PLIC
+	// https://static.dev.sifive.com/U54-MC-RVCoreIP.pdf
+	// Presumably, since we're running on hart 0 (the only hart), we need to
+	// enable the interrupt in context 0x1 (S-mode).
+
+	let context = 1; // TODO this should be done for all available harts
+	let source = NonZeroU16::new(source + 1).unwrap();
+
+	PLIC.enable(context, source, true).unwrap();
+	PLIC.set_priority(source, 1).unwrap();
+	PLIC.set_priority_threshold(context, 0).unwrap();
+
+	Ok(())
+}
 
 /// A RISC-V Platform Level Interrupt Controller. This must be set up to receive
 /// interrupts at all.
@@ -53,18 +130,8 @@ impl PLIC {
 	const STRIDE_PRIORITY_THRESHOLDS: usize = 0x1000 / mem::size_of::<u32>();
 	const STRIDE_CLAIM_COMPLETE: usize = 0x1000 / mem::size_of::<u32>();
 
-	/// Setup a new PLIC controller.
-	///
-	/// # Safety
-	///
-	/// The address must actually point to a PLIC controller MMIO map. It may not be
-	/// in use by anything else either yet.
-	pub unsafe fn new(base_address: NonNull<u32>) -> Self {
-		Self { base_address }
-	}
-
 	/// Set the priority of an interrupt source.
-	pub fn set_priority(&mut self, source: NonZeroU16, priority: u32) -> Result<(), InvalidSource> {
+	pub fn set_priority(&self, source: NonZeroU16, priority: u32) -> Result<(), InvalidSource> {
 		Self::source_in_range(source)?;
 		unsafe {
 			let addr = self
@@ -79,7 +146,7 @@ impl PLIC {
 
 	/// Check if an interrupt is pending.
 	#[allow(dead_code)]
-	pub fn check_pending(&mut self, source: NonZeroU16) -> Result<bool, InvalidSource> {
+	pub fn check_pending(&self, source: NonZeroU16) -> Result<bool, InvalidSource> {
 		let (offt, bit) = Self::split_source(source)?;
 		unsafe {
 			let addr = self
@@ -93,7 +160,7 @@ impl PLIC {
 
 	/// Enable or disable an interrupt.
 	pub fn enable(
-		&mut self,
+		&self,
 		context: u16,
 		source: NonZeroU16,
 		enable: bool,
@@ -115,7 +182,7 @@ impl PLIC {
 
 	/// Set the priority threshold of a context
 	pub fn set_priority_threshold(
-		&mut self,
+		&self,
 		context: u16,
 		threshold: u32,
 	) -> Result<(), InvalidContext> {
@@ -132,7 +199,7 @@ impl PLIC {
 	}
 
 	/// Claim an interrupt.
-	pub fn claim(&mut self, context: u16) -> Result<Option<NonZeroU16>, InvalidContext> {
+	pub fn claim(&self, context: u16) -> Result<Option<NonZeroU16>, InvalidContext> {
 		Self::context_in_range(context)?;
 		unsafe {
 			let addr = self
@@ -148,7 +215,7 @@ impl PLIC {
 
 	/// Mark an interrupt as completed.
 	pub fn complete(
-		&mut self,
+		&self,
 		context: u16,
 		source: NonZeroU16,
 	) -> Result<(), InvalidContextOrSource> {

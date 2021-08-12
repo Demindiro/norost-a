@@ -9,6 +9,7 @@
 //! [priv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
 
 pub mod rv64;
+pub(super) mod plic;
 pub mod sbi;
 pub mod vms;
 

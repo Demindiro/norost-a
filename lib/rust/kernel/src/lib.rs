@@ -207,7 +207,8 @@ syscall!(
 	sys_set_interrupt_controller,
 	8,
 	ppn: usize,
-	count: usize
+	count: usize,
+	max_devices: u16
 );
 
 syscall!(io_notify_return, 9);

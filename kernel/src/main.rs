@@ -83,21 +83,10 @@ use core::cell::UnsafeCell;
 use core::convert::TryInto;
 use core::ops;
 use core::{mem, panic, ptr};
+use util::OnceCell;
 
-static PLATFORM_INFO_SIZE: OnceCell<usize> = OnceCell(UnsafeCell::new(0));
-static PLATFORM_INFO_PHYS_PTR: OnceCell<usize> = OnceCell(UnsafeCell::new(0));
-
-pub struct OnceCell<T>(UnsafeCell<T>);
-
-impl<T> ops::Deref for OnceCell<T> {
-	type Target = T;
-
-	fn deref(&self) -> &T {
-		unsafe { &*self.0.get() }
-	}
-}
-
-unsafe impl<T> Sync for OnceCell<T> {}
+static PLATFORM_INFO_SIZE: OnceCell<usize> = OnceCell::new(0);
+static PLATFORM_INFO_PHYS_PTR: OnceCell<usize> = OnceCell::new(0);
 
 #[panic_handler]
 fn panic(info: &panic::PanicInfo) -> ! {
@@ -387,10 +376,10 @@ extern "C" fn main(
 	}
 
 	// Remap FDT to kernel global space
-	unsafe { *PLATFORM_INFO_PHYS_PTR.0.get() = dtb_ptr as usize };
+	unsafe { PLATFORM_INFO_PHYS_PTR.set(dtb_ptr as usize); }
 	unsafe {
-		*PLATFORM_INFO_SIZE.0.get() = (dtb.total_size() + arch::Page::SIZE - 1) / arch::Page::SIZE
-	};
+		PLATFORM_INFO_SIZE.set((dtb.total_size() + arch::Page::SIZE - 1) / arch::Page::SIZE);
+	}
 	let mut addr = memory::reserved::DEVICE_TREE.start;
 	for i in 0..(dtb.total_size() + arch::Page::SIZE - 1) / arch::Page::SIZE {
 		unsafe {
