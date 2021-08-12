@@ -4,6 +4,22 @@
 
 use super::*;
 use crate::arch;
+use crate::task::Task;
+use core::cell::UnsafeCell;
+use core::mem::MaybeUninit;
+
+/// The idle "task".
+///
+/// This is not a real task. It is simply used as a buffer so trap handlers don't need yet
+/// another branch to ensure no memory is improperly overwritten.
+///
+/// While writing to data from multiple harts without synchronization may technically be
+/// UB, it is unlikely to be an issue since we normally don't read from the written data.
+static IDLE_TASK_STUB: WriteOnly<UnsafeCell<MaybeUninit<Task>>> = WriteOnly(UnsafeCell::new(MaybeUninit::uninit()));
+
+struct WriteOnly<T>(T);
+
+unsafe impl<T> Sync for WriteOnly<T> {}
 
 #[repr(C)]
 pub struct Executor<'a> {
@@ -38,22 +54,6 @@ impl Executor<'_> {
 			};
 
 			if let Ok(task) = group.task(id) {
-				/*
-				if id == 1 {
-				log!("Halting...");
-				crate::arch::enable_supervisor_interrupts(true);
-				crate::arch::enable_timer_interrupts(true);
-				crate::arch::enable_external_interrupts(true);
-				crate::arch::clear_pending_interrupts();
-				//crate::arch::riscv::sbi::set_timer(10_000_000 * 2);
-				crate::powerstate::halt();
-				crate::arch::enable_supervisor_interrupts(false);
-				crate::arch::enable_timer_interrupts(false);
-				crate::arch::enable_external_interrupts(false);
-				log!("Done halting :)");
-				}
-				*/
-
 				task.process_io(Address::todo(id));
 				task.execute()
 			};
@@ -68,7 +68,13 @@ impl Executor<'_> {
 
 	/// Begin idling, i.e. do nothing
 	#[allow(dead_code)]
-	pub fn idle(&self) -> ! {
+	pub fn idle() -> ! {
+		//dbg!("Idling...");
+		unsafe {
+			// TODO move this to arch::
+			asm!("csrw sscratch, {0}", in(reg) IDLE_TASK_STUB.0.get());
+		}
+		arch::enable_interrupts(true);
 		loop {
 			crate::powerstate::halt();
 		}
@@ -106,4 +112,11 @@ impl Executor<'_> {
 			current_task: None,
 		}
 	}
+}
+
+/// Helper function primarily intended to be called from assembly.
+#[export_name = "executor_get_task"]
+extern "C" fn get_task(address: Address) -> Option<Task> {
+	group::Group::get(address.group().into())
+		.and_then(|g| g.task(address.task().into()).ok())
 }

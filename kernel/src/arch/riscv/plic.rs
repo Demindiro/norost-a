@@ -27,6 +27,7 @@ static TOTAL_SOURCES: OnceCell<u16> = OnceCell::new(0);
 /// Note that it is offset by one, i.e. slot 0 refers to interrupt 1.
 // Using 0 as using usize::MAX would cause RESERVATIONS to be stored in the
 // ELF file, bloating it.
+#[export_name = "plic_reservations"]
 static RESERVATIONS: [AtomicUsize; 1023] = [STUPIDITY; 1023];
 
 const STUPIDITY: AtomicUsize = AtomicUsize::new(0);

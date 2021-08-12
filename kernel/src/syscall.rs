@@ -185,6 +185,10 @@ mod sys {
 			logcall!("io_wait 0b{:b}, {}", flags, time);
 			// FIXME actually wait for I/O
 			// FIXME lol, lmao
+
+			// FIXME this is a quick test to see if we can wake up from idling.
+			task::Executor::idle();
+
 			crate::task::Executor::default().next()
 		}
 	}

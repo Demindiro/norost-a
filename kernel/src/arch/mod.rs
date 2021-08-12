@@ -111,12 +111,15 @@ pub fn set_supervisor_userpage_access(enable: bool) {
 
 #[inline]
 pub fn enable_interrupts(enable: bool) {
-	// Enable timer, external & software interrupts.
+	// Timer, external & software interrupts.
 	let imm = (1 << 9) | (1 << 5) | (1 << 1); // s[ets]ie
 	// Ditto
 	if enable {
 		unsafe { asm!("csrs sie, {0}", in(reg) imm) };
+		// 1 << 1 = SIE
+		unsafe { asm!("csrsi sstatus, 1 << 1") };
 	} else {
 		unsafe { asm!("csrc sie, {0}", in(reg) imm) };
+		unsafe { asm!("csrci sstatus, 1 << 1") };
 	}
 }

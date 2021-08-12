@@ -18,6 +18,9 @@ stval_msg:
 .align	2
 mini_panic:
 
+	# Backup ra
+	mv		t0, ra
+
 	# Print panic message
 	la		s0, early_panic_msg
 	call	trap_print_msg

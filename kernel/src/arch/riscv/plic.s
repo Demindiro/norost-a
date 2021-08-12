@@ -36,10 +36,45 @@ external_interrupt_handler:
 	add		a0, a0, a1
 
 	# Claim the source
-	lw		a1, 0(a0)
+	# s0 is used as we need to preserve it across a call.
+	lw		s0, 0(a0)
 
 	# Figure out which task to send a notification to.
 	# TODO Pretend for now some context-switchy stuff is happening here.
+	la		a0, plic_reservations
+	li		a2, GP_REGBYTES
+	mul		a2, a2, s0
+	add		a0, a0, a2
+	# Use -GP_REGBYTES as the table doesn't include source 0
+	# FIXME this also needs to be atomic I suppose?
+	gp_load	a0, -GP_REGBYTES, a0
+
+	# FIXME this may fail under normal circumstances; it is possible the
+	# interrupt handler is running while the driver unregisters an interrupt
+	#
+	# Unlikely, but certainly possible.
+	addi	a2, a0, 1
+	beqz	a2, mini_panic
+
+	# Get a pointer to the task with the given address
+	call	executor_get_task
+
+	# Put the interrupt source in a1, as intended
+	mv		a1, s0
+
+	# FIXME don't panic you doof
+	beqz	a0, mini_panic
+
+	# We need a0 to be in x31 regardless, so just do it now.
+	mv		x31, a0
+
+	# Update sscratch for the trap handler
+	csrw	sscratch, x31
+
+	# Load the task's VMS
+	gp_load	a0, TASK_VMS, x31
+	csrw	satp, a0
+	sfence.vma
 
 	# Set the IRQ field.
 	# FIXME this needs to be atomic
@@ -64,8 +99,9 @@ external_interrupt_handler:
 	gp_load		x30, 17 * GP_REGBYTES, x31
 	gp_store	x30, -1 * GP_REGBYTES, sp
 
-	# Disable SUM
-	csrc	sstatus, a1
+	# Disable SUM and SPP to ensure we will enter usermode
+	ori		a2, a2, 1 << 8
+	csrc	sstatus, a2
 
 	# Set address, which is -1 for the kernel
 	li		a7, -1
