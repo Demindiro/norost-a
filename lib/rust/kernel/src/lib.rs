@@ -210,10 +210,9 @@ syscall!(
 	count: usize
 );
 
-syscall!(
-	io_notify_return,
-	9
-);
+syscall!(io_notify_return, 9);
+
+syscall!(sys_reserve_interrupt, 10, interrupt: usize);
 
 syscall!(
 	task_spawn,

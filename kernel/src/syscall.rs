@@ -233,7 +233,15 @@ mod sys {
 		/// Return from a notification handler.
 		[task] io_notify_return() {
 			logcall!("io_notify_return");
-			loop {}
+			// TODO we should call this directly
+			//
+			// The main reason we don't yet is that logcall won't work.
+			extern "C" {
+				fn syscall_io_notify_return(_: crate::task::Task) -> !;
+			}
+			unsafe {
+				syscall_io_notify_return(task.clone());
+			}
 		}
 	}
 

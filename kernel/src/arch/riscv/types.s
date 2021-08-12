@@ -87,3 +87,23 @@
 
 # Total size of register storage
 .equ		REGSTATE_SIZE, (GP_REGSTATE_SIZE + FP_REGSTATE_SIZE)
+
+
+# The offset of the tasks' stack, which shouldn't even be present in the
+# task struct.
+.equ		TASK_STACK, REGSTATE_SIZE
+
+# The offset of the task's VMS address
+.equ		TASK_VMS, (TASK_STACK + GP_REGBYTES)
+
+# The offset of the task's notification handler
+.equ		TASK_NOTIFY_HANDLER, (TASK_VMS + GP_REGBYTES)
+
+# The offset of the task's flags
+.equ		TASK_FLAGS, (TASK_NOTIFY_HANDLER + GP_REGBYTES)
+
+# The offset of the task's current IRQ value
+.equ		TASK_IRQ, (TASK_FLAGS + 2)
+
+# Mask to toggle the NOTIFY flag
+.equ		TASK_FLAG_NOTIFY, 0x1

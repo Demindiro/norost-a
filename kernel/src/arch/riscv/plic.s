@@ -41,6 +41,10 @@ external_interrupt_handler:
 	# Figure out which task to send a notification to.
 	# TODO Pretend for now some context-switchy stuff is happening here.
 
+	# Set the IRQ field.
+	# FIXME this needs to be atomic
+	sh		a1, TASK_IRQ (x31)
+
 	# Set sepc to that of the notification handler
 	gp_load		a0, 2 * GP_REGBYTES + REGSTATE_SIZE, x31
 	csrw		sepc, a0

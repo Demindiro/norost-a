@@ -107,8 +107,13 @@ extern "C" fn notification_handler(typ: usize, value: usize, address: usize) {
 	sys_log!("  address :  0x{:x}", address);
 	sys_log!("  type    :  0x{:x}", typ);
 	sys_log!("  value   :  0x{:x}", value);
-	unsafe { NEW_DATA = true };
+	let mut buf = [0; 16];
+	let r = unsafe { CONSOLE.as_mut().unwrap().read(&mut buf) };
+	kernel::dbg!();
+	sys_log!("Read '{}'", core::str::from_utf8(&buf[..r]).unwrap());
 }
+
+static mut CONSOLE: Option<console::Console> = None;
 
 #[export_name = "main"]
 fn main() {
@@ -168,11 +173,15 @@ fn main() {
 	let mut prev = None;
 	plic.set_priority_threshold(context, 4).unwrap();
 
+	unsafe { CONSOLE = Some(console) };
+	loop {}
+	let console = unsafe { CONSOLE.take().unwrap() };
+
 	sys_log!("Waiting for notification of stuff");
 	loop {
 		if unsafe { core::mem::replace(&mut NEW_DATA, false) } {
 			let r = console.read(&mut buf);
-			plic.complete(context, source).unwrap();
+			//plic.complete(context, source).unwrap();
 			console.write(b"You typed '");
 			console.write(&buf[..r]);
 			console.write(b"'\n");

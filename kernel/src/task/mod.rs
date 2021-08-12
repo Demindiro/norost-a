@@ -31,7 +31,20 @@ pub use group::Group;
 use crate::arch::vms::{self, VirtualMemorySystem, RWX};
 use crate::arch::{self, Map, Page};
 use crate::memory::{self, AllocateError};
+use core::num::NonZeroU16;
 use core::ptr::NonNull;
+
+/// Various flags indicating a task's state.
+#[repr(transparent)]
+struct Flags(u16);
+
+impl Flags {
+}
+
+/// An IRQ source / identifier
+// TODO move this to arch::
+#[repr(transparent)]
+struct IRQ(NonZeroU16);
 
 /// A wrapper around a task pointer.
 #[derive(Clone)]
@@ -57,6 +70,12 @@ pub struct TaskData {
 	shared_state: SharedState,
 	/// The address of a notification handler.
 	notification_handler: Option<notification::Handler>,
+	/// Flags pertaining to this task
+	flags: Flags,
+	/// The IRQ this task is currently handling, if any.
+	///
+	/// Only relevant for drivers.
+	current_irq: Option<IRQ>,
 	/// IPC state to communicate with other tasks.
 	ipc: Option<ipc::IPC>,
 }
@@ -87,8 +106,10 @@ impl Task {
 				shared_state: SharedState {
 					virtual_memory: vms,
 				},
-				ipc: None,
 				notification_handler: None,
+				current_irq: None,
+				flags: Flags(0),
+				ipc: None,
 			});
 		}
 		unsafe { TASK_DATA_ADDRESS = TASK_DATA_ADDRESS.next().unwrap() };
