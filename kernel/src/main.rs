@@ -24,6 +24,7 @@
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
+#![feature(never_type)]
 #![feature(nonnull_slice_from_raw_parts)]
 #![feature(option_result_unwrap_unchecked)]
 #![feature(optimize_attribute)]
@@ -444,8 +445,8 @@ extern "C" fn main(
 	// We could also do this earlier but whatever.
 	arch::enable_interrupts(true);
 
-	let exec = task::Executor::new(hart_id);
-	exec.next();
+	task::Executor::init(hart_id.try_into().expect("hart id higher than supported"));
+	task::Executor::next();
 }
 
 /*

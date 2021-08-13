@@ -116,12 +116,6 @@ trap_handler:
 # Handler for syscalls.
 trap_syscall:
 
-	# FIXME we shouldn't have to do this ever.
-	#la		s0, global_mapping
-	#ld		s0, 0(s0)
-	#csrrw	s0, satp, s0
-	#sfence.vma
-
 	addi	sp, sp, -1 * GP_REGBYTES
 
 	# Skip the ecall instruction, which is always 4 bytes long (there is no
@@ -142,10 +136,6 @@ trap_syscall:
 
 	# Perform the call
 	jalr	ra, t0
-
-	# FIXME we shouldn't have to do this ever.
-	#csrw	satp, s0
-	#sfence.vma
 
 	# Restore all integer registers except a0 and a1, then return
 0:

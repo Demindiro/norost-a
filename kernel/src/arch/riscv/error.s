@@ -11,6 +11,8 @@ stval_msg:
 	.asciz	"stval   0x"
 satp_msg:
 	.asciz	"satp    0x"
+sp_msg:
+	.asciz	"sp      0x"
 
 .section .text.cold
 
@@ -48,6 +50,12 @@ mini_panic:
 	la		s0, satp_msg
 	call	trap_print_msg
 	csrr	s0, satp
+	call	trap_print_num
+
+	# Print sp
+	la		s0, sp_msg
+	call	trap_print_msg
+	mv		s0, sp
 	call	trap_print_num
 
 	# Halt forever

@@ -33,6 +33,10 @@ use crate::arch::{self, Map, Page};
 use crate::memory::{self, AllocateError};
 use core::num::NonZeroU16;
 use core::ptr::NonNull;
+use core::sync::atomic::{AtomicU16, Ordering};
+
+#[derive(Debug)]
+struct Claimed(u16);
 
 /// Various flags indicating a task's state.
 #[repr(transparent)]
@@ -76,6 +80,10 @@ pub struct TaskData {
 	///
 	/// Only relevant for drivers.
 	current_irq: Option<IRQ>,
+	/// The executor / hart that is executing this task.
+	///
+	/// This value is u16::MAX if no executor has claimed it.
+	executor_id: AtomicU16,
 	/// IPC state to communicate with other tasks.
 	ipc: Option<ipc::IPC>,
 }
@@ -109,6 +117,7 @@ impl Task {
 				notification_handler: None,
 				current_irq: None,
 				flags: Flags(0),
+				executor_id: AtomicU16::new(u16::MAX),
 				ipc: None,
 			});
 		}
@@ -122,10 +131,13 @@ impl Task {
 	}
 
 	/// Begin executing this task.
-	fn execute(&self) -> ! {
+	fn execute(&self, executor_id: u16) -> Result<!, Claimed> {
 		self.inner().shared_state.virtual_memory.activate();
-		// SAFETY: even if the task invokes UB, it won't affect the kernel itself.
-		unsafe { arch::trap_start_task(self.clone()) };
+		self.inner()
+			.executor_id
+			.compare_exchange(u16::MAX, executor_id, Ordering::Relaxed, Ordering::Relaxed)
+			.map(|_| unsafe { arch::trap_start_task(self.clone()) })
+			.map_err(Claimed)
 	}
 
 	/// Allocate private memory at the given virtual address for the current task.

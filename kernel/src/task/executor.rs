@@ -7,6 +7,7 @@ use crate::arch;
 use crate::task::Task;
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
+use core::sync::atomic::Ordering;
 
 /// The idle "task".
 ///
@@ -40,9 +41,10 @@ static mut NEXT_ID: usize = 1;
 
 impl Executor<'_> {
 	/// Suspend the current task (if any) and begin executing another task.
-	pub fn next(&self) -> ! {
-		// FIXME HACK
-		unsafe { (&mut *(&mut *IDLE_TASK_STUB.0.get()).as_mut_ptr()).stack = crate::memory::reserved::HART_STACKS.start.skip(1).unwrap() };
+	pub fn next() -> ! {
+
+		// Unclaim the current task
+		Self::current_task().inner().executor_id.store(u16::MAX, Ordering::Relaxed);
 
 		// TODO lol, lmao
 
@@ -60,7 +62,8 @@ impl Executor<'_> {
 
 			if let Ok(task) = group.task(id) {
 				arch::schedule_timer(1_000_000 / 10);
-				task.execute()
+				// If the task is already claimed, just try again.
+				let _ = task.execute(Self::id());
 			};
 		}
 	}
@@ -85,13 +88,25 @@ impl Executor<'_> {
 		}
 	}
 
-	/// Create a new executor.
+	/// Initializes the executor for a given hart.
+	///
+	/// # Safety
+	///
+	/// It must only be called once per hart and only by the hart that will use
+	/// this executor.
 	///
 	/// # Panics
 	///
 	/// If it failed to allocate memory or if the stack address is out of range.
-	pub fn new(id: usize) -> Self {
+	pub fn init(id: u16) {
 		const STACK_ADDRESS: Page = crate::memory::reserved::HART_STACKS.start;
+
+		// FIXME HACK
+		unsafe { (&mut *(&mut *IDLE_TASK_STUB.0.get()).as_mut_ptr()).stack = crate::memory::reserved::HART_STACKS.start.skip(1).unwrap() };
+		unsafe { (&mut *(&mut *IDLE_TASK_STUB.0.get()).as_mut_ptr()).executor_id.store(id, Ordering::Relaxed) };
+
+		// TODO should be moved to arch::
+		unsafe { asm!("csrw sscratch, {0}", in(reg) IDLE_TASK_STUB.0.get()) };
 
 		let stack = Map::Private(memory::allocate().unwrap());
 		arch::VMS::add(
@@ -101,21 +116,21 @@ impl Executor<'_> {
 			vms::Accessibility::KernelGlobal,
 		)
 		.unwrap();
-		Self {
-			stack: crate::memory::reserved::HART_STACKS
-				.start
-				.skip(id + 1)
-				.unwrap(),
-			current_task: None,
-		}
 	}
 
-	// FIXME lol
-	pub fn default() -> Self {
-		Self {
-			stack: crate::memory::reserved::HART_STACKS.start.skip(1).unwrap(),
-			current_task: None,
-		}
+	/// Return the ID of this executor, which corresponds to the hart ID.
+	pub fn id() -> u16 {
+		Self::current_task().inner().executor_id.load(Ordering::Relaxed)
+	}
+
+	/// Return the current task claimed by this executor.
+	pub fn current_task() -> Task {
+		// TODO should be moved partially to arch::
+		let task: *mut TaskData;
+		unsafe { asm!("csrr {0}, sscratch", out(reg) task) };
+		// SAFETY: sscratch should never ever EVER be 0! Hence it _should_ be safe to
+		// make it NonNull
+		unsafe { Task(NonNull::new_unchecked(task)) }
 	}
 }
 
@@ -131,5 +146,5 @@ extern "C" fn get_task(address: Address) -> Option<Task> {
 /// Helper function primarily intended to be called from assembly.
 #[export_name = "executor_next_task"]
 extern "C" fn next_task() -> ! {
-	Executor::default().next()
+	Executor::next()
 }

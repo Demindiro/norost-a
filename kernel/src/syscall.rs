@@ -194,7 +194,7 @@ mod sys {
 				task::Executor::idle();
 			}
 
-			crate::task::Executor::default().next()
+			crate::task::Executor::next()
 		}
 	}
 
