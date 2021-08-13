@@ -14,7 +14,6 @@ use core::ptr;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-
 /// The total amount of available interrupt sources.
 ///
 /// This *excludes* the non-existent interrupt 0.
@@ -52,8 +51,14 @@ pub enum ReserveError {
 /// It must point to a PLIC MMIO area.
 pub unsafe fn set_controller(range: MapRange, max_devices: u16) {
 	TOTAL_SOURCES.set(max_devices);
-	use crate::arch::vms::{Accessibility, RWX, VirtualMemorySystem};
-	VMS::add_range(reserved::PLIC.start, range, RWX::RW, Accessibility::KernelGlobal).unwrap();
+	use crate::arch::vms::{Accessibility, VirtualMemorySystem, RWX};
+	VMS::add_range(
+		reserved::PLIC.start,
+		range,
+		RWX::RW,
+		Accessibility::KernelGlobal,
+	)
+	.unwrap();
 	// Set up the reservations now.
 	for e in RESERVATIONS.iter() {
 		e.store(usize::MAX, Ordering::Relaxed);
@@ -63,10 +68,17 @@ pub unsafe fn set_controller(range: MapRange, max_devices: u16) {
 /// Reserve an interrupt source
 pub fn reserve(source: u16, address: Address) -> Result<(), ReserveError> {
 	let source = source.checked_sub(1).ok_or(ReserveError::NonExistent)?;
-	(source < *TOTAL_SOURCES).then(|| ()).ok_or(ReserveError::NonExistent)?;
+	(source < *TOTAL_SOURCES)
+		.then(|| ())
+		.ok_or(ReserveError::NonExistent)?;
 	let entry = &RESERVATIONS[usize::from(source)];
 	entry
-		.compare_exchange(usize::MAX, address.into(), Ordering::Relaxed, Ordering::Relaxed)
+		.compare_exchange(
+			usize::MAX,
+			address.into(),
+			Ordering::Relaxed,
+			Ordering::Relaxed,
+		)
 		.map_err(|_| ReserveError::Occupied)?;
 
 	// The PLIC's behaviour should match that of SiFive's PLIC
@@ -212,11 +224,7 @@ impl PLIC {
 	}
 
 	/// Mark an interrupt as completed.
-	pub fn complete(
-		&self,
-		context: u16,
-		source: NonZeroU16,
-	) -> Result<(), InvalidContextOrSource> {
+	pub fn complete(&self, context: u16, source: NonZeroU16) -> Result<(), InvalidContextOrSource> {
 		Self::context_in_range(context)?;
 		Self::source_in_range(source)?;
 		unsafe {

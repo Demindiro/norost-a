@@ -377,7 +377,9 @@ extern "C" fn main(
 	}
 
 	// Remap FDT to kernel global space
-	unsafe { PLATFORM_INFO_PHYS_PTR.set(dtb_ptr as usize); }
+	unsafe {
+		PLATFORM_INFO_PHYS_PTR.set(dtb_ptr as usize);
+	}
 	unsafe {
 		PLATFORM_INFO_SIZE.set((dtb.total_size() + arch::Page::SIZE - 1) / arch::Page::SIZE);
 	}

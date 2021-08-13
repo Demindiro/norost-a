@@ -10,8 +10,7 @@ use core::ptr::NonNull;
 pub struct Handler(NonNull<()>);
 
 #[derive(Debug)]
-pub enum NewHandlerError {
-}
+pub enum NewHandlerError {}
 
 impl Handler {
 	/// Create a new handler.

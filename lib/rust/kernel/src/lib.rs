@@ -187,11 +187,7 @@ syscall!(
 	free_pages: *mut ipc::FreePage,
 	free_pages_size: usize
 );
-syscall!(
-	io_set_notify_handler,
-	2,
-	function: notification::Handler
-);
+syscall!(io_set_notify_handler, 2, function: notification::Handler);
 
 syscall!(mem_alloc, 3, address: *mut Page, size: usize, flags: u8);
 syscall!(mem_dealloc, 4, address: *mut Page, size: usize);

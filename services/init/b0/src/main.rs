@@ -56,7 +56,8 @@ static mut NEW_DATA: bool = false;
 #[naked]
 extern "C" fn notification_handler_entry() {
 	unsafe {
-		asm!("
+		asm!(
+			"
 			# a0: type
 			# a1: value
 			# a7: address
@@ -96,7 +97,8 @@ extern "C" fn notification_handler_entry() {
 			addi	sp, sp, (13 + 4) * GP_REGBYTES
 			li		a7, NOTIFY_RETURN
 			ecall
-		");
+		"
+		);
 	}
 }
 

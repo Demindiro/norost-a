@@ -78,7 +78,4 @@ impl<T> ops::Deref for OnceCell<T> {
 	}
 }
 
-unsafe impl<T> Sync for OnceCell<T>
-where
-	T: Sync
-{}
+unsafe impl<T> Sync for OnceCell<T> where T: Sync {}

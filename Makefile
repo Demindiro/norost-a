@@ -21,3 +21,6 @@ clean:
 
 init:
 	$(MAKE) -C services/init/multi_process
+
+format:
+	cargo fmt --all

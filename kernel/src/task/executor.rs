@@ -16,7 +16,8 @@ use core::sync::atomic::Ordering;
 ///
 /// While writing to data from multiple harts without synchronization may technically be
 /// UB, it is unlikely to be an issue since we normally don't read from the written data.
-static IDLE_TASK_STUB: WriteOnly<UnsafeCell<MaybeUninit<TaskData>>> = WriteOnly(UnsafeCell::new(MaybeUninit::uninit()));
+static IDLE_TASK_STUB: WriteOnly<UnsafeCell<MaybeUninit<TaskData>>> =
+	WriteOnly(UnsafeCell::new(MaybeUninit::uninit()));
 
 struct WriteOnly<T>(T);
 
@@ -42,9 +43,11 @@ static mut NEXT_ID: usize = 1;
 impl Executor<'_> {
 	/// Suspend the current task (if any) and begin executing another task.
 	pub fn next() -> ! {
-
 		// Unclaim the current task
-		Self::current_task().inner().executor_id.store(u16::MAX, Ordering::Relaxed);
+		Self::current_task()
+			.inner()
+			.executor_id
+			.store(u16::MAX, Ordering::Relaxed);
 
 		// TODO lol, lmao
 
@@ -102,8 +105,15 @@ impl Executor<'_> {
 		const STACK_ADDRESS: Page = crate::memory::reserved::HART_STACKS.start;
 
 		// FIXME HACK
-		unsafe { (&mut *(&mut *IDLE_TASK_STUB.0.get()).as_mut_ptr()).stack = crate::memory::reserved::HART_STACKS.start.skip(1).unwrap() };
-		unsafe { (&mut *(&mut *IDLE_TASK_STUB.0.get()).as_mut_ptr()).executor_id.store(id, Ordering::Relaxed) };
+		unsafe {
+			(&mut *(&mut *IDLE_TASK_STUB.0.get()).as_mut_ptr()).stack =
+				crate::memory::reserved::HART_STACKS.start.skip(1).unwrap()
+		};
+		unsafe {
+			(&mut *(&mut *IDLE_TASK_STUB.0.get()).as_mut_ptr())
+				.executor_id
+				.store(id, Ordering::Relaxed)
+		};
 
 		// TODO should be moved to arch::
 		unsafe { asm!("csrw sscratch, {0}", in(reg) IDLE_TASK_STUB.0.get()) };
@@ -120,7 +130,10 @@ impl Executor<'_> {
 
 	/// Return the ID of this executor, which corresponds to the hart ID.
 	pub fn id() -> u16 {
-		Self::current_task().inner().executor_id.load(Ordering::Relaxed)
+		Self::current_task()
+			.inner()
+			.executor_id
+			.load(Ordering::Relaxed)
 	}
 
 	/// Return the current task claimed by this executor.
@@ -139,8 +152,7 @@ impl Executor<'_> {
 extern "C" fn get_task(address: Address) -> Option<Task> {
 	// FIXME *puke*
 	unsafe { NEXT_ID = address.into() };
-	group::Group::get(address.group().into())
-		.and_then(|g| g.task(address.task().into()).ok())
+	group::Group::get(address.group().into()).and_then(|g| g.task(address.task().into()).ok())
 }
 
 /// Helper function primarily intended to be called from assembly.

@@ -42,8 +42,7 @@ struct Claimed(u16);
 #[repr(transparent)]
 struct Flags(u16);
 
-impl Flags {
-}
+impl Flags {}
 
 /// An IRQ source / identifier
 // TODO move this to arch::
@@ -147,12 +146,7 @@ impl Task {
 		rwx: vms::RWX,
 	) -> Result<(), vms::AddError> {
 		//self.inner().shared_state.virtual_memory
-		arch::VMS::allocate(
-			address,
-			count,
-			rwx,
-			vms::Accessibility::UserLocal,
-		)
+		arch::VMS::allocate(address, count, rwx, vms::Accessibility::UserLocal)
 	}
 
 	/// Deallocate memory for the current task

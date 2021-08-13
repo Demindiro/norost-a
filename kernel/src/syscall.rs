@@ -33,22 +33,22 @@ pub const TABLE_LEN: usize = 16;
 /// Table with all syscalls.
 #[export_name = "syscall_table"]
 pub static TABLE: [Syscall; TABLE_LEN] = [
-	sys::io_wait,                // 0
-	sys::io_set_queues,          // 1
-	sys::io_set_notify_handler,  // 2
-	sys::mem_alloc,              // 3
-	sys::mem_dealloc,            // 4
-	sys::mem_get_flags,          // 5
-	sys::mem_set_flags,          // 6
-	sys::mem_physical_addresses, // 7
-	sys::sys_set_interrupt_controller,   // 8
-	sys::io_notify_return,       // 9
-	sys::sys_reserve_interrupt,  // 10
-	sys::task_spawn,             // 11
-	sys::dev_dma_alloc,          // 12
-	sys::sys_platform_info,      // 13
-	sys::sys_direct_alloc,       // 14
-	sys::sys_log,                // 15
+	sys::io_wait,                      // 0
+	sys::io_set_queues,                // 1
+	sys::io_set_notify_handler,        // 2
+	sys::mem_alloc,                    // 3
+	sys::mem_dealloc,                  // 4
+	sys::mem_get_flags,                // 5
+	sys::mem_set_flags,                // 6
+	sys::mem_physical_addresses,       // 7
+	sys::sys_set_interrupt_controller, // 8
+	sys::io_notify_return,             // 9
+	sys::sys_reserve_interrupt,        // 10
+	sys::task_spawn,                   // 11
+	sys::dev_dma_alloc,                // 12
+	sys::sys_platform_info,            // 13
+	sys::sys_direct_alloc,             // 14
+	sys::sys_log,                      // 15
 ];
 
 /// Enum representing whether a syscall was successfull or failed.

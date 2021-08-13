@@ -167,4 +167,3 @@ impl TryFrom<*mut PageData> for Page {
 
 /// Working around Rust retardedness that will probably never be fixed
 unsafe impl Sync for Page {}
-

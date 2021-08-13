@@ -8,8 +8,8 @@
 //! [spec]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMAFDQC/riscv-spec-20191213.pdf
 //! [priv]: https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf
 
-pub mod rv64;
 pub(super) mod plic;
+pub mod rv64;
 pub mod sbi;
 pub mod vms;
 

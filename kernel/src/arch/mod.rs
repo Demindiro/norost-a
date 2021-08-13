@@ -1,7 +1,7 @@
+pub mod interrupts;
 pub mod map;
 pub mod page;
 pub mod vms;
-pub mod interrupts;
 
 pub use map::{Map, MapRange};
 pub use page::*;
@@ -114,7 +114,7 @@ pub fn set_supervisor_userpage_access(enable: bool) {
 pub fn enable_interrupts(enable: bool) {
 	// Timer, external & software interrupts.
 	let imm = (1 << 9) | (1 << 5) | (1 << 1); // s[ets]ie
-	// Ditto
+										  // Ditto
 	if enable {
 		unsafe { asm!("csrs sie, {0}", in(reg) imm) };
 	} else {
