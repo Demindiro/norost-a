@@ -5,18 +5,21 @@
 HAS_ISSUES=0
 
 for file in $(git diff --name-only --staged); do
-    FMT_RESULT="$(rustfmt --check $file 2>/dev/null || true)"
-    if [ "$FMT_RESULT" != "" ]; then
-        echo "$file"
-        HAS_ISSUES=1
-    fi
+	# This sucks but rustfmt doesn't allow --check with stdin because ???? idfk
+	if [[ "$file" =~ '.rs'$ ]]; then
+		FMT_RESULT=$(diff <(git show ":$file") <(git show ":$file" | rustfmt))
+		if [ "$FMT_RESULT" != "" ]; then
+			echo "$file"
+			HAS_ISSUES=1
+		fi
+	fi
 done
 
 if [ $HAS_ISSUES -eq 0 ]; then
     exit 0
 fi
 
-echo "Your code has formatting issues in files listed above."
-echo "Run \`make format\` before committing."
+echo "Your code has formatting issues in the files listed above."
+echo "Run \`make format\` and stage the changes."
 exit 1
 
