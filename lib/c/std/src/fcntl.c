@@ -40,7 +40,7 @@ ssize_t read(int fd, void *buf, size_t count)
 
 	cre->opcode = KERNEL_IPC_OP_READ;
 
-	kernel_io_wait(0, 0);
+	kernel_io_wait(-1);
 
 	/*
 	   struct kernel_client_completion_entry *cce =

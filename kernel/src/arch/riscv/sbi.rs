@@ -21,7 +21,9 @@ pub fn console_putchar(c: u8) {
 pub fn set_timer(value: u64) {
 	// SAFETY: calling  set_timer should be safe.
 	unsafe {
-		let value = value as usize;
-		asm!("ecall", in("a7") 0x0, in("a6") 0, in("a0") value, in("a1") value >> 32);
+		// TODO idk why the hell the SBI is unable to handle full 64 bit integers.
+		// 31 bits allows timeouts of about 30 minutes, so it should be fine for now.
+		let value = value & 0x7fff_ffff;
+		asm!("ecall", in("a7") 0x0, in("a6") 0, in("a0") value, in("a1") value);
 	}
 }

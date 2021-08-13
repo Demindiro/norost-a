@@ -185,6 +185,9 @@ impl IPC {
 
 			rx_index.fetch_add(1, Ordering::Release);
 
+			// Clear the tasks wait time so it will be rescheduled
+			task.inner().wait_time = 0;
+
 			// TODO ditto
 			slf_task.inner().shared_state.virtual_memory.activate();
 			let vm = &mut task.inner().shared_state.virtual_memory;

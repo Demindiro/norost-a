@@ -198,7 +198,7 @@ size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
 		struct kernel_ipc_packet *pkt;
 		uint16_t slot = dux_reserve_transmit_entry(&pkt);
 		while (pkt == NULL) {
-			kernel_io_wait(0, 0);
+			kernel_io_wait(-1);
 			slot = dux_reserve_transmit_entry(&pkt);
 		}
 
@@ -235,7 +235,7 @@ size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
 			} else {
 				dux_defer_received_entry(slot);
 			}
-			kernel_io_wait(0, 0);
+			kernel_io_wait(-1);
 		}
 
 		// Check if the "stream" ended early
@@ -268,7 +268,7 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
 		struct kernel_ipc_packet *pkt;
 		uint16_t slot = dux_reserve_transmit_entry(&pkt);
 		while (pkt == NULL) {
-			kernel_io_wait(0, 0);
+			kernel_io_wait(-1);
 			slot = dux_reserve_transmit_entry(&pkt);
 		}
 
@@ -304,7 +304,7 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
 			} else {
 				dux_defer_received_entry(slot);
 			}
-			kernel_io_wait(0, 0);
+			kernel_io_wait(-1);
 		}
 
 		// Check if the "stream" ended early
@@ -401,7 +401,7 @@ int vfprintf(FILE * stream, const char *format, va_list args)
 			} else {
 				dux_defer_received_entry(slot);
 			}
-			kernel_io_wait(0, 0);
+			kernel_io_wait(-1);
 		}
 	}
 

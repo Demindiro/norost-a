@@ -83,6 +83,12 @@ pub struct TaskData {
 	///
 	/// This value is u16::MAX if no executor has claimed it.
 	executor_id: AtomicU16,
+	/// An accumulator that determines the priority of a task.
+	priority: u16,
+	/// A factor that scales the value of the priority.
+	priority_factor: u16,
+	/// The time a task will wait for an event until it is rescheduled.
+	wait_time: u64,
 	/// IPC state to communicate with other tasks.
 	ipc: Option<ipc::IPC>,
 }
@@ -117,6 +123,9 @@ impl Task {
 				current_irq: None,
 				flags: Flags(0),
 				executor_id: AtomicU16::new(u16::MAX),
+				priority: 0,
+				priority_factor: 0,
+				wait_time: 0,
 				ipc: None,
 			});
 		}

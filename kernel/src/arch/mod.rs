@@ -135,13 +135,9 @@ pub fn enable_kernel_interrupts(enable: bool) {
 
 /// Schedule the timer for a certain amount of microseconds in the future
 #[inline]
-pub fn schedule_timer(delta: u64) {
-	// TODO apparently we need to figure out the time scale in a platform dependant way??
-	unsafe {
-		let now: u64;
-		asm!("csrr {0}, time", out(reg) now);
-		riscv::sbi::set_timer(now + delta);
-	}
+pub fn schedule_timer(delay: u64) {
+	// Clamp the duration in case delay is very high.
+	riscv::sbi::set_timer(current_time().checked_add(delay).unwrap_or(u64::MAX));
 }
 
 /// Disable the timer
@@ -150,4 +146,15 @@ pub fn disable_timer() {
 	//riscv::sbi::set_timer(u64::MAX);
 	// IDK what's wrong with SBI
 	riscv::sbi::set_timer(u32::MAX.into());
+}
+
+/// Return the current time in microseconds.
+#[inline]
+pub fn current_time() -> u64 {
+	// TODO apparently we need to figure out the time scale in a platform dependant way??
+	unsafe {
+		let now: u64;
+		asm!("csrr {0}, time", out(reg) now);
+		now
+	}
 }

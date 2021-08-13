@@ -53,22 +53,33 @@ impl Executor<'_> {
 
 		let group = group::Group::get(0).expect("No root group");
 
-		loop {
-			let id = unsafe { NEXT_ID };
-			let id = if id > 256 {
-				unsafe { NEXT_ID = 0 };
-				0
-			} else {
-				unsafe { NEXT_ID = id + 1 };
-				id + 1
-			};
+		let prev_id = unsafe { NEXT_ID };
+		let mut id = (prev_id + 1) & 0xf;
 
+		let mut min_time = u64::MAX;
+		let mut curr_time = arch::current_time();
+		let mut stop_next = false;
+
+		loop {
 			if let Ok(task) = group.task(id) {
-				arch::schedule_timer(1_000_000 / 10);
-				// If the task is already claimed, just try again.
-				let _ = task.execute(Self::id());
+				let wait_time = task.inner().wait_time;
+				if wait_time < curr_time {
+					unsafe { NEXT_ID = id };
+					arch::schedule_timer(1_000_000 / 10);
+					// If the task is already claimed, just try again.
+					let _ = task.execute(Self::id());
+				}
+				min_time = min_time.min(wait_time);
 			};
+			id = id.wrapping_add(1) & 0xf;
+			if id == prev_id {
+				stop_next = true;
+			} else if stop_next {
+				break;
+			}
 		}
+
+		Self::idle(min_time)
 	}
 
 	/// Returns the address of the current task
@@ -77,15 +88,15 @@ impl Executor<'_> {
 		Address::todo(unsafe { NEXT_ID })
 	}
 
-	/// Begin idling, i.e. do nothing
+	/// Begin idling, i.e. do nothing until the given time.
 	#[allow(dead_code)]
-	pub fn idle() -> ! {
+	pub fn idle(time: u64) -> ! {
 		unsafe {
 			// TODO move this to arch::
 			asm!("csrw sscratch, {0}", in(reg) IDLE_TASK_STUB.0.get());
 		}
+		arch::schedule_timer(time);
 		arch::enable_kernel_interrupts(true);
-		arch::schedule_timer(1_000_000 / 10);
 		loop {
 			crate::powerstate::halt();
 		}
@@ -144,6 +155,14 @@ impl Executor<'_> {
 		// SAFETY: sscratch should never ever EVER be 0! Hence it _should_ be safe to
 		// make it NonNull
 		unsafe { Task(NonNull::new_unchecked(task)) }
+	}
+}
+
+impl super::Task {
+	/// Delay the task for the given duration
+	pub fn wait_duration(&self, delay: u64) {
+		// Clamp the duration in case delay is very high.
+		self.inner().wait_time = arch::current_time().checked_add(delay).unwrap_or(u64::MAX);
 	}
 }
 

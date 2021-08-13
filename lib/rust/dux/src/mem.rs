@@ -323,7 +323,7 @@ pub(crate) mod ipc {
 			match pop_free_slot() {
 				Ok(slot) => return TransmitLock { slot },
 				Err(NoFreeSlots) => unsafe {
-					let _ = kernel::io_wait(0, 0);
+					let _ = kernel::io_wait(u64::MAX);
 				},
 			}
 		}
@@ -394,7 +394,7 @@ pub(crate) mod ipc {
 					slot: entries[usize::from(i & mask)].get(),
 				};
 			}
-			let _ = unsafe { kernel::io_wait(0, 0) };
+			let _ = unsafe { kernel::io_wait(u64::MAX) };
 		}
 	}
 

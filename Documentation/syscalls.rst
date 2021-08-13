@@ -73,24 +73,13 @@ io_wait
 +--------+-----------------------------+-----------------------+
 | **ID** |                          xx |                       |
 +--------+-----------------------------+-----------------------+
-| **a0** | ``u8``                      | ``flags``             |
-+--------+-----------------------------+-----------------------+
-| **a1** | ``u64``                     | ``time``              |
+| **a0** | ``u64``                     | ``time``              |
 +--------+-----------------------------+-----------------------+
 | **r0** | ``io_ring_wait_status``     | ``status``            |
 +--------+-----------------------------+-----------------------+
 
-Halts the calling task until an I/O event occurs.
-
-Valid ``flags`` are:
-
-* ``IO_WAIT_ALL`` (``0x1``): Wait for all events to complete.
-
-* ``IO_WAIT_REQUESTER`` (``0x2``): Wait for requester events.
-
-* ``IO_WAIT_RESPONDER`` (``0x4``): Wait for responder events.
-
-* ``IO_WAIT_MAX_TIME`` (``0x8``): Wait only for a certain amount of time.
+Halts the calling task until either an I/O event occurs or the timeout is
+exceeded.
 
 
 io_set_client_buffers

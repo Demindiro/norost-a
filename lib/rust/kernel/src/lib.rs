@@ -178,7 +178,7 @@ mod riscv;
 #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
 pub use riscv::*;
 
-syscall!(io_wait, 0, flags: u8, time: u64);
+syscall!(saveall io_wait, 0, time: u64);
 syscall!(
 	io_set_queues,
 	1,

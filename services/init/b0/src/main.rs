@@ -261,183 +261,177 @@ fn main() {
 	assert_eq!(ret.status, 0);
 
 	loop {
-		// Read received data & write it to UART
-		if let Some(rxq) = dux::ipc::try_receive() {
-			let op = rxq.opcode.unwrap();
-			match kernel::ipc::Op::try_from(op) {
-				Ok(kernel::ipc::Op::Read) => {
-					// Figure out object to read.
-					let data = unsafe {
-						core::slice::from_raw_parts_mut(
-							rxq.data.unwrap().as_ptr().cast(),
-							rxq.length,
-						)
-					};
-					let path = rxq.name.map(|name| unsafe {
-						core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
-					});
+		// Wait for packets.
+		let rxq = dux::ipc::receive();
+		let op = rxq.opcode.unwrap();
+		match kernel::ipc::Op::try_from(op) {
+			Ok(kernel::ipc::Op::Read) => {
+				// Figure out object to read.
+				let data = unsafe {
+					core::slice::from_raw_parts_mut(rxq.data.unwrap().as_ptr().cast(), rxq.length)
+				};
+				let path = rxq.name.map(|name| unsafe {
+					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
+				});
 
-					let length = if let Some(path) = path {
-						// Read data from file
-						let mut f = fs
-							.root_dir()
-							.open_file(core::str::from_utf8(path).unwrap())
-							.unwrap();
-						use fatfs::Read;
-						f.read(data).unwrap()
-					} else {
-						// Read data from UART
+				let length = if let Some(path) = path {
+					// Read data from file
+					let mut f = fs
+						.root_dir()
+						.open_file(core::str::from_utf8(path).unwrap())
+						.unwrap();
+					use fatfs::Read;
+					f.read(data).unwrap()
+				} else {
+					// Read data from UART
+					let read = loop {
 						let read = unsafe { CONSOLE_INDEX };
-						unsafe {
-							for i in 0..read {
-								data[i] = CONSOLE_BUFFER[i];
-							}
-							CONSOLE_INDEX = 0;
+						if read > 0 {
+							break read;
 						}
-						data[..read]
-							.iter_mut()
-							.filter(|b| **b == b'\r')
-							.for_each(|b| *b = b'\n');
-						read
+						// TODO it should just be put in a queue..
+						unsafe { kernel::io_wait(u64::MAX) };
 					};
+					unsafe {
+						for i in 0..read {
+							data[i] = CONSOLE_BUFFER[i];
+						}
+						CONSOLE_INDEX = 0;
+					}
+					data[..read]
+						.iter_mut()
+						.filter(|b| **b == b'\r')
+						.for_each(|b| *b = b'\n');
+					read
+				};
 
-					// Send completion event
-					*dux::ipc::transmit() = kernel::ipc::Packet {
-						uuid: kernel::ipc::UUID::from(0x09090909090555577777),
-						opcode: Some(kernel::ipc::Op::Read.into()),
-						name: None,
-						name_len: 0,
-						flags: 0,
-						id: 0,
-						address: id,
-						data: None,
-						length,
-						offset: 0,
-					};
+				// Send completion event
+				*dux::ipc::transmit() = kernel::ipc::Packet {
+					uuid: kernel::ipc::UUID::from(0x09090909090555577777),
+					opcode: Some(kernel::ipc::Op::Read.into()),
+					name: None,
+					name_len: 0,
+					flags: 0,
+					id: 0,
+					address: id,
+					data: None,
+					length,
+					offset: 0,
+				};
 
-					// Free ranges
-					let len = dux::Page::min_pages_for_range(rxq.length);
-					let ret = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, len) };
+				// Free ranges
+				let len = dux::Page::min_pages_for_range(rxq.length);
+				let ret = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, len) };
+				assert_eq!(ret.status, 0);
+				dux::ipc::add_free_range(
+					dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap())
+						.unwrap(),
+					len,
+				)
+				.unwrap();
+				if let Some(name) = rxq.name {
+					let len = dux::Page::min_pages_for_range(rxq.name_len.into());
+					let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, len) };
 					assert_eq!(ret.status, 0);
 					dux::ipc::add_free_range(
-						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap())
+						dux::Page::new(core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap())
 							.unwrap(),
 						len,
 					)
 					.unwrap();
-					if let Some(name) = rxq.name {
-						let len = dux::Page::min_pages_for_range(rxq.name_len.into());
-						let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, len) };
-						assert_eq!(ret.status, 0);
-						dux::ipc::add_free_range(
-							dux::Page::new(
-								core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap(),
-							)
-							.unwrap(),
-							len,
-						)
-						.unwrap();
-					}
 				}
-				Ok(kernel::ipc::Op::Write) => {
-					// Figure out object to write to.
-					let data = unsafe {
-						core::slice::from_raw_parts(rxq.data.unwrap().as_ptr().cast(), rxq.length)
-					};
-					let path = rxq.name.map(|name| unsafe {
-						core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
-					});
-
-					// Write data
-					let len = if path.is_none() {
-						unsafe { CONSOLE.as_mut().unwrap().write(data) };
-						data.len()
-					} else {
-						let name = core::str::from_utf8(path.unwrap()).unwrap();
-						let mut f = match fs.root_dir().open_file(name) {
-							Ok(f) => f,
-							Err(_) => fs.root_dir().create_file(name).unwrap(),
-						};
-						use fatfs::{Seek, SeekFrom, Write};
-						f.seek(SeekFrom::Start(rxq.offset)).unwrap();
-						f.write(data).unwrap()
-					};
-
-					// Free ranges
-					let len = dux::Page::min_pages_for_range(rxq.length);
-					let ret = unsafe { kernel::mem_dealloc(rxq.data.unwrap().as_ptr(), len) };
-					assert_eq!(ret.status, 0);
-					dux::ipc::add_free_range(
-						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap())
-							.unwrap(),
-						len,
-					)
-					.unwrap();
-					if let Some(name) = rxq.name {
-						let len = dux::Page::min_pages_for_range(rxq.name_len.into());
-						let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, len) };
-						assert_eq!(ret.status, 0);
-						dux::ipc::add_free_range(
-							dux::Page::new(
-								core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap(),
-							)
-							.unwrap(),
-							len,
-						)
-						.unwrap();
-					}
-
-					// Confirm reception.
-					*dux::ipc::transmit() = kernel::ipc::Packet {
-						uuid: kernel::ipc::UUID::from(0x10101010101010),
-						opcode: Some(kernel::ipc::Op::Write.into()),
-						name: None,
-						name_len: 0,
-						flags: 0,
-						id: 0,
-						address: id,
-						data: None,
-						length: len,
-						offset: 0,
-					};
-					unsafe { kernel::io_wait(0, 0) };
-				}
-				Ok(kernel::ipc::Op::List) => {
-					let mut list_builder =
-						dux::ipc::list::Builder::new(fs.root_dir().iter().count(), 50).unwrap();
-					for f in fs.root_dir().iter() {
-						let f = f.unwrap();
-						let uuid = kernel::ipc::UUID::from(0);
-						let name = f.short_file_name_as_bytes();
-						let size = f.len();
-						list_builder.add(uuid, name, size).unwrap();
-					}
-
-					let data = Some(core::ptr::NonNull::from(list_builder.data()).cast());
-
-					*dux::ipc::transmit() = kernel::ipc::Packet {
-						uuid: kernel::ipc::UUID::from(0x22222222222222),
-						opcode: Some(kernel::ipc::Op::List.into()),
-						name: None,
-						name_len: 0,
-						flags: 0,
-						id: rxq.id,
-						address: id,
-						data,
-						length: list_builder.bytes_len(),
-						offset: 0,
-					};
-
-					// FIXME goddamnit
-					let _ = unsafe { kernel::io_wait(0, 0) };
-					let _ = unsafe { kernel::io_wait(0, 0) };
-				}
-				Ok(op) => sys_log!("TODO {:?}", op),
-				Err(kernel::ipc::UnknownOp) => sys_log!("Unknown op {}", op),
 			}
-		}
+			Ok(kernel::ipc::Op::Write) => {
+				// Figure out object to write to.
+				let data = unsafe {
+					core::slice::from_raw_parts(rxq.data.unwrap().as_ptr().cast(), rxq.length)
+				};
+				let path = rxq.name.map(|name| unsafe {
+					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
+				});
 
-		// Wait for more data & make sure our packet is sent.
-		unsafe { kernel::io_wait(0, 0) };
+				// Write data
+				let len = if path.is_none() {
+					unsafe { CONSOLE.as_mut().unwrap().write(data) };
+					data.len()
+				} else {
+					let name = core::str::from_utf8(path.unwrap()).unwrap();
+					let mut f = match fs.root_dir().open_file(name) {
+						Ok(f) => f,
+						Err(_) => fs.root_dir().create_file(name).unwrap(),
+					};
+					use fatfs::{Seek, SeekFrom, Write};
+					f.seek(SeekFrom::Start(rxq.offset)).unwrap();
+					f.write(data).unwrap()
+				};
+
+				// Free ranges
+				let len = dux::Page::min_pages_for_range(rxq.length);
+				let ret = unsafe { kernel::mem_dealloc(rxq.data.unwrap().as_ptr(), len) };
+				assert_eq!(ret.status, 0);
+				dux::ipc::add_free_range(
+					dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap())
+						.unwrap(),
+					len,
+				)
+				.unwrap();
+				if let Some(name) = rxq.name {
+					let len = dux::Page::min_pages_for_range(rxq.name_len.into());
+					let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, len) };
+					assert_eq!(ret.status, 0);
+					dux::ipc::add_free_range(
+						dux::Page::new(core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap())
+							.unwrap(),
+						len,
+					)
+					.unwrap();
+				}
+
+				// Confirm reception.
+				*dux::ipc::transmit() = kernel::ipc::Packet {
+					uuid: kernel::ipc::UUID::from(0x10101010101010),
+					opcode: Some(kernel::ipc::Op::Write.into()),
+					name: None,
+					name_len: 0,
+					flags: 0,
+					id: 0,
+					address: id,
+					data: None,
+					length: len,
+					offset: 0,
+				};
+			}
+			Ok(kernel::ipc::Op::List) => {
+				let mut list_builder =
+					dux::ipc::list::Builder::new(fs.root_dir().iter().count(), 50).unwrap();
+				for f in fs.root_dir().iter() {
+					let f = f.unwrap();
+					let uuid = kernel::ipc::UUID::from(0);
+					let name = f.short_file_name_as_bytes();
+					let size = f.len();
+					list_builder.add(uuid, name, size).unwrap();
+				}
+
+				let data = Some(core::ptr::NonNull::from(list_builder.data()).cast());
+
+				*dux::ipc::transmit() = kernel::ipc::Packet {
+					uuid: kernel::ipc::UUID::from(0x22222222222222),
+					opcode: Some(kernel::ipc::Op::List.into()),
+					name: None,
+					name_len: 0,
+					flags: 0,
+					id: rxq.id,
+					address: id,
+					data,
+					length: list_builder.bytes_len(),
+					offset: 0,
+				};
+				// FIXME Ultra shitty workaround to make sure we don't deallocate the pages
+				// before they're transmitted.
+				let _ = unsafe { kernel::io_wait(u64::MAX) };
+			}
+			Ok(op) => sys_log!("TODO {:?}", op),
+			Err(kernel::ipc::UnknownOp) => sys_log!("Unknown op {}", op),
+		}
 	}
 }

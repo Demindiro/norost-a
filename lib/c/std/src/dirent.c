@@ -51,7 +51,7 @@ DIR *opendir(const char *path)
 	struct kernel_ipc_packet *pkt = NULL;
 	uint16_t slot = dux_reserve_transmit_entry(&pkt);
 	while (slot == -1) {
-		kernel_io_wait(0, 0);
+		kernel_io_wait(-1);
 		slot = dux_reserve_transmit_entry(&pkt);
 	}
 
@@ -85,7 +85,7 @@ DIR *opendir(const char *path)
 		} else {
 			dux_defer_received_entry(slot);
 		}
-		kernel_io_wait(0, 0);
+		kernel_io_wait(-1);
 	}
 
 	static DIR dir = {

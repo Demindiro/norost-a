@@ -94,6 +94,14 @@ struct kernel_free_range {
 	kernel_return_t r = { a0, a1 }; \
 	return r;
 
+#define SYSCALL_SAVEALL(...) \
+	__asm__ __volatile__ ( \
+		"ecall\n\t" \
+		: \
+		: __VA_ARGS__ \
+		: "memory" \
+	);
+
 #define SYSCALL_6(__name, __code, __a0, __a1, __a2, __a3, __a4, __a5) \
 	static inline kernel_return_t __name(__a0 a, __a1 b, __a2 c, __a3 d, __a4 e, __a5 f) { \
 		register size_t a7 __asm__("a7") = __code; \
@@ -153,12 +161,20 @@ struct kernel_free_range {
 		register size_t a1 __asm__("a1"); \
 		SYSCALL("r"(a7)) \
 	}
+#define SYSCALL_1_SAVEALL(__name, __code, __a0) \
+	static inline void __name(__a0 a) { \
+		register size_t a7 __asm__("a7") = __code; \
+		register size_t a0 __asm__("a0") = (size_t)a; \
+		SYSCALL_SAVEALL("r"(a7), "r"(a0)) \
+	}
 
-SYSCALL_2(kernel_io_wait, 0, uint16_t /* flags */ , uint64_t /* time */ )
-    SYSCALL_6(kernel_io_set_queues, 1, void * /* requests */ ,
+SYSCALL_1_SAVEALL(kernel_io_wait, 0, uint64_t /* time */ )
+
+SYSCALL_6(kernel_io_set_queues, 1, void * /* requests */ ,
 	      size_t /* requests_size */ ,
 	      void * /* completions */ , size_t /* completion_sizes */ ,
 	      void * /* free_pages */ , size_t /* free_pages_size */ )
+
 SYSCALL_3(kernel_mem_alloc, 3, void * /* address */ , size_t /* count */ ,
 	  uint8_t /* flags */ ) SYSCALL_2(kernel_mem_dealloc, 4,
 					  void * /* address */ ,

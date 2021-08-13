@@ -7,6 +7,7 @@ use crate::arch::{self, Map, MapRange, Page, PageData};
 use crate::memory::ppn::*;
 use crate::task;
 use core::convert::TryFrom;
+use core::mem;
 use core::ptr::NonNull;
 
 /// The type of a syscall, specifically the amount and type of arguments it takes.
@@ -181,18 +182,16 @@ mod sys {
 
 	sys! {
 		/// Waits for one or all I/O events to complete
-		[task] io_wait(flags, time) {
-			logcall!("io_wait 0b{:b}, {}", flags, time);
+		[task] io_wait(time, timeh) {
+			let time = match mem::size_of::<usize>() {
+				4 => time as u64 | ((timeh as u64) << 32),
+				8 => time as u64,
+				_ => unreachable!("unsupported usize width"),
+			};
+			logcall!("io_wait {}", time);
 
 			task.process_io(task::Executor::current_address());
-
-			// FIXME actually wait for I/O
-			// FIXME lol, lmao
-
-			// FIXME this is a quick test to see if we can wake up from idling.
-			if usize::from(task::Executor::current_address()) == 0 {
-				task::Executor::idle();
-			}
+			task.wait_duration(time);
 
 			crate::task::Executor::next()
 		}

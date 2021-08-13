@@ -80,7 +80,7 @@ ssize_t writev(int fd, const struct iovec *iov, int iov_count)
 			} else {
 				dux_defer_received_entry(slot);
 			}
-			kernel_io_wait(0, 0);
+			kernel_io_wait(-1);
 		}
 	}
 }
