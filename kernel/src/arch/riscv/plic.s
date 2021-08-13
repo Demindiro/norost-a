@@ -40,7 +40,6 @@ external_interrupt_handler:
 	lw		s0, 0(a0)
 
 	# Figure out which task to send a notification to.
-	# TODO Pretend for now some context-switchy stuff is happening here.
 	la		a0, plic_reservations
 	li		a2, GP_REGBYTES
 	mul		a2, a2, s0
@@ -91,12 +90,14 @@ external_interrupt_handler:
 	li		a2, 1 << 18
 	csrs	sstatus, a2
 
-	# Push original a[017] to stack
+	# Push original a[017] and pc to stack
 	gp_load		x30, 10 * GP_REGBYTES, x31
-	gp_store	x30, -3 * GP_REGBYTES, sp
+	gp_store	x30, -4 * GP_REGBYTES, sp
 	gp_load		x30, 11 * GP_REGBYTES, x31
-	gp_store	x30, -2 * GP_REGBYTES, sp
+	gp_store	x30, -3 * GP_REGBYTES, sp
 	gp_load		x30, 17 * GP_REGBYTES, x31
+	gp_store	x30, -2 * GP_REGBYTES, sp
+	gp_load		x30,  0 * GP_REGBYTES, x31
 	gp_store	x30, -1 * GP_REGBYTES, sp
 
 	# Disable SUM and SPP to ensure we will enter usermode

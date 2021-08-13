@@ -47,19 +47,24 @@ syscall_io_notify_return:
 	# Setup sscratch
 	csrw	sscratch, x31
 
+	# Restore sp (x2)
+	load_gp_regs	2, 2, x31
+
 	# Enable SUM
 	li		a2, 1 << 18
 	csrs	sstatus, a2
 
-	# Pop a[017] from the stack
-	gp_load		a0, -3 * GP_REGBYTES, sp
-	gp_load		a1, -2 * GP_REGBYTES, sp
-	gp_load		a7, -1 * GP_REGBYTES, sp
+	# Pop a[017] and pc from the stack
+	gp_load		a0, -4 * GP_REGBYTES, sp
+	gp_load		a1, -3 * GP_REGBYTES, sp
+	gp_load		a7, -2 * GP_REGBYTES, sp
+	gp_load		x30, -1 * GP_REGBYTES, sp
+	csrw		sepc, x30
 
 	# Disable SUM
 	csrc	sstatus, a2
 
-	# Restore all registers except a[017]
+	# Restore all registers except a[017] and sp
 	load_gp_regs	1, 9, x31
 	load_gp_regs	12, 16, x31
 	load_gp_regs	18, 31, x31

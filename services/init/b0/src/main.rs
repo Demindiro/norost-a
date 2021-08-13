@@ -64,7 +64,7 @@ extern "C" fn notification_handler_entry() {
 			# The original a[0-2] are stored on the stack by the kernel.
 			.equ	GP_REGBYTES, 8
 			.equ	NOTIFY_RETURN, 9
-			addi	sp, sp, -(13 + 3) * GP_REGBYTES
+			addi	sp, sp, -(13 + 4) * GP_REGBYTES
 			sd		t0, 0 * GP_REGBYTES (sp)
 			sd		t1, 1 * GP_REGBYTES (sp)
 			sd		t2, 2 * GP_REGBYTES (sp)
@@ -93,7 +93,7 @@ extern "C" fn notification_handler_entry() {
 			ld		a6, 10 * GP_REGBYTES (sp)
 			ld		a2, 11 * GP_REGBYTES (sp)
 			ld		ra, 12 * GP_REGBYTES (sp)
-			addi	sp, sp, (13 + 3) * GP_REGBYTES
+			addi	sp, sp, (13 + 4) * GP_REGBYTES
 			li		a7, NOTIFY_RETURN
 			ecall
 		");
@@ -102,16 +102,18 @@ extern "C" fn notification_handler_entry() {
 
 #[export_name = "notification_handler"]
 extern "C" fn notification_handler(typ: usize, value: usize, address: usize) {
-	sys_log!("Got a notification!");
-	sys_log!("  address :  0x{:x}", address);
-	sys_log!("  type    :  0x{:x}", typ);
-	sys_log!("  value   :  0x{:x}", value);
 	let mut buf = [0; 16];
 	let r = unsafe { CONSOLE.as_mut().unwrap().read(&mut buf) };
-	sys_log!("Read '{}'", core::str::from_utf8(&buf[..r]).unwrap());
+	unsafe {
+		CONSOLE_BUFFER[CONSOLE_INDEX..CONSOLE_INDEX + r].copy_from_slice(&buf[..r]);
+		CONSOLE_INDEX += r;
+	}
 }
 
 static mut CONSOLE: Option<console::Console> = None;
+
+static mut CONSOLE_BUFFER: [u8; 4096] = [0; 4096];
+static mut CONSOLE_INDEX: usize = 0;
 
 #[export_name = "main"]
 fn main() {
@@ -164,11 +166,6 @@ fn main() {
 	sys_log!("Press any key for magic");
 
 	unsafe { CONSOLE = Some(console) };
-	sys_log!("Waiting for notification of stuff");
-	loop {
-		unsafe { kernel::io_wait(0, 0) };
-	}
-	let console = unsafe { CONSOLE.take().unwrap() };
 
 	sys_log!("Listing binary addresses:");
 
@@ -257,23 +254,6 @@ fn main() {
 
 	sys_log!("Spawned task with ID {}", id);
 
-	// Create pseudo list.
-	let mut list_builder = dux::ipc::list::Builder::new(fs.root_dir().iter().count(), 50).unwrap();
-	for f in fs.root_dir().iter() {
-		let f = f.unwrap();
-		let uuid = kernel::ipc::UUID::from(0);
-		let name = f.short_file_name_as_bytes();
-		let size = f.len();
-		list_builder.add(uuid, name, size).unwrap();
-	}
-	let list = dux::ipc::list::List::new(list_builder.data());
-	sys_log!("Listing {} entries", list.iter().count());
-	for (i, e) in list.iter().enumerate() {
-		sys_log!("{}: {:?}", i, e);
-	}
-	drop(list);
-	drop(list_builder);
-
 	// Allocate a single page for transmitting data.
 	let raw = dux::mem::reserve_range(None, 1)
 		.unwrap()
@@ -309,8 +289,15 @@ fn main() {
 						f.read(data).unwrap()
 					} else {
 						// Read data from UART
-						let read = console.read(data);
-						data.iter_mut()
+						let read = unsafe { CONSOLE_INDEX };
+						unsafe {
+							for i in 0..read {
+								data[i] = CONSOLE_BUFFER[i];
+							}
+							CONSOLE_INDEX = 0;
+						}
+						data[..read]
+							.iter_mut()
 							.filter(|b| **b == b'\r')
 							.for_each(|b| *b = b'\n');
 						read
@@ -363,7 +350,7 @@ fn main() {
 
 					// Write data
 					let len = if path.is_none() {
-						console.write(data);
+						unsafe { CONSOLE.as_mut().unwrap().write(data) };
 						data.len()
 					} else {
 						let name = core::str::from_utf8(path.unwrap()).unwrap();
