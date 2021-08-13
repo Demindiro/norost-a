@@ -183,6 +183,9 @@ mod sys {
 		/// Waits for one or all I/O events to complete
 		[task] io_wait(flags, time) {
 			logcall!("io_wait 0b{:b}, {}", flags, time);
+
+			task.process_io(task::Executor::current_address());
+
 			// FIXME actually wait for I/O
 			// FIXME lol, lmao
 

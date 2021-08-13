@@ -60,7 +60,6 @@ impl Executor<'_> {
 
 			if let Ok(task) = group.task(id) {
 				arch::schedule_timer(1_000_000 / 10);
-				task.process_io(Address::todo(id));
 				task.execute()
 			};
 		}
