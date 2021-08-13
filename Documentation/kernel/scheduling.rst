@@ -60,3 +60,21 @@ Each group has a separate heap where each entry is a task ID. The heap is
 sorted based on the task's accumulator.
 
 Groups are sorted in the same way.
+
+
+Suspended tasks
+~~~~~~~~~~~~~~~
+
+Tasks may be waiting for an event to happen. There events are:
+
+* Receiving an IPC packet.
+
+* Receiving a notification.
+
+* Waiting for a certain amount of time.
+
+All of these are set using the ``io_wait`` call. The call takes a single
+argument specifying how long to wait in microseconds.
+
+When the task is rescheduled, the wait time is set to ``0``, i.e. the timeout
+is cleared.
