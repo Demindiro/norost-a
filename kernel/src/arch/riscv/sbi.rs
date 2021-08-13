@@ -21,6 +21,7 @@ pub fn console_putchar(c: u8) {
 pub fn set_timer(value: u64) {
 	// SAFETY: calling  set_timer should be safe.
 	unsafe {
-		asm!("ecall", in("a7") 0x0, in("a6") 0, in("a0") value);
+		let value = value as usize;
+		asm!("ecall", in("a7") 0x0, in("a6") 0, in("a0") value, in("a1") value >> 32);
 	}
 }

@@ -187,13 +187,9 @@ mod sys {
 			// FIXME lol, lmao
 
 			// FIXME this is a quick test to see if we can wake up from idling.
-			/*
-			if let Some(h) = task.set_notification_handler(None) {
-				task.set_notification_handler(Some(h));
-			} else {
+			if usize::from(task::Executor::current_address()) == 0 {
 				task::Executor::idle();
 			}
-			*/
 
 			crate::task::Executor::default().next()
 		}

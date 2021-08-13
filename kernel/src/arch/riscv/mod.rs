@@ -91,6 +91,7 @@ mod trap {
 	global_asm!(include_str!("trap.s"));
 	global_asm!(include_str!("plic.s"));
 	global_asm!(include_str!("syscall.s"));
+	global_asm!(include_str!("timer.s"));
 	global_asm!(include_str!("error.s"));
 
 	/// Initialize the trap CSR and the interrupt table.

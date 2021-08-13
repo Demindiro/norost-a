@@ -15,7 +15,7 @@ use core::mem::MaybeUninit;
 ///
 /// While writing to data from multiple harts without synchronization may technically be
 /// UB, it is unlikely to be an issue since we normally don't read from the written data.
-static IDLE_TASK_STUB: WriteOnly<UnsafeCell<MaybeUninit<Task>>> = WriteOnly(UnsafeCell::new(MaybeUninit::uninit()));
+static IDLE_TASK_STUB: WriteOnly<UnsafeCell<MaybeUninit<TaskData>>> = WriteOnly(UnsafeCell::new(MaybeUninit::uninit()));
 
 struct WriteOnly<T>(T);
 
@@ -41,6 +41,9 @@ static mut NEXT_ID: usize = 1;
 impl Executor<'_> {
 	/// Suspend the current task (if any) and begin executing another task.
 	pub fn next(&self) -> ! {
+		// FIXME HACK
+		unsafe { (&mut *(&mut *IDLE_TASK_STUB.0.get()).as_mut_ptr()).stack = crate::memory::reserved::HART_STACKS.start.skip(1).unwrap() };
+
 		// TODO lol, lmao
 
 		let group = group::Group::get(0).expect("No root group");
@@ -56,6 +59,7 @@ impl Executor<'_> {
 			};
 
 			if let Ok(task) = group.task(id) {
+				arch::schedule_timer(1_000_000 / 10);
 				task.process_io(Address::todo(id));
 				task.execute()
 			};
@@ -76,6 +80,7 @@ impl Executor<'_> {
 			asm!("csrw sscratch, {0}", in(reg) IDLE_TASK_STUB.0.get());
 		}
 		arch::enable_kernel_interrupts(true);
+		arch::schedule_timer(1_000_000 / 10);
 		loop {
 			crate::powerstate::halt();
 		}
@@ -122,4 +127,10 @@ extern "C" fn get_task(address: Address) -> Option<Task> {
 	unsafe { NEXT_ID = address.into() };
 	group::Group::get(address.group().into())
 		.and_then(|g| g.task(address.task().into()).ok())
+}
+
+/// Helper function primarily intended to be called from assembly.
+#[export_name = "executor_next_task"]
+extern "C" fn next_task() -> ! {
+	Executor::default().next()
 }

@@ -16,7 +16,7 @@ interrupt_table:
 	.balign 4	# 4
 	j	mini_panic   # User timer interrupt
 	.balign 4	# 5
-	j	mini_panic   # Supervisor timer interrupt
+	j	timer_interrupt_handler		# Supervisor timer interrupt
 	.balign 4	# 6
 	j	mini_panic   # Reserved
 	.balign 4	# 7

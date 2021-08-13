@@ -398,7 +398,7 @@ fn main() {
 						length: len,
 						offset: 0,
 					};
-					unsafe { kernel::io_wait(0, 0) };
+					//unsafe { kernel::io_wait(0, 0) };
 				}
 				Ok(kernel::ipc::Op::List) => {
 					let mut list_builder =
@@ -427,8 +427,8 @@ fn main() {
 					};
 
 					// FIXME goddamnit
-					let _ = unsafe { kernel::io_wait(0, 0) };
-					let _ = unsafe { kernel::io_wait(0, 0) };
+					//let _ = unsafe { kernel::io_wait(0, 0) };
+					//let _ = unsafe { kernel::io_wait(0, 0) };
 				}
 				Ok(op) => sys_log!("TODO {:?}", op),
 				Err(kernel::ipc::UnknownOp) => sys_log!("Unknown op {}", op),
@@ -436,6 +436,6 @@ fn main() {
 		}
 
 		// Wait for more data & make sure our packet is sent.
-		unsafe { kernel::io_wait(0, 0) };
+		//unsafe { kernel::io_wait(0, 0) };
 	}
 }
