@@ -20,10 +20,6 @@ fn main() {
 	let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("list.rs");
 	let mut out = File::create(out).unwrap();
 
-	for v in std::env::vars() {
-		dbg!(v.0, v.1);
-		dbg!();
-	}
 	let base_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
 	write!(

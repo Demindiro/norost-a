@@ -9,7 +9,6 @@ extern "C" fn dux_add_free_range(
 	address: Option<NonNull<kernel::Page>>,
 	count: usize,
 ) -> ffi::c_int {
-	kernel::dbg!(address, count);
 	match address.and_then(|addr| dux::Page::new(addr).ok()) {
 		Some(addr) => match add_free_range(addr, count) {
 			Ok(()) => 0,

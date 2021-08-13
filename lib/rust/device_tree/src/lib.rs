@@ -525,7 +525,6 @@ mod test {
 	#[test]
 	fn qemu_system_riscv64() {
 		let data = Align(*include_bytes!("../test/qemu_system_riscv64.dtb"));
-		dbg!(DeviceTree::parse(data.as_u32()).unwrap().root().unwrap());
-		panic!();
+		DeviceTree::parse(data.as_u32()).unwrap().root().unwrap();
 	}
 }
