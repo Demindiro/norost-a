@@ -2,6 +2,7 @@
 
 # a0: pointer to task struct
 syscall_io_notify_return:
+
 	# Move a0 to x31 as we will overwrite the former
 	mv		x31, a0
 

@@ -109,6 +109,7 @@ pub fn set_supervisor_userpage_access(enable: bool) {
 	}
 }
 
+/// Enable interrupts.
 #[inline]
 pub fn enable_interrupts(enable: bool) {
 	// Timer, external & software interrupts.
@@ -116,10 +117,18 @@ pub fn enable_interrupts(enable: bool) {
 	// Ditto
 	if enable {
 		unsafe { asm!("csrs sie, {0}", in(reg) imm) };
+	} else {
+		unsafe { asm!("csrc sie, {0}", in(reg) imm) };
+	}
+}
+
+/// Allow supervisor / kernel interrupts.
+#[inline]
+pub fn enable_kernel_interrupts(enable: bool) {
+	if enable {
 		// 1 << 1 = SIE
 		unsafe { asm!("csrsi sstatus, 1 << 1") };
 	} else {
-		unsafe { asm!("csrc sie, {0}", in(reg) imm) };
 		unsafe { asm!("csrci sstatus, 1 << 1") };
 	}
 }

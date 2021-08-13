@@ -132,10 +132,6 @@ fn main() {
 	device_tree::map_devices();
 	pci::init_blk_device();
 
-	sys_log!("Setting up PLIC & enabling Interrupt 0");
-	let source = core::num::NonZeroU16::new(0xa).unwrap(); // UART
-	let context = 0x1; // Hart 0 S-mode
-
 	let ret = unsafe { kernel::sys_reserve_interrupt(0xa) };
 	assert_eq!(ret.status, 0, "failed to reserve interrupt");
 
@@ -318,23 +314,25 @@ fn main() {
 					};
 
 					// Free ranges
-					let ret = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
+					let len = dux::Page::min_pages_for_range(rxq.length);
+					let ret = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, len) };
 					assert_eq!(ret.status, 0);
 					dux::ipc::add_free_range(
 						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap())
 							.unwrap(),
-						dux::Page::min_pages_for_range(rxq.length),
+						len,
 					)
 					.unwrap();
 					if let Some(name) = rxq.name {
-						let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, 1) };
+						let len = dux::Page::min_pages_for_range(rxq.name_len.into());
+						let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, len) };
 						assert_eq!(ret.status, 0);
 						dux::ipc::add_free_range(
 							dux::Page::new(
 								core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap(),
 							)
 							.unwrap(),
-							dux::Page::min_pages_for_range(rxq.name_len.into()),
+							len,
 						)
 						.unwrap();
 					}
@@ -364,23 +362,25 @@ fn main() {
 					};
 
 					// Free ranges
-					let ret = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, 1) };
+					let len = dux::Page::min_pages_for_range(rxq.length);
+					let ret = unsafe { kernel::mem_dealloc(rxq.data.unwrap().as_ptr(), len) };
 					assert_eq!(ret.status, 0);
 					dux::ipc::add_free_range(
 						dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap())
 							.unwrap(),
-						dux::Page::min_pages_for_range(rxq.length),
+						len,
 					)
 					.unwrap();
 					if let Some(name) = rxq.name {
-						let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, 1) };
+						let len = dux::Page::min_pages_for_range(rxq.name_len.into());
+						let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, len) };
 						assert_eq!(ret.status, 0);
 						dux::ipc::add_free_range(
 							dux::Page::new(
 								core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap(),
 							)
 							.unwrap(),
-							dux::Page::min_pages_for_range(rxq.name_len.into()),
+							len,
 						)
 						.unwrap();
 					}

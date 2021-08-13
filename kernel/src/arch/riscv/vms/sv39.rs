@@ -360,6 +360,7 @@ impl Sv39 {
 				.as_mut()
 		};
 		let pte = &mut tbl[va.ppn_0()];
+		let addr = va;
 		Ok(NonNull::from(pte))
 	}
 
@@ -604,7 +605,6 @@ impl VirtualMemorySystem for Sv39 {
 	/// Allocate the given amount of private pages and insert it as virtual memory at the
 	/// given address.
 	fn allocate(
-		&mut self,
 		virtual_address: Page,
 		count: usize,
 		rwx: RWX,
@@ -621,11 +621,11 @@ impl VirtualMemorySystem for Sv39 {
 	}
 
 	/// Deallocate the given range of pages.
-	fn deallocate(&mut self, virtual_address: Page, count: usize) -> Result<(), ()> {
+	fn deallocate(virtual_address: Page, count: usize) -> Result<(), ()> {
 		let mut va = virtual_address;
 		// FIXME deallocate pages on failure.
 		for _ in 0..count {
-			Self::remove(va).unwrap();
+			Self::remove(va).map_err(|e| { dbg!("panic!", va, count); e }).unwrap();
 			va = va.next().unwrap();
 		}
 		Ok(())

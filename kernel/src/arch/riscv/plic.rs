@@ -62,15 +62,12 @@ pub unsafe fn set_controller(range: MapRange, max_devices: u16) {
 
 /// Reserve an interrupt source
 pub fn reserve(source: u16, address: Address) -> Result<(), ReserveError> {
-	dbg!("Oh my", source, address);
 	let source = source.checked_sub(1).ok_or(ReserveError::NonExistent)?;
 	(source < *TOTAL_SOURCES).then(|| ()).ok_or(ReserveError::NonExistent)?;
 	let entry = &RESERVATIONS[usize::from(source)];
 	entry
 		.compare_exchange(usize::MAX, address.into(), Ordering::Relaxed, Ordering::Relaxed)
 		.map_err(|_| ReserveError::Occupied)?;
-
-	dbg!("harhar");
 
 	// The PLIC's behaviour should match that of SiFive's PLIC
 	// https://static.dev.sifive.com/U54-MC-RVCoreIP.pdf

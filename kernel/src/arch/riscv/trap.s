@@ -117,10 +117,10 @@ trap_handler:
 trap_syscall:
 
 	# FIXME we shouldn't have to do this ever.
-	la		s0, global_mapping
-	ld		s0, 0(s0)
-	csrrw	s0, satp, s0
-	sfence.vma
+	#la		s0, global_mapping
+	#ld		s0, 0(s0)
+	#csrrw	s0, satp, s0
+	#sfence.vma
 
 	addi	sp, sp, -1 * GP_REGBYTES
 
@@ -144,8 +144,8 @@ trap_syscall:
 	jalr	ra, t0
 
 	# FIXME we shouldn't have to do this ever.
-	csrw	satp, s0
-	sfence.vma
+	#csrw	satp, s0
+	#sfence.vma
 
 	# Restore all integer registers except a0 and a1, then return
 0:
@@ -174,10 +174,6 @@ trap_init:
 ## Arguments:
 ## - a0: A pointer to the task structure.
 trap_start_task:
-	# FIXME we should do this in init (or never, rather)
-	csrr	t0, satp
-	la		t1, global_mapping
-	sd		t0, 0(t1)
 	# Switch to U-mode when executing mret.
 	li		t0, 0 << 11
 	csrw	sstatus, t0

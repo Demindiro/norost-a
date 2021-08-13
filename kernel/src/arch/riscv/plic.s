@@ -18,6 +18,11 @@ external_interrupt_handler:
 	csrr			x30, sepc
 	gp_store		x30, 0 * GP_REGBYTES, x31
 
+	# Fix kernel stack, needed for call later
+	# FIXME this causes UB with the pseudo task, as it has no valid stack
+	# pointer
+	gp_load			sp, TASK_STACK, x31
+
 	# Claim the interrupt.
 	# We need to do this now because we can't return to userspace otherwise.
 

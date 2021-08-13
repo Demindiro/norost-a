@@ -441,6 +441,7 @@ extern "C" fn main(
 	let _ = (boot_args, stdout, model);
 
 	// Enable interrupts now that the important setup is done
+	// We could also do this earlier but whatever.
 	arch::enable_interrupts(true);
 
 	let exec = task::Executor::new(hart_id);

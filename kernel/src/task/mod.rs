@@ -128,14 +128,14 @@ impl Task {
 		unsafe { arch::trap_start_task(self.clone()) };
 	}
 
-	/// Allocate private memory at the given virtual address.
+	/// Allocate private memory at the given virtual address for the current task.
 	pub fn allocate_memory(
-		&self,
 		address: Page,
 		count: usize,
 		rwx: vms::RWX,
 	) -> Result<(), vms::AddError> {
-		self.inner().shared_state.virtual_memory.allocate(
+		//self.inner().shared_state.virtual_memory
+		arch::VMS::allocate(
 			address,
 			count,
 			rwx,
@@ -143,13 +143,15 @@ impl Task {
 		)
 	}
 
-	/// Deallocate memory
-	pub fn deallocate_memory(&self, address: Page, count: usize) -> Result<(), ()> {
+	/// Deallocate memory for the current task
+	pub fn deallocate_memory(address: Page, count: usize) -> Result<(), ()> {
 		let _ = (address, count);
+		/*
 		self.inner()
 			.shared_state
 			.virtual_memory
-			.deallocate(address, count)
+			*/
+		arch::VMS::deallocate(address, count)
 	}
 
 	/// Set the task transmit & receive queue pointers and sizes.

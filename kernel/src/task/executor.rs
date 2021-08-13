@@ -34,6 +34,8 @@ pub struct NoTask;
 
 // FIXME lol wtf
 // FIXME the boot elf parser doesn't zero initialize this. Workaround is to set it to 1 first (lmao)
+// FIXME this really needs to be fixed, it just got out of sync due to an interrupt which caused
+// some very strange buggy behaviour.
 static mut NEXT_ID: usize = 1;
 
 impl Executor<'_> {
@@ -69,12 +71,11 @@ impl Executor<'_> {
 	/// Begin idling, i.e. do nothing
 	#[allow(dead_code)]
 	pub fn idle() -> ! {
-		//dbg!("Idling...");
 		unsafe {
 			// TODO move this to arch::
 			asm!("csrw sscratch, {0}", in(reg) IDLE_TASK_STUB.0.get());
 		}
-		arch::enable_interrupts(true);
+		arch::enable_kernel_interrupts(true);
 		loop {
 			crate::powerstate::halt();
 		}
@@ -117,6 +118,8 @@ impl Executor<'_> {
 /// Helper function primarily intended to be called from assembly.
 #[export_name = "executor_get_task"]
 extern "C" fn get_task(address: Address) -> Option<Task> {
+	// FIXME *puke*
+	unsafe { NEXT_ID = address.into() };
 	group::Group::get(address.group().into())
 		.and_then(|g| g.task(address.task().into()).ok())
 }

@@ -1,8 +1,6 @@
 ## Error handling routines
 
 .section .rodata
-global_mapping:
-	.quad	0
 early_panic_msg:
 	.asciz	"Early panic!"
 scause_msg:
@@ -11,6 +9,8 @@ sepc_msg:
 	.asciz	"sepc    0x"
 stval_msg:
 	.asciz	"stval   0x"
+satp_msg:
+	.asciz	"satp    0x"
 
 .section .text.cold
 
@@ -42,6 +42,12 @@ mini_panic:
 	la		s0, stval_msg
 	call	trap_print_msg
 	csrr	s0, stval
+	call	trap_print_num
+
+	# Print satp
+	la		s0, satp_msg
+	call	trap_print_msg
+	csrr	s0, satp
 	call	trap_print_num
 
 	# Halt forever

@@ -74,7 +74,6 @@ where
 	/// Allocate the given amount of private pages and insert it as virtual memory at the
 	/// given address.
 	fn allocate(
-		&mut self,
 		virtual_address: Page,
 		count: usize,
 		rwx: RWX,
@@ -82,7 +81,7 @@ where
 	) -> Result<(), AddError>;
 
 	/// Allocate the given range of pages.
-	fn deallocate(&mut self, virtual_address: Page, count: usize) -> Result<(), ()>;
+	fn deallocate(virtual_address: Page, count: usize) -> Result<(), ()>;
 
 	/// Add a single page mapping to a specific VMS.
 	fn add_to(

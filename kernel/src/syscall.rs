@@ -187,7 +187,13 @@ mod sys {
 			// FIXME lol, lmao
 
 			// FIXME this is a quick test to see if we can wake up from idling.
-			//task::Executor::idle();
+			/*
+			if let Some(h) = task.set_notification_handler(None) {
+				task.set_notification_handler(Some(h));
+			} else {
+				task::Executor::idle();
+			}
+			*/
 
 			crate::task::Executor::default().next()
 		}
@@ -251,12 +257,12 @@ mod sys {
 
 	sys! {
 		/// Allocates a range of private or shared pages for the current task.
-		[task] mem_alloc(address, count, flags) {
+		[_] mem_alloc(address, count, flags) {
 			logcall!("mem_alloc 0x{:x}, {}, 0b{:b}", address, count, flags);
 			match arch::Page::try_from(address as *mut _) {
 				Ok(address) => match decode_rwx_flags(flags) {
 					Ok(rwx) => {
-						task.allocate_memory(address, count, rwx).unwrap();
+						task::Task::allocate_memory(address, count, rwx).unwrap();
 						Return(Status::Ok, address.as_ptr() as usize)
 					}
 					Err(InvalidPageFlags) => Return(Status::MemoryInvalidProtectionFlags, 0),
@@ -269,14 +275,14 @@ mod sys {
 
 	sys! {
 		/// Frees a range of pages of the current task.
-		[task] mem_dealloc(address, count) {
+		[_] mem_dealloc(address, count) {
 			logcall!("mem_dealloc 0x{:x}, {}", address, count);
 			let address = match Page::from_usize(address) {
 				Ok(a) => a,
 				Err(arch::page::FromPointerError::Null) => return Return(Status::NullArgument, 0),
 				Err(arch::page::FromPointerError::BadAlignment) => return Return(Status::BadAlignment, 0),
 			};
-			task.deallocate_memory(address, count).unwrap();
+			task::Task::deallocate_memory(address, count).unwrap();
 			Return(Status::Ok, 0)
 		}
 	}
