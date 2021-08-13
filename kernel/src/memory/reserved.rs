@@ -74,7 +74,7 @@ impl Range {
 // fruighhreiughiuergrehreguih
 macro_rules! page {
 	(offset $offset:expr, $s:expr) => {{
-		let val = $offset.wrapping_sub($s * Page::SIZE);
+		let val = $offset.wrapping_sub($s);
 		match Page::from_usize(val) {
 			Ok(v) => v,
 			Err(_) => {
@@ -125,7 +125,7 @@ macro_rules! range {
 			start: page!(offset $offset, $s),
 		};
 		range! {
-			@offset $offset.wrapping_sub($s * Page::SIZE),
+			@offset $offset.wrapping_sub($s),
 			@local $g_offset,
 			$($l_name => $l_size,)*
 		}
@@ -160,7 +160,7 @@ macro_rules! range {
 			start: page!(offset $offset, $s),
 		};
 		range! {
-			@offset $offset.wrapping_sub($s * Page::SIZE),
+			@offset $offset.wrapping_sub($s),
 			@global
 			$($g_name => $g_size,)*
 			@local
@@ -218,28 +218,24 @@ range! {
 range! {
 	limit = 0xffff_ff80_0000_0000,
 	[GLOBAL]
-	KERNEL => 1 << (17 - Page::OFFSET_BITS),
-	PMM_BITMAP => (1 << (44 - Page::OFFSET_BITS)) / 8 / Page::SIZE,
-	PMM_STACK => super::allocator::Stacks::MEM_TOTAL_SIZE * MAX_HARTS,
-	SHARED_COUNTERS => (1 << (44 - Page::OFFSET_BITS + 2)) / Page::SIZE,
-	SHARED_ALLOC => 1 << (44 - Page::OFFSET_BITS - 12 + 1) / Page::SIZE,
-	HART_STACKS => MAX_HARTS * 2, // Reserve extra space for guard pages.
-	DEVICE_TREE => 1 << (16 - Page::OFFSET_BITS),
-	TASK_GROUPS => 1 << (20 - Page::OFFSET_BITS),
-	TASK_DATA => 1 << (30 - Page::OFFSET_BITS),
+	KERNEL => 1 << 17,
+	PMM_BITMAP => (1 << 44) / 8 / Page::SIZE,
+	PMM_STACK => super::allocator::Stacks::MEM_TOTAL_SIZE * MAX_HARTS * Page::SIZE,
+	SHARED_COUNTERS => (1 << (44 + 2)) / Page::SIZE,
+	SHARED_ALLOC => (1 << (44 - 12 + 1)) / Page::SIZE,
+	HART_STACKS => MAX_HARTS * Page::SIZE,
+	DEVICE_TREE => 1 << 16,
+	TASK_GROUPS => 1 << 20,
+	TASK_DATA => 1 << 30,
 	// https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic.adoc
-	PLIC => 0x4000000 >> Page::OFFSET_BITS,
+	PLIC => 0x4000000,
 	[LOCAL]
-	HIGHMEM_A => 1 << (30 - Page::OFFSET_BITS),
-	HIGHMEM_B => 1 << (30 - Page::OFFSET_BITS),
-	VMM_ROOT => 1 << 0,
+	HIGHMEM_A => 1 << 30,
+	HIGHMEM_B => 1 << 30,
+	VMM_ROOT => Page::SIZE,
 }
 
 // TODO find a way to get this included in assembly files as a constant.
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 #[export_name = "plic_address"]
 static _PLIC: Page = PLIC.start;
-/*static _PLIC: Page = match Page::from_pointer(0x4_0000_0000 as *mut _) {
-	Ok(p) => p,
-	Err(_) => unreachable!(),
-};*/
