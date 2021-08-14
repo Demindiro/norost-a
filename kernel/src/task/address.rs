@@ -72,7 +72,7 @@ impl Address {
 		)
 	}
 
-	pub(super) const fn todo(n: usize) -> Self {
+	pub const fn todo(n: usize) -> Self {
 		Self(n)
 	}
 }

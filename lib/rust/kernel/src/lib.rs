@@ -239,6 +239,15 @@ syscall!(
 );
 syscall!(sys_log, 15, string: *const u8, length: usize);
 
+syscall!(
+	sys_registry_add,
+	16,
+	name: *const u8,
+	name_length: usize,
+	address: usize
+);
+syscall!(sys_registry_get, 17, name: *const u8, name_length: usize);
+
 /// Interface for sending messages to the kernel log.
 pub struct SysLog;
 

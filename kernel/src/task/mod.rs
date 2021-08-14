@@ -19,6 +19,7 @@
 
 pub mod ipc;
 pub mod notification;
+pub mod registry;
 
 mod address;
 mod executor;

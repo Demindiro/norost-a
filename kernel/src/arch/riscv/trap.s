@@ -1,8 +1,5 @@
 # Trap handling routines
 
-.equ		SYSCALL_MAX,			16
-.equ		SYSCALL_ERR_NOCALL, 	1
-
 .section .text.hot
 	.balign 4	# 0
 interrupt_table:

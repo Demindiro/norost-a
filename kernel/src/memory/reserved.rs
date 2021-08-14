@@ -229,6 +229,7 @@ range! {
 	TASK_DATA => 1 << 30,
 	// https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic.adoc
 	PLIC => 0x4000000,
+	REGISTRY => 1 << 20,
 	[LOCAL]
 	HIGHMEM_A => 1 << 30,
 	HIGHMEM_B => 1 << 30,

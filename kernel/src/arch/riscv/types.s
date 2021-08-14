@@ -107,3 +107,9 @@
 
 # Mask to toggle the NOTIFY flag
 .equ		TASK_FLAG_NOTIFY, 0x1
+
+# The total amount of system calls, including placeholders
+.equ		SYSCALL_MAX,			20
+
+# The error code for when a syscall was not found.
+.equ		SYSCALL_ERR_NOCALL, 	1

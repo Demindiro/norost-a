@@ -260,6 +260,16 @@ fn main() {
 	let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
 	assert_eq!(ret.status, 0);
 
+	// Add self to registry
+	let name = "init_b0_test";
+	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name.len(), usize::MAX) };
+	assert_eq!(ret.status, 0, "failed to add registry entry");
+
+	// Check if we can find the added entry.
+	let ret = unsafe { kernel::sys_registry_get(name.as_ptr(), name.len()) };
+	assert_eq!(ret.status, 0, "failed to get registry entry");
+	kernel::dbg!(ret.value);
+
 	loop {
 		// Wait for packets.
 		let rxq = dux::ipc::receive();

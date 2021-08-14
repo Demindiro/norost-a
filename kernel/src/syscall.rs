@@ -29,7 +29,7 @@ pub type Syscall = extern "C" fn(
 pub struct Return(Status, usize);
 
 /// The length of the table as a separate constant because Rust is a little dum dum.
-pub const TABLE_LEN: usize = 16;
+pub const TABLE_LEN: usize = 20;
 
 /// Table with all syscalls.
 #[export_name = "syscall_table"]
@@ -50,6 +50,10 @@ pub static TABLE: [Syscall; TABLE_LEN] = [
 	sys::sys_platform_info,            // 13
 	sys::sys_direct_alloc,             // 14
 	sys::sys_log,                      // 15
+	sys::sys_registry_add,             // 16
+	sys::sys_registry_get,             // 17
+	sys::placeholder,                  // 18
+	sys::placeholder,                  // 19
 ];
 
 /// Enum representing whether a syscall was successfull or failed.
@@ -73,6 +77,8 @@ pub enum Status {
 	MemoryInvalidProtectionFlags = 7,
 	/// The address isn't properly aligned.
 	BadAlignment = 8,
+	/// Whatever was looked for was not found.
+	NotFound = 9,
 }
 
 impl From<Status> for u8 {
@@ -496,6 +502,34 @@ mod sys {
 			let max_devices = max_devices as u16;
 			unsafe { arch::interrupts::set_controller(MapRange::Direct(ppn_range), max_devices) };
 			Return(Status::Ok, 0)
+		}
+	}
+
+	sys! {
+		/// Add an entry to the registry. If the address is `usize::MAX`, it will be replaced by
+		/// the calling tasks' address.
+		[_] sys_registry_add(name, name_len, address) {
+			let address = (address == usize::MAX)
+				.then(task::Executor::current_address)
+				.unwrap_or(task::Address::todo(address));
+			arch::set_supervisor_userpage_access(true);
+			let name = unsafe { core::slice::from_raw_parts(name as *const u8, name_len.into()) };
+			task::registry::add(name, address);
+			arch::set_supervisor_userpage_access(false);
+			Return(Status::Ok, 0)
+		}
+	}
+
+	sys! {
+		/// Get an entry in the registry and return the address if found.
+		[_] sys_registry_get(name, name_len) {
+			arch::set_supervisor_userpage_access(true);
+			let name = unsafe { core::slice::from_raw_parts(name as *const u8, name_len.into()) };
+			let ret = task::registry::get(name)
+				.map(|addr| Return(Status::Ok, addr.into()))
+				.unwrap_or(Return(Status::NotFound, 0));
+			arch::set_supervisor_userpage_access(false);
+			ret
 		}
 	}
 
