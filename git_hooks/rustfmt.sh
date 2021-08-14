@@ -4,7 +4,7 @@
 
 HAS_ISSUES=0
 
-for file in $(git diff --name-only --staged); do
+for file in $(git diff --name-only --staged --diff-filter=d); do
 	# This sucks but rustfmt doesn't allow --check with stdin because ???? idfk
 	if [[ "$file" =~ '.rs'$ ]]; then
 		FMT_RESULT=$(diff <(git show ":$file") <(git show ":$file" | rustfmt))

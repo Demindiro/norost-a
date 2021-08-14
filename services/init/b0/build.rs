@@ -28,16 +28,27 @@ fn main() {
 	#[repr(align(4096))]
 	pub struct Aligned<const S: usize>([u8; S]);
 
-	pub const BINARIES: &[&[u8]] = &[
+	pub struct Binary {{
+		name: &'static str,
+		data: &'static [u8],
+	}}
+
+	pub const BINARIES: &[Binary] = &[
 	"
 	)
 	.unwrap();
 	for line in list
 		.split('\n')
+		.map(str::trim)
 		.filter(|s| !s.is_empty() && &s[0..1] != "#")
 	{
-		let path = if &line[0..1] != "/" {
-			format!("{}/{}/{}", base_dir, BASE_DIR, line)
+		let (name, path) = line
+			.split_once(char::is_whitespace)
+			.expect("expected name and path");
+		let path = path.trim_start();
+		dbg!(name, path);
+		let path = if &path[0..1] != "/" {
+			format!("{}/{}/{}", base_dir, BASE_DIR, path)
 		} else {
 			String::from(line)
 		};
@@ -46,9 +57,12 @@ fn main() {
 			"{{
 			const LENGTH: usize = include_bytes!(\"{}\").len();
 			const ALIGNED: Aligned<LENGTH> = Aligned(*include_bytes!(\"{}\"));
-			&ALIGNED.0
+			Binary {{
+				name: \"{}\",
+				data: &ALIGNED.0,
+			}}
 		}},",
-			path, path
+			path, path, name
 		)
 		.unwrap();
 	}

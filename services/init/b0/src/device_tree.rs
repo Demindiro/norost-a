@@ -5,7 +5,6 @@
 use core::convert::{TryFrom, TryInto};
 use core::ptr::NonNull;
 
-pub const UART_ADDRESS: NonNull<u8> = unsafe { NonNull::new_unchecked(0x1000_0000 as *mut _) };
 pub const PCI_ADDRESS: NonNull<u8> = unsafe { NonNull::new_unchecked(0x2000_0000 as *mut _) };
 pub const PCI_MMIO_ADDRESS: NonNull<u8> = unsafe { NonNull::new_unchecked(0x3000_0000 as *mut _) };
 pub static mut PCI_MMIO_PHYSICAL: (usize, usize) = (0, 0);
@@ -124,15 +123,7 @@ pub fn map_devices() {
 							let (addr, reg) = unpack_reg(reg, node.address_cells);
 							let (size, reg) = unpack_reg(reg, node.size_cells);
 							assert!(reg.is_empty());
-							let kernel::Return { status, .. } = unsafe {
-								kernel::sys_direct_alloc(
-									UART_ADDRESS.as_ptr().cast(),
-									(addr >> 12).try_into().unwrap(),
-									((size + 0xfff) >> 12).try_into().unwrap(),
-									0b011,
-								)
-							};
-							assert_eq!(status, 0, "mapping UART failed");
+							// TODO design a protocol for communicating the address with the driver
 						}
 						b"plic" => {
 							let reg = reg.unwrap();

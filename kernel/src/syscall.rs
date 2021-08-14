@@ -196,8 +196,8 @@ mod sys {
 			};
 			logcall!("io_wait {}", time);
 
-			task.process_io(task::Executor::current_address());
 			task.wait_duration(time);
+			task.process_io(task::Executor::current_address());
 
 			crate::task::Executor::next()
 		}

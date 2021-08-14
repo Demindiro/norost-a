@@ -15,3 +15,5 @@ READELF   = $(TOOLS_DIR)/$(TARGET)-readelf
 OBJDUMP   = $(TOOLS_DIR)/$(TARGET)-objdump
 
 _common_mk_dir = $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
+default: build

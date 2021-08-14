@@ -9,6 +9,7 @@ members = [
 	"lib/rust/pci",
 	"lib/rust/virtio",
 	"lib/rust/virtio_block",
+	"services/driver/uart",
 	"services/init/hello_world_virtio",
 	"services/init/multi_process",
 	"services/init/b0",

@@ -6,6 +6,7 @@ test:
 	make -C lib/rust/dux_ar
 	make -C lib/c/std/ -B
 	make -C services/init/minish/ -B
+	make -C services/driver/uart -B
 	make -C services/init/b0
 	make -C . run
 

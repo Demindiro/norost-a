@@ -262,6 +262,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "uart"
+version = "0.1.0"
+dependencies = [
+ "dux",
+ "syscalls",
+]
+
+[[package]]
 name = "vcell"
 version = "0.1.3"
 

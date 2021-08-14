@@ -24,12 +24,10 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 
 extern crate alloc;
 
-mod console;
 mod device_tree;
 mod fs;
 mod pci;
 mod rtbegin;
-mod uart;
 
 include!(concat!(env!("OUT_DIR"), "/list.rs"));
 
@@ -51,72 +49,6 @@ use core::convert::TryFrom;
 use kernel::sys_log;
 use xmas_elf::ElfFile;
 
-static mut NEW_DATA: bool = false;
-
-#[naked]
-extern "C" fn notification_handler_entry() {
-	unsafe {
-		asm!(
-			"
-			# a0: type
-			# a1: value
-			# a7: address
-			#
-			# The original a[0-2] are stored on the stack by the kernel.
-			.equ	GP_REGBYTES, 8
-			.equ	NOTIFY_RETURN, 9
-			addi	sp, sp, -(13 + 4) * GP_REGBYTES
-			sd		t0, 0 * GP_REGBYTES (sp)
-			sd		t1, 1 * GP_REGBYTES (sp)
-			sd		t2, 2 * GP_REGBYTES (sp)
-			sd		t3, 3 * GP_REGBYTES (sp)
-			sd		t4, 4 * GP_REGBYTES (sp)
-			sd		t5, 5 * GP_REGBYTES (sp)
-			sd		t6, 6 * GP_REGBYTES (sp)
-			sd		a3, 7 * GP_REGBYTES (sp)
-			sd		a4, 8 * GP_REGBYTES (sp)
-			sd		a5, 9 * GP_REGBYTES (sp)
-			sd		a6, 10 * GP_REGBYTES (sp)
-			sd		a2, 11 * GP_REGBYTES (sp)
-			sd		ra, 12 * GP_REGBYTES (sp)
-			mv		a2, a7
-			call	notification_handler
-			ld		t0, 0 * GP_REGBYTES (sp)
-			ld		t1, 1 * GP_REGBYTES (sp)
-			ld		t2, 2 * GP_REGBYTES (sp)
-			ld		t3, 3 * GP_REGBYTES (sp)
-			ld		t4, 4 * GP_REGBYTES (sp)
-			ld		t5, 5 * GP_REGBYTES (sp)
-			ld		t6, 6 * GP_REGBYTES (sp)
-			ld		a3, 7 * GP_REGBYTES (sp)
-			ld		a4, 8 * GP_REGBYTES (sp)
-			ld		a5, 9 * GP_REGBYTES (sp)
-			ld		a6, 10 * GP_REGBYTES (sp)
-			ld		a2, 11 * GP_REGBYTES (sp)
-			ld		ra, 12 * GP_REGBYTES (sp)
-			addi	sp, sp, (13 + 4) * GP_REGBYTES
-			li		a7, NOTIFY_RETURN
-			ecall
-		"
-		);
-	}
-}
-
-#[export_name = "notification_handler"]
-extern "C" fn notification_handler(typ: usize, value: usize, address: usize) {
-	let mut buf = [0; 16];
-	let r = unsafe { CONSOLE.as_mut().unwrap().read(&mut buf) };
-	unsafe {
-		CONSOLE_BUFFER[CONSOLE_INDEX..CONSOLE_INDEX + r].copy_from_slice(&buf[..r]);
-		CONSOLE_INDEX += r;
-	}
-}
-
-static mut CONSOLE: Option<console::Console> = None;
-
-static mut CONSOLE_BUFFER: [u8; 4096] = [0; 4096];
-static mut CONSOLE_INDEX: usize = 0;
-
 #[export_name = "main"]
 fn main() {
 	// GOD FUCKING DAMN IT RUST
@@ -126,16 +58,9 @@ fn main() {
 	// WHYYYYYYYYYYYYYYYY
 	unsafe { dux::init() };
 
-	sys_log!("Setting up notification handler");
-	let ret = unsafe { kernel::io_set_notify_handler(notification_handler_entry) };
-	assert_eq!(ret.status, 0);
-
 	sys_log!("Mapping devices");
 	device_tree::map_devices();
 	pci::init_blk_device();
-
-	let ret = unsafe { kernel::sys_reserve_interrupt(0xa) };
-	assert_eq!(ret.status, 0, "failed to reserve interrupt");
 
 	sys_log!("Opening FAT FS");
 	let dev = unsafe { pci::BLK.as_mut().unwrap().downcast_mut().unwrap() };
@@ -157,26 +82,27 @@ fn main() {
 		}
 	};
 
-	sys_log!("Creating console");
-	let mut console = unsafe { console::Console::new(device_tree::UART_ADDRESS.cast()) };
-	let mut buf = [0; 256];
-
-	sys_log!("Press any key for magic");
-
-	unsafe { CONSOLE = Some(console) };
-
-	sys_log!("Listing binary addresses:");
-
-	// SAFETY: all zeroes TaskSpawnMapping is valid.
-	let mut mappings =
-		unsafe { core::mem::MaybeUninit::<[kernel::TaskSpawnMapping; 16]>::zeroed().assume_init() };
-	let mut i = 0;
-	let mut pc = 0;
-
 	for bin in BINARIES.iter() {
-		sys_log!("  {:p}", bin);
-		let elf = ElfFile::new(bin).unwrap();
+		// SAFETY: all zeroes TaskSpawnMapping is valid.
+		let mut mappings = unsafe {
+			core::mem::MaybeUninit::<[kernel::TaskSpawnMapping; 16]>::zeroed().assume_init()
+		};
+		let mut i = 0;
+		let mut pc = 0;
+
+		sys_log!("  {}: {:p}", bin.name, bin.data);
+		sys_log!("");
+
+		sys_log!("Listing binary addresses:");
+
+		let mut fixme_terrible_writepage_hack = None;
+
+		let elf = ElfFile::new(bin.data).unwrap();
 		for ph in elf.program_iter() {
+			if ph.get_type().unwrap() != xmas_elf::program::Type::Load {
+				continue;
+			}
+
 			sys_log!("");
 			sys_log!("  Offset  : 0x{:x}", ph.offset());
 			sys_log!("  VirtAddr: 0x{:x}", ph.virtual_addr());
@@ -187,10 +113,11 @@ fn main() {
 			sys_log!("  Align   : 0x{:x}", ph.align());
 
 			let mut offset = ph.offset() & !0xfff;
+			let mut page_offset = ph.offset() & 0xfff;
 			let mut virt_a = ph.virtual_addr() & !0xfff;
 
-			let file_pages = ((ph.file_size() + 0xfff) & !0xfff) / 0x1000;
-			let mem_pages = ((ph.mem_size() + 0xfff) & !0xfff) / 0x1000;
+			let file_pages = ((ph.file_size() + page_offset + 0xfff) & !0xfff) / 0x1000;
+			let mem_pages = ((ph.mem_size() + page_offset + 0xfff) & !0xfff) / 0x1000;
 			let flags = ph.flags();
 			let flags = u8::from(flags.is_read()) << 0
 				| u8::from(flags.is_write()) << 1
@@ -200,6 +127,8 @@ fn main() {
 				// We must copy the pages as they may be written to.
 				// FIXME add a sort of "mmap" to dux so we can avoid this lazy brokenness.
 				let addr = 0xded_0000 as *mut _;
+				assert!(fixme_terrible_writepage_hack.is_none());
+				fixme_terrible_writepage_hack = Some((addr, mem_pages as usize));
 				let ret = unsafe { kernel::mem_alloc(addr, mem_pages as usize, flags) };
 				let addr = addr.cast::<u8>();
 				assert_eq!(ret.status, 0);
@@ -226,7 +155,7 @@ fn main() {
 			} else {
 				// It is safe to share the pages
 				for _ in 0..file_pages {
-					let self_address = bin.as_ptr().wrapping_add(offset as usize) as *mut _;
+					let self_address = bin.data.as_ptr().wrapping_add(offset as usize) as *mut _;
 					sys_log!("    {:p} -> 0x{:x} ({:b})", self_address, virt_a, flags);
 					mappings[i] = kernel::TaskSpawnMapping {
 						typ: 0,
@@ -241,34 +170,43 @@ fn main() {
 			}
 		}
 		pc = elf.header.pt2.entry_point() as usize;
+		sys_log!("entry:  0x{:x}", pc);
+
+		sys_log!("Spawning task");
+
+		let kernel::Return { status, value: id } =
+			unsafe { kernel::task_spawn(mappings.as_ptr(), i, pc as *const _, core::ptr::null()) };
+
+		assert_eq!(status, 0, "Failed to spawn task");
+
+		sys_log!("Spawned task with ID {}", id);
+
+		// FIXME extra hack to workaround hackiness.
+		if let Some((addr, mem_pages)) = fixme_terrible_writepage_hack {
+			let ret = unsafe { kernel::mem_dealloc(addr.cast(), mem_pages as usize) };
+			assert_eq!(ret.status, 0);
+		}
+
+		// Allocate a single page for transmitting data.
+		let raw = dux::mem::reserve_range(None, 1)
+			.unwrap()
+			.as_ptr()
+			.cast::<u8>();
+		let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
+		assert_eq!(ret.status, 0);
+
+		sys_log!("Registering task {} as {:?}", id, bin.name);
+
+		// Add to registry
+		let name = "";
+		let ret = unsafe { kernel::sys_registry_add(bin.name.as_ptr(), bin.name.len(), id) };
+		assert_eq!(ret.status, 0, "failed to add registry entry");
+
+		// Check if we can find the added entry.
+		let ret = unsafe { kernel::sys_registry_get(bin.name.as_ptr(), bin.name.len()) };
+		assert_eq!(ret.status, 0, "failed to get registry entry");
+		kernel::dbg!(ret.value);
 	}
-
-	sys_log!("Spawning task");
-
-	let kernel::Return { status, value: id } =
-		unsafe { kernel::task_spawn(mappings.as_ptr(), i, pc as *const _, core::ptr::null()) };
-
-	assert_eq!(status, 0, "Failed to spawn task");
-
-	sys_log!("Spawned task with ID {}", id);
-
-	// Allocate a single page for transmitting data.
-	let raw = dux::mem::reserve_range(None, 1)
-		.unwrap()
-		.as_ptr()
-		.cast::<u8>();
-	let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
-	assert_eq!(ret.status, 0);
-
-	// Add self to registry
-	let name = "init_b0_test";
-	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name.len(), usize::MAX) };
-	assert_eq!(ret.status, 0, "failed to add registry entry");
-
-	// Check if we can find the added entry.
-	let ret = unsafe { kernel::sys_registry_get(name.as_ptr(), name.len()) };
-	assert_eq!(ret.status, 0, "failed to get registry entry");
-	kernel::dbg!(ret.value);
 
 	loop {
 		// Wait for packets.
@@ -284,36 +222,14 @@ fn main() {
 					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
 				});
 
-				let length = if let Some(path) = path {
-					// Read data from file
-					let mut f = fs
-						.root_dir()
-						.open_file(core::str::from_utf8(path).unwrap())
-						.unwrap();
-					use fatfs::Read;
-					f.read(data).unwrap()
-				} else {
-					// Read data from UART
-					let read = loop {
-						let read = unsafe { CONSOLE_INDEX };
-						if read > 0 {
-							break read;
-						}
-						// TODO it should just be put in a queue..
-						unsafe { kernel::io_wait(u64::MAX) };
-					};
-					unsafe {
-						for i in 0..read {
-							data[i] = CONSOLE_BUFFER[i];
-						}
-						CONSOLE_INDEX = 0;
-					}
-					data[..read]
-						.iter_mut()
-						.filter(|b| **b == b'\r')
-						.for_each(|b| *b = b'\n');
-					read
-				};
+				let path = path.unwrap();
+				// Read data from file
+				let mut f = fs
+					.root_dir()
+					.open_file(core::str::from_utf8(path).unwrap())
+					.unwrap();
+				use fatfs::Read;
+				let length = f.read(data).unwrap();
 
 				// Send completion event
 				*dux::ipc::transmit() = kernel::ipc::Packet {
@@ -323,7 +239,7 @@ fn main() {
 					name_len: 0,
 					flags: 0,
 					id: 0,
-					address: id,
+					address: rxq.address,
 					data: None,
 					length,
 					offset: 0,
@@ -361,19 +277,14 @@ fn main() {
 				});
 
 				// Write data
-				let len = if path.is_none() {
-					unsafe { CONSOLE.as_mut().unwrap().write(data) };
-					data.len()
-				} else {
-					let name = core::str::from_utf8(path.unwrap()).unwrap();
-					let mut f = match fs.root_dir().open_file(name) {
-						Ok(f) => f,
-						Err(_) => fs.root_dir().create_file(name).unwrap(),
-					};
-					use fatfs::{Seek, SeekFrom, Write};
-					f.seek(SeekFrom::Start(rxq.offset)).unwrap();
-					f.write(data).unwrap()
+				let name = core::str::from_utf8(path.unwrap()).unwrap();
+				let mut f = match fs.root_dir().open_file(name) {
+					Ok(f) => f,
+					Err(_) => fs.root_dir().create_file(name).unwrap(),
 				};
+				use fatfs::{Seek, SeekFrom, Write};
+				f.seek(SeekFrom::Start(rxq.offset)).unwrap();
+				let len = f.write(data).unwrap();
 
 				// Free ranges
 				let len = dux::Page::min_pages_for_range(rxq.length);
@@ -405,7 +316,7 @@ fn main() {
 					name_len: 0,
 					flags: 0,
 					id: 0,
-					address: id,
+					address: rxq.address,
 					data: None,
 					length: len,
 					offset: 0,
@@ -431,7 +342,7 @@ fn main() {
 					name_len: 0,
 					flags: 0,
 					id: rxq.id,
-					address: id,
+					address: rxq.address,
 					data,
 					length: list_builder.bytes_len(),
 					offset: 0,

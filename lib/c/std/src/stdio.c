@@ -18,9 +18,9 @@ typedef signed long ssize_t;
 #define MODE_UPDATE  (0x8)  // "+"
 #define MODE_EXIST   (0x10) // "x"
 
-static FILE _stdin = {._address = 0,._fd = 0,._uuid = KERNEL_UUID(0, 0) };
-static FILE _stdout = {._address = 0,._fd = 1,._uuid = KERNEL_UUID(0, 0) };
-static FILE _stderr = {._address = 0,._fd = 2,._uuid = KERNEL_UUID(0, 0) };
+static FILE _stdin = {._address = 2,._fd = 0,._uuid = KERNEL_UUID(0, 0) };
+static FILE _stdout = {._address = 2,._fd = 1,._uuid = KERNEL_UUID(0, 0) };
+static FILE _stderr = {._address = 2,._fd = 2,._uuid = KERNEL_UUID(0, 0) };
 
 FILE *stdin = &_stdin;
 FILE *stdout = &_stdout;
@@ -53,27 +53,12 @@ int putchar(int c)
 
 int puts(const char *s)
 {
-	struct iovec iov[2] = {
-		{
-		 // Discarding const is fine as writev won't write to this.
-		 .iov_base = (void *)s,
-		 .iov_len = strlen(s),
-		 },
-		{
-		 .iov_base = "\n",
-		 .iov_len = 1,
-		 },
-	};
-
-	ssize_t ret = writev(stdout->_fd, iov, 2);
-
-	if (ret >= 0) {
-		// ret just has to be a "non-negative number". ssize_t may overflow int so just set it
-		// to 0.
-		ret = 0;
+	int r0 = fputs(s, stdout);
+	if (r0 < 0) {
+		return r0;
 	}
-
-	return ret;
+	int r1 = fputs("\n", stdout);
+	return r1 < 0 ? r1 : r0 + r1;
 }
 
 int fgetc(FILE * stream)
@@ -399,6 +384,7 @@ int vfprintf(FILE * stream, const char *format, va_list args)
 				dux_pop_received_entry(slot);
 				break;
 			} else {
+				for (;;) {}
 				dux_defer_received_entry(slot);
 			}
 			kernel_io_wait(-1);

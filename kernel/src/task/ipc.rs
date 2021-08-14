@@ -147,7 +147,15 @@ impl IPC {
 			// It may be worth mapping the packet tables into kernel space.
 			task.inner().shared_state.virtual_memory.activate();
 
-			let task_ipc = task.inner().ipc.as_mut().unwrap();
+			let task_ipc = match task.inner().ipc.as_mut() {
+				Some(ipc) => ipc,
+				None => {
+					// TODO instead of waking up the task, we should just process it's entries
+					// without explicitly scheduling it.
+					slf_task.inner().wait_time = 0;
+					break;
+				}
+			};
 			let (rx_index, rx_slots) = task_ipc.received_ring();
 			let rx_pkt_slot = task_ipc.pop_free_slot().unwrap();
 
