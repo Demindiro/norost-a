@@ -1,3 +1,3 @@
-#test		lib/c/std/build/riscv64-pc-dux/test
-minish		sysroot/riscv64-pc-dux/bin/minish
-uart		target/riscv64gc-unknown-none-elf/release/uart
+#test		init		lib/c/std/build/riscv64-pc-dux/test
+minish		init		sysroot/riscv64-pc-dux/bin/minish
+uart		ns16550a	target/riscv64gc-unknown-none-elf/release/uart

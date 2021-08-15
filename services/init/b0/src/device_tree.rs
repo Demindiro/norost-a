@@ -15,15 +15,19 @@ pub const PLIC_ADDRESS: NonNull<u32> = unsafe { NonNull::new_unchecked(0x4_0000_
 pub static mut UART_ADDRESS: Option<NonZeroUsize> = None;
 pub static mut UART_SIZE: Option<NonZeroUsize> = None;
 
-pub fn map_devices() {
+pub fn iter_devices<F>(mut f: F)
+where
+	F: FnMut(&[u8], &[&[u8]], &[(u128, u128)]),
+{
 	let dtb = unsafe {
 		let dtb = 0x100_0000 as *mut _;
 		let ret = kernel::sys_platform_info(dtb, 16);
 		assert_eq!(ret.status, 0);
 		core::slice::from_raw_parts(dtb.cast(), ret.value << 10)
 	};
+
 	let dtb = device_tree::DeviceTree::parse(dtb).unwrap();
-	kernel::sys_log!("Iterating DTB");
+
 	if let Ok(node) = dtb.root() {
 		for node in node.children() {
 			if node.name == b"soc" {
@@ -121,20 +125,6 @@ pub fn map_devices() {
 							);
 							unsafe { PCI_MMIO_PHYSICAL = (start, size) };
 						}
-						b"uart" => {
-							kernel::sys_log!("  Found UART");
-							let reg = reg.unwrap();
-							let (addr, reg) = unpack_reg(reg, node.address_cells);
-							let (size, reg) = unpack_reg(reg, node.size_cells);
-							unsafe {
-								UART_ADDRESS =
-									Some(NonZeroUsize::new(addr.try_into().unwrap()).unwrap());
-								UART_SIZE =
-									Some(NonZeroUsize::new(size.try_into().unwrap()).unwrap());
-							}
-							assert!(reg.is_empty());
-							// TODO design a protocol for communicating the address with the driver
-						}
 						b"plic" => {
 							let reg = reg.unwrap();
 							let (addr, reg) = unpack_reg(reg, node.address_cells);
@@ -171,7 +161,32 @@ pub fn map_devices() {
 							};
 							assert_eq!(ret.status, 0, "registering PLIC failed");
 						}
-						_ => (),
+						other => {
+							let mut addr_size = [(0, 0); 32];
+							let mut reg = reg.unwrap_or(&[]);
+							let mut as_i = 0;
+
+							while !reg.is_empty() {
+								let (a, r) = unpack_reg(reg, node.address_cells);
+								let (s, r) = unpack_reg(reg, node.size_cells);
+								addr_size[as_i] = (a, s);
+								reg = r;
+								as_i += 1;
+							}
+
+							let mut compat = [&[][..]; 8];
+							let mut c_i = 0;
+							node.properties()
+								.find(|p| p.name == b"compatible")
+								.map(|c| {
+									for (i, s) in c.value.split(|c| c == &b'\0').enumerate() {
+										compat[i] = s;
+										c_i = i;
+									}
+								});
+
+							f(other, &compat[..c_i], &addr_size[..as_i])
+						}
 					}
 				}
 			}

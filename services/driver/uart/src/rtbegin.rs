@@ -7,7 +7,6 @@ static mut ARG_COUNT: usize = 0;
 static mut ARG_POINTER: *const *const u8 = core::ptr::null();
 
 pub fn args() -> ArgIter {
-	kernel::dbg!(unsafe { ARG_COUNT });
 	let ptr = unsafe { ARG_POINTER };
 	let end = unsafe { ptr.add(ARG_COUNT) };
 	ArgIter { ptr, end }
@@ -23,7 +22,6 @@ impl Iterator for ArgIter {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		(self.ptr != self.end).then(|| unsafe {
-			kernel::dbg!(self.ptr, *self.ptr);
 			let len = usize::from(*(*self.ptr).cast::<u16>());
 			let ret = slice::from_raw_parts((*self.ptr).add(mem::size_of::<u16>()), len);
 			self.ptr = self.ptr.add(1);

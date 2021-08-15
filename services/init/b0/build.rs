@@ -30,6 +30,7 @@ fn main() {
 
 	pub struct Binary {{
 		name: &'static str,
+		compatible: &'static str,
 		data: &'static [u8],
 	}}
 
@@ -42,11 +43,13 @@ fn main() {
 		.map(str::trim)
 		.filter(|s| !s.is_empty() && &s[0..1] != "#")
 	{
-		let (name, path) = line
+		let (name, compat, path) = line
 			.split_once(char::is_whitespace)
-			.expect("expected name and path");
-		let path = path.trim_start();
-		dbg!(name, path);
+			.map(|(n, r)| (n, r.trim_start()))
+			.and_then(|(n, r)| r.split_once(char::is_whitespace).map(|(c, p)| (n, c, p)))
+			.map(|(n, c, p)| (n, c.trim_start(), p.trim_start()))
+			.expect("expected name, compatibility and path");
+		dbg!(name, compat, path);
 		let path = if &path[0..1] != "/" {
 			format!("{}/{}/{}", base_dir, BASE_DIR, path)
 		} else {
@@ -55,14 +58,15 @@ fn main() {
 		write!(
 			out,
 			"{{
-			const LENGTH: usize = include_bytes!(\"{}\").len();
-			const ALIGNED: Aligned<LENGTH> = Aligned(*include_bytes!(\"{}\"));
+			const LENGTH: usize = include_bytes!({:?}).len();
+			const ALIGNED: Aligned<LENGTH> = Aligned(*include_bytes!({:?}));
 			Binary {{
-				name: \"{}\",
+				name: {:?},
+				compatible: {:?},
 				data: &ALIGNED.0,
 			}}
 		}},",
-			path, path, name
+			path, path, name, compat
 		)
 		.unwrap();
 	}

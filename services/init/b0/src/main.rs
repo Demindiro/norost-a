@@ -58,8 +58,81 @@ fn main() {
 	// WHYYYYYYYYYYYYYYYY
 	unsafe { dux::init() };
 
-	sys_log!("Mapping devices");
-	device_tree::map_devices();
+	device_tree::iter_devices(|name, compat, addr_size| {
+		for bin in BINARIES.iter() {
+			if !compat.contains(&bin.compatible.as_bytes()) {
+				continue;
+			}
+
+			sys_log!(
+				"Using driver {:?} for {:?}",
+				bin.name,
+				core::str::from_utf8(name).unwrap()
+			);
+
+			// FIXME completely, utterly unsound
+			let data = unsafe {
+				core::slice::from_raw_parts(
+					bin.data.as_ptr().cast(),
+					(bin.data.len() + dux::Page::OFFSET_MASK) / dux::Page::SIZE,
+				)
+			};
+			// TODO which terminology to use? Ports seems... wrong?
+			let mut buf = [0u8; 256];
+			let mut buf = &mut buf[..];
+			let mut args = [&[][..]; 8];
+			let args = {
+				let mut i = 0;
+				fn fmt(buf: &mut [u8], mut num: u128) -> (&mut [u8], &mut [u8]) {
+					let mut i = buf.len() - 1;
+					while {
+						let d = (num % 16) as u8;
+						buf[i] = (d < 10).then(|| b'0').unwrap_or(b'a' - 10) + d;
+						num /= 16;
+						i -= 1;
+						num != 0
+					} {}
+					buf.split_at_mut(i + 1)
+				}
+				for (i, (a, s)) in addr_size.iter().copied().enumerate() {
+					let (b, a) = fmt(buf, a);
+					let (b, s) = fmt(b, s);
+					args[i * 2 + 0] = a;
+					args[i * 2 + 1] = s;
+					buf = b;
+				}
+				&args[..addr_size.len()]
+			};
+			let address = dux::task::spawn_elf(data, &mut [].iter().copied(), &args)
+				.expect("failed to spawn task");
+
+			// Allocate a single page for transmitting data.
+			let raw = dux::mem::reserve_range(None, 1)
+				.unwrap()
+				.as_ptr()
+				.cast::<u8>();
+			let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
+			assert_eq!(ret.status, 0);
+
+			sys_log!("Registering task {} as {:?}", address, bin.name);
+
+			// Add to registry
+			dux::task::registry::add(bin.name.as_bytes(), address)
+				.expect("failed to add registry entry");
+
+			return;
+		}
+
+		let _ = core::str::from_utf8(name)
+			.map(|name| sys_log!("No driver found for {:?}", name))
+			.map_err(|_| sys_log!("No driver found for {:?}", name));
+		for c in compat {
+			let _ = core::str::from_utf8(c)
+				.map(|c| sys_log!("  {:?}", c))
+				.map_err(|_| sys_log!("  {:?}", c));
+		}
+	});
+
 	pci::init_blk_device();
 
 	sys_log!("Opening FAT FS");
@@ -82,59 +155,18 @@ fn main() {
 		}
 	};
 
-	for bin in BINARIES.iter() {
-		sys_log!("Spawning task {:?}", bin.name);
-
+	BINARIES.iter().find(|e| e.compatible == "init").map(|e| {
 		// FIXME completely, utterly unsound
 		let data = unsafe {
 			core::slice::from_raw_parts(
-				bin.data.as_ptr().cast(),
-				(bin.data.len() + dux::Page::OFFSET_MASK) / dux::Page::SIZE,
+				e.data.as_ptr().cast(),
+				(e.data.len() + dux::Page::OFFSET_MASK) / dux::Page::SIZE,
 			)
 		};
-		// TODO which terminology to use? Ports seems... wrong?
-		let ports = [(dux::task::Address::from(2), kernel::ipc::UUID::from(0x1234))];
+		let ports = [(dux::task::Address::from(1), kernel::ipc::UUID::from(0x0))];
 		let ports = &mut ports.iter().copied();
-		let mut buf = [0u8; 256];
-		let mut args = [&[][..]; 8];
-		let args = if bin.name != "uart" {
-			args[0..3].copy_from_slice(&[&b"red"[..], &b"wololo"[..], &b"blue"[..]]);
-			&args[..3]
-		} else {
-			fn fmt(buf: &mut [u8], mut num: usize) -> &[u8] {
-				let mut i = buf.len() - 1;
-				while {
-					let d = (num % 16) as u8;
-					buf[i] = (d < 10).then(|| b'0').unwrap_or(b'a' - 10) + d;
-					num /= 16;
-					i -= 1;
-					num != 0
-				} {}
-				&buf[i + 1..]
-			}
-			let (a, b) = buf.split_at_mut(32);
-			args[0] = fmt(a, unsafe { device_tree::UART_ADDRESS.unwrap().get() });
-			args[1] = fmt(b, unsafe { device_tree::UART_SIZE.unwrap().get() });
-			&args[..2]
-		};
-		kernel::dbg!(core::str::from_utf8(args[0]));
-		kernel::dbg!(core::str::from_utf8(args[1]));
-		let address = dux::task::spawn_elf(data, ports, &args).expect("failed to spawn task");
-
-		// Allocate a single page for transmitting data.
-		let raw = dux::mem::reserve_range(None, 1)
-			.unwrap()
-			.as_ptr()
-			.cast::<u8>();
-		let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
-		assert_eq!(ret.status, 0);
-
-		sys_log!("Registering task {} as {:?}", address, bin.name);
-
-		// Add to registry
-		dux::task::registry::add(bin.name.as_bytes(), address)
-			.expect("failed to add registry entry");
-	}
+		dux::task::spawn_elf(data, ports, &[]).expect("failed to spawn task");
+	});
 
 	loop {
 		// Wait for packets.
@@ -203,8 +235,6 @@ fn main() {
 				let path = rxq.name.map(|name| unsafe {
 					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
 				});
-
-				kernel::dbg!(&*rxq);
 
 				// Write data
 				let name = core::str::from_utf8(path.unwrap()).unwrap();
