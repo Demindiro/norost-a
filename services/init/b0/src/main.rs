@@ -92,7 +92,14 @@ fn main() {
 				(bin.data.len() + dux::Page::OFFSET_MASK) / dux::Page::SIZE,
 			)
 		};
-		let address = dux::task::spawn_elf(data).expect("failed to spawn task");
+		// TODO which terminology to use? Ports seems... wrong?
+		let ports = [(dux::task::Address::from(2), kernel::ipc::UUID::from(0))];
+		let ports = [(
+			dux::task::Address::from(2),
+			kernel::ipc::UUID::from(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
+		)];
+		let address =
+			dux::task::spawn_elf(data, &mut ports.iter().copied()).expect("failed to spawn task");
 
 		// Allocate a single page for transmitting data.
 		let raw = dux::mem::reserve_range(None, 1)
@@ -176,6 +183,8 @@ fn main() {
 				let path = rxq.name.map(|name| unsafe {
 					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
 				});
+
+				kernel::dbg!(&*rxq);
 
 				// Write data
 				let name = core::str::from_utf8(path.unwrap()).unwrap();

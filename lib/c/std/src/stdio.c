@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/uio.h>
 #include "common.h"
+#include "fd.h"
 #include "format.h"
 
 // FIXME this is temporary as we currently rely on GCC's stddef, which doesn't have ssize_t
@@ -18,13 +19,9 @@ typedef signed long ssize_t;
 #define MODE_UPDATE  (0x8)  // "+"
 #define MODE_EXIST   (0x10) // "x"
 
-static FILE _stdin = {._address = 2,._fd = 0,._uuid = KERNEL_UUID(0, 0) };
-static FILE _stdout = {._address = 2,._fd = 1,._uuid = KERNEL_UUID(0, 0) };
-static FILE _stderr = {._address = 2,._fd = 2,._uuid = KERNEL_UUID(0, 0) };
-
-FILE *stdin = &_stdin;
-FILE *stdout = &_stdout;
-FILE *stderr = &_stderr;
+int fileno(FILE * stream) {
+	return (stream - __files_list) / sizeof(*stream);
+}
 
 int fputc(int c, FILE * stream)
 {
@@ -34,7 +31,7 @@ int fputc(int c, FILE * stream)
 		.iov_len = 1,
 	};
 
-	ssize_t ret = writev(stream->_fd, &iov, 1);
+	ssize_t ret = writev(fileno(stream), &iov, 1);
 	if (ret >= 0) {
 		ret = chr;
 	}
@@ -150,21 +147,21 @@ FILE *fopen(const char *path, const char *mode)
 		return NULL;
 	}
 
-	// FIXME don't use statics
 	static char path_buf[4096] __attribute__ ((__aligned__(4096)));
-	static FILE f = {};
+
+	// Take a free file
+	FILE *f = __std_pop_free_file();
 
 	size_t len = strlen(path);
 	len = len < sizeof(path_buf) - 1 ? len : sizeof(path_buf) - 1;
 	memcpy(path_buf, path, len);
 	path_buf[len] = '\0';
-	f._address = 0;
-	f._uuid = kernel_uuid(0, 0);
-	f._path = path_buf;
-	f._fd = -1;
-	f._position = 0;
+	f->_address = 0;
+	f->_uuid = kernel_uuid(0, 0);
+	f->_path = path_buf;
+	f->_position = 0;
 
-	return &f;
+	return f;
 }
 
 size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
@@ -356,7 +353,7 @@ int vfprintf(FILE * stream, const char *format, va_list args)
 		uint16_t slot = dux_reserve_transmit_entry(&pkt);
 
 		// Fill out the request entry
-		pkt->uuid = kernel_uuid(-1, -1);
+		pkt->uuid = stream->_uuid;
 		pkt->flags = 0;
 		pkt->address = stream->_address;
 		pkt->offset = total_written;

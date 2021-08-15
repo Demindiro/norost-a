@@ -15,12 +15,16 @@ typedef struct {
 	uint64_t _position;
 	pid_t _address;
 	const char *_path;
-	int _fd;
 } FILE;
 
-extern FILE *stdin;
-extern FILE *stdout;
-extern FILE *stderr;
+extern FILE *__files_list;
+extern size_t __files_count;
+
+#define stdin  (&__files_list[0])
+#define stdout (&__files_list[1])
+#define stderr (&__files_list[2])
+
+int fileno(FILE * stream);
 
 int fputc(int c, FILE * stream);
 

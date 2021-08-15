@@ -40,6 +40,12 @@ impl fmt::Display for Address {
 	}
 }
 
+impl From<usize> for Address {
+	fn from(tid: usize) -> Self {
+		Self(tid)
+	}
+}
+
 #[derive(Debug)]
 pub enum SpawnElfError {
 	ReserveError(mem::ReserveError),
@@ -47,7 +53,10 @@ pub enum SpawnElfError {
 }
 
 /// Create a new task from an ELF file.
-pub fn spawn_elf(data: &[kernel::Page]) -> Result<Address, SpawnElfError> {
+pub fn spawn_elf(
+	data: &[kernel::Page],
+	object_entries: &mut dyn ExactSizeIterator<Item = (Address, kernel::ipc::UUID)>,
+) -> Result<Address, SpawnElfError> {
 	use xmas_elf::ElfFile;
 
 	// SAFETY: the data is guaranteed to be properly aligned and have the proper size
@@ -148,6 +157,7 @@ pub fn spawn_elf(data: &[kernel::Page]) -> Result<Address, SpawnElfError> {
 
 	// Allocate a stack
 	{
+		// Allocate
 		let stack_pages = 16;
 		let addr =
 			mem::allocate_range(None, stack_pages, RWX::RW).map_err(SpawnElfError::ReserveError)?;
@@ -155,6 +165,22 @@ pub fn spawn_elf(data: &[kernel::Page]) -> Result<Address, SpawnElfError> {
 		reserved_ranges.0[reserved_ranges.1] = Some((addr, stack_pages));
 		reserved_ranges.1 += 1;
 
+		let l = object_entries.len();
+
+		unsafe {
+			// Push address + UUID entries on the stack
+			let mut sp = addr.as_ptr().add(stack_pages);
+			sp = sp.cast::<usize>().sub(1).cast();
+			sp.cast::<usize>().write(object_entries.len());
+			for (addr, uuid) in object_entries {
+				sp = sp.cast::<Address>().sub(1).cast();
+				sp.cast::<Address>().write(addr);
+				sp = sp.cast::<kernel::ipc::UUID>().sub(1).cast();
+				sp.cast::<kernel::ipc::UUID>().write(uuid);
+			}
+		}
+
+		// Map
 		let mut virt_a = 0x7fff_0000;
 		let mut offset = 0x0;
 

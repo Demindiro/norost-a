@@ -2,12 +2,30 @@
 
 .globl _start
 
-.equ	FILE_UUID, 0
-.equ	FILE_POSITION, (FILE_UUID + 16)
-.equ	FILE_ADDRESS, (FILE_POSITION + 8)
+## Definition of FILE in stdio.h at the time of writing:
+# typedef struct {
+#	kernel_uuid_t _uuid;
+# 	uint64_t _position;
+#	pid_t _address;
+#	const char *_path;
+# } FILE;
 
-.set	__files_list, 0x87650000
-# Same thing, no errors
+.struct	0
+
+
+.equ	FILE_UUID_SIZE, 16
+.equ	FILE_POSITION_SIZE, 8
+.equ	FILE_ADDRESS_SIZE, 8
+.equ	FILE_PATH_SIZE, 8
+
+.equ	FILE_UUID, 0
+.equ	FILE_POSITION, (FILE_UUID + FILE_UUID_SIZE)
+.equ	FILE_ADDRESS, (FILE_POSITION + FILE_POSITION_SIZE)
+.equ	FILE_PATH, (FILE_ADDRESS + FILE_ADDRESS_SIZE)
+
+.equ	SIZEOF_FILE, (FILE_PATH + FILE_PATH_SIZE)
+
+# The actual address of the files list that will be stored in __files_list
 .equ	__FILES_LIST, 0x87650000
 
 .section .text
@@ -24,19 +42,25 @@ _start:
 	# Amount of entries
 	ld		s1, -8(sp)
 	# Store entry
-	la		a0, __files_count
-	sd		s1, 0(a0)
+	la		t5, __files_count
+	sd		s1, 0(t5)
 	# Adjust for element count
 	addi	sp, sp, -8
-	# Multiply by 8 + 16 (64-bit address + 128 bit UUID)
+
+	# Don't try to copy or alias anything if stdin is not defined
+	beqz	s1, 3f
+
+	# Backup s1 in t3 as we need it later
+	mv		t3, s1
+	# Multiply by 8 + 16 (64-bit address + 128 bit UUID) & determine
+	# end address of stack pointer
 	slli	a1, s1, 3
 	slli	s1, s1, 4
-	add		s1, a1, a1
+	add		s1, s1, a1
 	sub		s1, sp, s1
 
 	# Load the address with files and map a page in it.
 	# TODO account for the actual amount of memory needed.
-	#la		s0, __files_list
 	li		s0, __FILES_LIST
 	li		a7, 3			# mem_alloc
 	mv		a0, s0			# address
@@ -46,6 +70,13 @@ _start:
 	# TODO add some way to abort
 0:
 	bnez	a0, 0b
+
+	# Set the address to the files list.
+	la		a0, __files_list
+	sd		s0, 0(a0)
+
+	# Backup s0 in t4 as we need it later
+	mv		t4, s0
 
 	# Jump to the loop check
 	j		1f
@@ -59,10 +90,38 @@ _start:
 
 	# Go to next element
 	addi	sp, sp, -24
-	addi	s0, s0, 24
+	addi	s0, s0, SIZEOF_FILE
 1:
 	# Repeat if we haven't reached the end
 	bne		s1, sp, 0b
+
+	# Alias stdin to stdout if it is not defined
+	addi	t0, t3, -1
+	bgtz	t0, 0f
+	ld		t0, 0 * SIZEOF_FILE + FILE_ADDRESS (t4)
+	ld		t1, 0 * SIZEOF_FILE + FILE_UUID + 0 (t4)
+	ld		t2, 0 * SIZEOF_FILE + FILE_UUID + 8 (t4)
+	sd		t0, 1 * SIZEOF_FILE + FILE_ADDRESS (t4)
+	sd		t1, 1 * SIZEOF_FILE + FILE_UUID + 0 (t4)
+	sd		t2, 1 * SIZEOF_FILE + FILE_UUID + 8 (t4)
+0:
+
+	# Alias stdout to stderr if it is not defined
+	addi	t0, t3, -2
+	bgtz	t0, 0f
+	ld		t0, 1 * SIZEOF_FILE + FILE_ADDRESS (t4)
+	ld		t1, 1 * SIZEOF_FILE + FILE_UUID + 0 (t4)
+	ld		t2, 1 * SIZEOF_FILE + FILE_UUID + 8 (t4)
+	sd		t0, 2 * SIZEOF_FILE + FILE_ADDRESS (t4)
+	sd		t1, 2 * SIZEOF_FILE + FILE_UUID + 0 (t4)
+	sd		t2, 2 * SIZEOF_FILE + FILE_UUID + 8 (t4)
+
+	# Adjust the file count as appropriate
+	li		t0, 3
+	sd		t0, 0(t5)
+0:
+
+3:
 
 	## Load the argument count & pointer & make all the argument strings
 	## zero-terminated.

@@ -23,7 +23,10 @@ POSIX compatibility
 
 For programs that assume a POSIX-y environment, the first entry is interpreted
 as ``stdin`` & the second as ``stdout``. If a third entry is pushed it will be
-used for ``stderr``, otherwise it will alias ``stdout``.
+used for ``stderr``, otherwise it will alias ``stdout``. If no second entry is
+pushed ``stdout`` will be aliased to ``stdin``.
+
+If no entries are pushed then best of luck.
 
 
 Passing arguments
