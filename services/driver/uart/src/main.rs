@@ -194,16 +194,25 @@ fn main() {
 	// FIXME move this to rtbegin
 	unsafe { dux::init() };
 
-	for a in rtbegin::args() {
-		kernel::dbg!(core::str::from_utf8(a).unwrap());
-	}
+	let mut args = rtbegin::args();
+	let mut addr = args.next().unwrap();
+	let mut size = args.next().unwrap();
+	args.next().ok_or(()).unwrap_err();
+
+	let addr = usize::from_str_radix(core::str::from_utf8(addr).unwrap(), 16).unwrap();
+	let size = usize::from_str_radix(core::str::from_utf8(size).unwrap(), 16).unwrap();
 
 	// Set up the notification handler _now_.
 	let ret = unsafe { kernel::io_set_notify_handler(notification_handler_entry) };
 	assert_eq!(ret.status, 0, "failed to set notify handler");
 
 	// Setup the UART device.
-	unsafe { init(0x10000000 / kernel::Page::SIZE, 1) };
+	unsafe {
+		init(
+			addr / kernel::Page::SIZE,
+			(size + kernel::Page::MASK) / kernel::Page::SIZE,
+		)
+	};
 
 	// Reserve the UART interrupt.
 	let ret = unsafe { kernel::sys_reserve_interrupt(0xa) };

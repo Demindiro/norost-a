@@ -3,6 +3,7 @@
 //! This module keeps track of used devices & their addresses.
 
 use core::convert::{TryFrom, TryInto};
+use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
 pub const PCI_ADDRESS: NonNull<u8> = unsafe { NonNull::new_unchecked(0x2000_0000 as *mut _) };
@@ -10,6 +11,9 @@ pub const PCI_MMIO_ADDRESS: NonNull<u8> = unsafe { NonNull::new_unchecked(0x3000
 pub static mut PCI_MMIO_PHYSICAL: (usize, usize) = (0, 0);
 pub static mut PCI_SIZE: usize = 0;
 pub const PLIC_ADDRESS: NonNull<u32> = unsafe { NonNull::new_unchecked(0x4_0000_0000 as *mut _) };
+
+pub static mut UART_ADDRESS: Option<NonZeroUsize> = None;
+pub static mut UART_SIZE: Option<NonZeroUsize> = None;
 
 pub fn map_devices() {
 	let dtb = unsafe {
@@ -122,6 +126,12 @@ pub fn map_devices() {
 							let reg = reg.unwrap();
 							let (addr, reg) = unpack_reg(reg, node.address_cells);
 							let (size, reg) = unpack_reg(reg, node.size_cells);
+							unsafe {
+								UART_ADDRESS =
+									Some(NonZeroUsize::new(addr.try_into().unwrap()).unwrap());
+								UART_SIZE =
+									Some(NonZeroUsize::new(size.try_into().unwrap()).unwrap());
+							}
 							assert!(reg.is_empty());
 							// TODO design a protocol for communicating the address with the driver
 						}

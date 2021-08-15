@@ -95,7 +95,30 @@ fn main() {
 		// TODO which terminology to use? Ports seems... wrong?
 		let ports = [(dux::task::Address::from(2), kernel::ipc::UUID::from(0x1234))];
 		let ports = &mut ports.iter().copied();
-		let args = [&b"red"[..], &b"wololo"[..], &b"blue"[..]];
+		let mut buf = [0u8; 256];
+		let mut args = [&[][..]; 8];
+		let args = if bin.name != "uart" {
+			args[0..3].copy_from_slice(&[&b"red"[..], &b"wololo"[..], &b"blue"[..]]);
+			&args[..3]
+		} else {
+			fn fmt(buf: &mut [u8], mut num: usize) -> &[u8] {
+				let mut i = buf.len() - 1;
+				while {
+					let d = (num % 16) as u8;
+					buf[i] = (d < 10).then(|| b'0').unwrap_or(b'a' - 10) + d;
+					num /= 16;
+					i -= 1;
+					num != 0
+				} {}
+				&buf[i + 1..]
+			}
+			let (a, b) = buf.split_at_mut(32);
+			args[0] = fmt(a, unsafe { device_tree::UART_ADDRESS.unwrap().get() });
+			args[1] = fmt(b, unsafe { device_tree::UART_SIZE.unwrap().get() });
+			&args[..2]
+		};
+		kernel::dbg!(core::str::from_utf8(args[0]));
+		kernel::dbg!(core::str::from_utf8(args[1]));
 		let address = dux::task::spawn_elf(data, ports, &args).expect("failed to spawn task");
 
 		// Allocate a single page for transmitting data.
