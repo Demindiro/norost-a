@@ -93,13 +93,10 @@ fn main() {
 			)
 		};
 		// TODO which terminology to use? Ports seems... wrong?
-		let ports = [(dux::task::Address::from(2), kernel::ipc::UUID::from(0))];
-		let ports = [(
-			dux::task::Address::from(2),
-			kernel::ipc::UUID::from(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
-		)];
-		let address =
-			dux::task::spawn_elf(data, &mut ports.iter().copied()).expect("failed to spawn task");
+		let ports = [(dux::task::Address::from(2), kernel::ipc::UUID::from(0x1234))];
+		let ports = &mut ports.iter().copied();
+		let args = [&b"red"[..], &b"wololo"[..], &b"blue"[..]];
+		let address = dux::task::spawn_elf(data, ports, &args).expect("failed to spawn task");
 
 		// Allocate a single page for transmitting data.
 		let raw = dux::mem::reserve_range(None, 1)

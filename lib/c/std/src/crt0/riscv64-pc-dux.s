@@ -37,37 +37,43 @@ _start:
 	la		gp, __global_pointer$
 	.option pop
 
+
 	## Load the argument count & pointer & make all the argument strings
 	## zero-terminated.
-	ld		a0, -8(sp)
-	ld		a1, -16(sp)
+	ld		s3, -8(sp)
+	addi	s4, sp, -16 + 8
 	addi	sp, sp, -8
 	# Multiply by 8
-	slli	s0, a0, 3
-	add		s0, sp, s0
+	slli	s0, s3, 3
+	sub		s4, s4, s0
+	sub		s0, sp, s0
 
 	# Iterate all strings
 	j		1f
 0:
 	ld		t0, -8(sp)
-	lh		t1, 0(s1)
+	lh		t1, 0(t0)
+	add		t1, t0, t1
 
 	# Shift the string to the left by two bytes
+	j		3f
 2:
 	# Since strings must be aligned on a 2 byte boundary we can safely use
 	# lh/sh
 	lh		t2, 2(t0)
 	sh		t2, 0(t0)
-	addi	t1, t1, -2
-	bnez	t1, 2b
+	addi	t0, t0, 2
+3:
+	blt		t0, t1, 2b
 
 	# Put a null terminator
-	sb		zero, 0(t0)
+	sb		zero, 0(t1)
 
 	addi	sp, sp, -8
 1:
 	# Repeat if we haven't reached the end
 	bne		s0, sp, 0b
+
 
 	## Set up stdin, stdout and stderr.
 	# the stack pointer is set to the very top of the stack
@@ -164,6 +170,8 @@ _start:
 	call	__posix_init
 
 	## Run main
+	mv		a0, s3
+	mv		a1, s4
 	call	main
 
 	## Exit (TODO)

@@ -56,6 +56,7 @@ pub enum SpawnElfError {
 pub fn spawn_elf(
 	data: &[kernel::Page],
 	object_entries: &mut dyn ExactSizeIterator<Item = (Address, kernel::ipc::UUID)>,
+	arguments: &[&[u8]],
 ) -> Result<Address, SpawnElfError> {
 	use xmas_elf::ElfFile;
 
@@ -155,6 +156,8 @@ pub fn spawn_elf(
 		}
 	}
 
+	let mut stack_offset = 0;
+
 	// Allocate a stack
 	{
 		// Allocate
@@ -170,9 +173,40 @@ pub fn spawn_elf(
 		unsafe {
 			let mut sp = addr.as_ptr().add(stack_pages);
 
+			// Copy strings onto stack
+			for arg in arguments.iter().copied() {
+				use core::convert::TryInto;
+				let words = ((arg.len() + 1) / 2) + 1;
+				sp = sp.cast::<u16>().sub(words).cast();
+				// Write length
+				sp.cast::<u16>().write(arg.len().try_into().unwrap());
+				// let sp = ... prevents accidently mutating the original sp
+				let sp = sp.cast::<u16>().add(1);
+				// Copy characters
+				for (i, c) in arg.iter().copied().enumerate() {
+					sp.cast::<u8>().add(i).write(c);
+				}
+				// Adjust stack base address as appropriate
+				stack_offset += 2 * words;
+			}
+
+			// Align to usize boundary
+			let size = core::mem::size_of::<usize>();
+			let offt = (size - sp.cast::<u8>().align_offset(size)) & (size - 1);
+			sp = sp.cast::<u8>().sub(offt).cast();
+			stack_offset += offt;
+
+			let mut strings_base = (0x8000_0000 - stack_offset + offt) as *const u8;
+
 			// Push arguments
 			sp = sp.cast::<usize>().sub(1).cast();
-			sp.cast::<usize>().write(0);
+			sp.cast::<usize>().write(arguments.len());
+			for arg in arguments.iter().rev().copied() {
+				sp = sp.cast::<*const u8>().sub(1).cast();
+				sp.cast::<*const u8>().write(strings_base);
+				let bytes = ((arg.len() + 1) & !1) + 2;
+				strings_base = strings_base.add(bytes);
+			}
 
 			// Push address + UUID entries on the stack
 			sp = sp.cast::<usize>().sub(1).cast();
@@ -210,7 +244,7 @@ pub fn spawn_elf(
 			mappings.as_ptr(),
 			i,
 			pc as *const _,
-			0x8000_0000 as *const _,
+			(0x8000_0000 - stack_offset) as *const _,
 		)
 	};
 	match ret.status {

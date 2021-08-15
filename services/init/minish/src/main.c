@@ -105,10 +105,19 @@ static void write() {
 }
 extern size_t __files_count;
 int main(int argc, char **argv) {
-	printf("  == test  =  %lu\n", __files_count);
-	printf("  == test2 =  %d\n", argc);
 
 	printf("MiniSH %d.%d.%d\n", VERSION_MAJ, VERSION_MIN, VERSION_REV);
+	printf("Arguments: ");
+	char comma = 0;
+	for (int i = 0; i < argc; i++) {
+		if (comma) {
+			printf(", \"%s\"", argv[i]);
+		} else {
+			printf("\"%s\"", argv[i]);
+			comma = 1;
+		}
+	}
+	puts("");
 
 	for (;;) {
 		printf(">> ");

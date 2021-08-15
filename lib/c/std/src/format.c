@@ -57,7 +57,7 @@ static inline char *format_unsigned_int(uintmax_t value, char *str, size_t size,
 		}
 		unsigned int c = value % base;
 		if (c >= 10) {
-			c += (modifiers & STD_FORMAT_UPPER ? 'A' : 'a');
+			c += (modifiers & STD_FORMAT_UPPER ? 'A' : 'a') - 10;
 		} else {
 			c += '0';
 		}
