@@ -22,6 +22,9 @@ impl Page {
 	/// The end address of the NULL page. This address is inclusive.
 	pub const NULL_PAGE_END: *mut kernel::Page = (Self::SIZE - 1) as *mut _;
 
+	/// The mask of the offset bits.
+	pub const OFFSET_MASK: usize = Self::SIZE - 1;
+
 	/// Try to create new `Page`.
 	pub const fn new(ptr: NonNull<kernel::Page>) -> Result<Self, Unaligned> {
 		// Fuck you rustc
@@ -83,5 +86,44 @@ impl fmt::Pointer for Page {
 impl fmt::Display for Page {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		fmt::Pointer::fmt(self, f)
+	}
+}
+
+/// RWX flags used on pages.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RWX {
+	R = 0b001,
+	W = 0b010,
+	X = 0b100,
+	RW = 0b011,
+	RX = 0b101,
+	RWX = 0b111,
+}
+
+impl fmt::Display for RWX {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::R => "R  ",
+			Self::W => " W ",
+			Self::X => "  X",
+			Self::RW => "RW ",
+			Self::RX => "R X",
+			Self::RWX => "RWX",
+		}
+		.fmt(f)
+	}
+}
+
+impl From<RWX> for u8 {
+	fn from(rwx: RWX) -> Self {
+		match rwx {
+			RWX::R => 0b001,
+			RWX::W => 0b010,
+			RWX::X => 0b100,
+			RWX::RW => 0b011,
+			RWX::RX => 0b101,
+			RWX::RWX => 0b111,
+		}
 	}
 }

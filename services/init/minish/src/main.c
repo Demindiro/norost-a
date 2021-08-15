@@ -103,8 +103,9 @@ static void write() {
 	}
 	fclose(f);
 }
-
+extern size_t __files_count;
 int main() {
+	printf("  == test  =  %lu\n", __files_count);
 
 	printf("MiniSH %d.%d.%d\n", VERSION_MAJ, VERSION_MIN, VERSION_REV);
 

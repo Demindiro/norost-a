@@ -31,6 +31,12 @@ impl RegisterState {
 	pub fn set_pc(&mut self, address: *const ()) {
 		self.pc = address;
 	}
+
+	/// Set the stack pointer to the given address.
+	#[inline(always)]
+	pub fn set_stack_pointer(&mut self, address: *const ()) {
+		self.x[2 - 1] = address as usize;
+	}
 }
 impl Default for RegisterState {
 	fn default() -> Self {

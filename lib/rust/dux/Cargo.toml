@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 kernel = { path = "../kernel", package = "syscalls" }
+xmas-elf = { path = "../../../thirdparty/rust/xmas-elf" }

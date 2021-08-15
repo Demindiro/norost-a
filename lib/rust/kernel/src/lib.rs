@@ -26,6 +26,21 @@ pub struct Return {
 	pub value: usize,
 }
 
+impl Return {
+	pub const OK: usize = 0;
+	pub const INVALID_CALL: usize = 1;
+	pub const NULL_ARGUMENT: usize = 2;
+	pub const MEMORY_OVERLAP: usize = 3;
+	pub const MEMORY_UNAVAILABLE: usize = 4;
+	pub const MEMORY_LOCKED: usize = 5;
+	pub const MEMORY_NOT_ALLOCATED: usize = 6;
+	pub const MEMORY_INVALID_PROTECTION_FLAGS: usize = 7;
+	pub const BAD_ALIGNMENT: usize = 8;
+	pub const NOT_FOUND: usize = 9;
+	pub const TOO_LONG: usize = 10;
+	pub const OCCUPIED: usize = 11;
+}
+
 pub mod ipc {
 	use super::*;
 	use core::convert::TryFrom;

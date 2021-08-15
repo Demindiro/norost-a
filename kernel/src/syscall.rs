@@ -79,6 +79,8 @@ pub enum Status {
 	BadAlignment = 8,
 	/// Whatever was looked for was not found.
 	NotFound = 9,
+	TooLong = 10,
+	Occupied = 11,
 }
 
 impl From<Status> for u8 {
@@ -344,7 +346,10 @@ mod sys {
 			}
 			arch::set_supervisor_userpage_access(false);
 			let task = Task::new(vms).unwrap();
+			logcall!("  pc  {:p}", program_counter as *const ());
+			logcall!("  sp  {:p}", stack_pointer as *const ());
 			task.set_pc(program_counter as *const ());
+			task.set_stack_pointer(stack_pointer as *const ());
 			let group = Group::get(0).unwrap();
 			let id = group.insert(task).unwrap();
 			Return(Status::Ok, id)
@@ -509,14 +514,20 @@ mod sys {
 		/// Add an entry to the registry. If the address is `usize::MAX`, it will be replaced by
 		/// the calling tasks' address.
 		[_] sys_registry_add(name, name_len, address) {
+			use task::registry;
 			let address = (address == usize::MAX)
 				.then(task::Executor::current_address)
 				.unwrap_or(task::Address::todo(address));
 			arch::set_supervisor_userpage_access(true);
 			let name = unsafe { core::slice::from_raw_parts(name as *const u8, name_len.into()) };
-			task::registry::add(name, address);
+			let ret = match registry::add(name, address) {
+				Ok(()) => Return(Status::Ok, 0),
+				Err(registry::AddError::Occupied) => Return(Status::Occupied, 0),
+				Err(registry::AddError::NameTooLong) => Return(Status::TooLong, 0),
+				Err(registry::AddError::RegistryFull) => Return(Status::MemoryUnavailable, 0),
+			};
 			arch::set_supervisor_userpage_access(false);
-			Return(Status::Ok, 0)
+			ret
 		}
 	}
 

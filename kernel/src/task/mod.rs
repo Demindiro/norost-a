@@ -139,6 +139,11 @@ impl Task {
 		self.inner().register_state.set_pc(address);
 	}
 
+	/// Set the stack pointer of this task to the given address.
+	pub fn set_stack_pointer(&self, address: *const ()) {
+		self.inner().register_state.set_stack_pointer(address);
+	}
+
 	/// Begin executing this task.
 	fn execute(&self, executor_id: u16) -> Result<!, Claimed> {
 		self.inner().shared_state.virtual_memory.activate();

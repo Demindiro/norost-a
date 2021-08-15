@@ -83,109 +83,16 @@ fn main() {
 	};
 
 	for bin in BINARIES.iter() {
-		// SAFETY: all zeroes TaskSpawnMapping is valid.
-		let mut mappings = unsafe {
-			core::mem::MaybeUninit::<[kernel::TaskSpawnMapping; 16]>::zeroed().assume_init()
+		sys_log!("Spawning task {:?}", bin.name);
+
+		// FIXME completely, utterly unsound
+		let data = unsafe {
+			core::slice::from_raw_parts(
+				bin.data.as_ptr().cast(),
+				(bin.data.len() + dux::Page::OFFSET_MASK) / dux::Page::SIZE,
+			)
 		};
-		let mut i = 0;
-		let mut pc = 0;
-
-		sys_log!("  {}: {:p}", bin.name, bin.data);
-		sys_log!("");
-
-		sys_log!("Listing binary addresses:");
-
-		let mut fixme_terrible_writepage_hack = None;
-
-		let elf = ElfFile::new(bin.data).unwrap();
-		for ph in elf.program_iter() {
-			if ph.get_type().unwrap() != xmas_elf::program::Type::Load {
-				continue;
-			}
-
-			sys_log!("");
-			sys_log!("  Offset  : 0x{:x}", ph.offset());
-			sys_log!("  VirtAddr: 0x{:x}", ph.virtual_addr());
-			sys_log!("  PhysAddr: 0x{:x}", ph.physical_addr());
-			sys_log!("  FileSize: 0x{:x}", ph.file_size());
-			sys_log!("  Mem Size: 0x{:x}", ph.mem_size());
-			sys_log!("  Flags   : {}", ph.flags());
-			sys_log!("  Align   : 0x{:x}", ph.align());
-
-			let mut offset = ph.offset() & !0xfff;
-			let mut page_offset = ph.offset() & 0xfff;
-			let mut virt_a = ph.virtual_addr() & !0xfff;
-
-			let file_pages = ((ph.file_size() + page_offset + 0xfff) & !0xfff) / 0x1000;
-			let mem_pages = ((ph.mem_size() + page_offset + 0xfff) & !0xfff) / 0x1000;
-			let flags = ph.flags();
-			let flags = u8::from(flags.is_read()) << 0
-				| u8::from(flags.is_write()) << 1
-				| u8::from(flags.is_execute()) << 2;
-
-			if ph.flags().is_write() {
-				// We must copy the pages as they may be written to.
-				// FIXME add a sort of "mmap" to dux so we can avoid this lazy brokenness.
-				let addr = 0xded_0000 as *mut _;
-				assert!(fixme_terrible_writepage_hack.is_none());
-				fixme_terrible_writepage_hack = Some((addr, mem_pages as usize));
-				let ret = unsafe { kernel::mem_alloc(addr, mem_pages as usize, flags) };
-				let addr = addr.cast::<u8>();
-				assert_eq!(ret.status, 0);
-				let data = match ph {
-					xmas_elf::program::ProgramHeader::Ph64(ph) => ph.raw_data(&elf),
-					_ => unreachable!(),
-				};
-				for k in 0..ph.file_size() {
-					unsafe { *addr.add(k as usize) = data[k as usize] };
-				}
-				for k in 0..mem_pages {
-					let self_address = addr.wrapping_add((k * 0x1000) as usize) as *mut _;
-					sys_log!("    {:p} -> 0x{:x} ({:b})", self_address, virt_a, flags);
-					mappings[i] = kernel::TaskSpawnMapping {
-						typ: 0,
-						flags,
-						task_address: virt_a as *mut _,
-						self_address,
-					};
-					i += 1;
-					offset += 0x1000;
-					virt_a += 0x1000;
-				}
-			} else {
-				// It is safe to share the pages
-				for _ in 0..file_pages {
-					let self_address = bin.data.as_ptr().wrapping_add(offset as usize) as *mut _;
-					sys_log!("    {:p} -> 0x{:x} ({:b})", self_address, virt_a, flags);
-					mappings[i] = kernel::TaskSpawnMapping {
-						typ: 0,
-						flags,
-						task_address: virt_a as *mut _,
-						self_address,
-					};
-					i += 1;
-					offset += 0x1000;
-					virt_a += 0x1000;
-				}
-			}
-		}
-		pc = elf.header.pt2.entry_point() as usize;
-		sys_log!("entry:  0x{:x}", pc);
-
-		sys_log!("Spawning task");
-
-		let kernel::Return { status, value: id } =
-			unsafe { kernel::task_spawn(mappings.as_ptr(), i, pc as *const _, core::ptr::null()) };
-
-		assert_eq!(status, 0, "Failed to spawn task");
-
-		sys_log!("Spawned task with ID {}", id);
-
-		// FIXME extra hack to workaround hackiness.
-		if let Some((addr, mem_pages)) = fixme_terrible_writepage_hack {
-			let ret = unsafe { kernel::mem_dealloc(addr.cast(), mem_pages as usize) };
-			assert_eq!(ret.status, 0);
-		}
+		let address = dux::task::spawn_elf(data).expect("failed to spawn task");
 
 		// Allocate a single page for transmitting data.
 		let raw = dux::mem::reserve_range(None, 1)
@@ -195,17 +102,11 @@ fn main() {
 		let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
 		assert_eq!(ret.status, 0);
 
-		sys_log!("Registering task {} as {:?}", id, bin.name);
+		sys_log!("Registering task {} as {:?}", address, bin.name);
 
 		// Add to registry
-		let name = "";
-		let ret = unsafe { kernel::sys_registry_add(bin.name.as_ptr(), bin.name.len(), id) };
-		assert_eq!(ret.status, 0, "failed to add registry entry");
-
-		// Check if we can find the added entry.
-		let ret = unsafe { kernel::sys_registry_get(bin.name.as_ptr(), bin.name.len()) };
-		assert_eq!(ret.status, 0, "failed to get registry entry");
-		kernel::dbg!(ret.value);
+		dux::task::registry::add(bin.name.as_bytes(), address)
+			.expect("failed to add registry entry");
 	}
 
 	loop {

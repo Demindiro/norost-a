@@ -10,7 +10,7 @@
 //! It also manages
 
 use crate::util;
-use crate::Page;
+use crate::{Page, RWX};
 use core::cell::Cell;
 use core::mem;
 use core::ops;
@@ -302,6 +302,43 @@ pub fn unreserve_range(address: Page, _count: usize) -> Result<(), UnreserveErro
 			.map(|i| GLOBAL.reserved_entries[i].start.set(None))
 			.map_err(|_| UnreserveError::InvalidAddress)
 	})
+}
+
+/// Allocate a range of pages.
+///
+/// This automatically reserves a range.
+pub fn allocate_range(
+	address: Option<Page>,
+	count: usize,
+	flags: RWX,
+) -> Result<Page, ReserveError> {
+	let address = reserve_range(address, count)?;
+	let ret = unsafe { kernel::mem_alloc(address.as_ptr(), count, flags.into()) };
+	match ret.status {
+		kernel::Return::OK => Ok(address),
+		r => unreachable!("{}", r),
+	}
+}
+
+/// Deallocate a range of pages.
+///
+/// This automatically unreserves a range.
+///
+/// # Safety
+///
+/// The pages are no longer in use.
+///
+/// # Panics
+///
+/// The pages are not reserved or allocated.
+pub unsafe fn deallocate_range(address: Page, count: usize) {
+	unreserve_range(address, count).expect("failed to deallocate range");
+	let ret = kernel::mem_dealloc(address.as_ptr(), count);
+	match ret.status {
+		kernel::Return::OK => (),
+		kernel::Return::MEMORY_NOT_ALLOCATED => panic!("pages were not allocated"),
+		r => unreachable!("{}", r),
+	}
 }
 
 /// Functions & structures intended for `crate::ipc` but defined here because it depends strongly

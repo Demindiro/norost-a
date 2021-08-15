@@ -14,8 +14,9 @@
 pub mod ipc;
 pub mod mem;
 pub mod page;
+pub mod task;
 
 mod util;
 
 pub use mem::init;
-pub use page::Page;
+pub use page::{Page, RWX};
