@@ -5,14 +5,23 @@ Spawning tasks
 This document describes common conventions when spawning tasks.
 
 
+Passing arguments
+~~~~~~~~~~~~~~~~~
+
+First, the arguments are passed. Each argument is a pointer to a string. Each
+string is prefixed by a ``u16`` indicating the length of the string. A pointer
+to each string is pushed onto the stack. The amount of arguments is indicated
+by an ``usize`` that is pushed before the string pointers.
+
+
 stdin/-out/-err ...
 ~~~~~~~~~~~~~~~~~~~
 
 As there is no notion of a "file descriptor" at the lowest level, the program
 must be told somehow where to read & write data.
 
-This is done by pushing address + UUID entries on the stack. The amount of
-entries is determined by an ``usize`` that is pushed first.
+This is done by pushing address + UUID entries on the stack after the arguments.
+The amount of entries is determined by an ``usize`` that is pushed first.
 
 The program is free to interpret the given entries in any way, i.e. it is not
 obliged to follow any standard such as POSIX.
@@ -27,16 +36,6 @@ used for ``stderr``, otherwise it will alias ``stdout``. If no second entry is
 pushed ``stdout`` will be aliased to ``stdin``.
 
 If no entries are pushed then best of luck.
-
-
-Passing arguments
-~~~~~~~~~~~~~~~~~
-
-After the address + UUID entries are parsed, the arguments are passed. Each
-argument is a pointer to a string. Each string is prefixed by a ``u16``
-indicating the length of the string. A pointer to each string is pushed onto
-the stack. The amount of arguments is indicated by an ``usize`` that is pushed
-before the string pointers.
 
 
 Note on task 0

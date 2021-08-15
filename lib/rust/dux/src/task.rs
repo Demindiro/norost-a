@@ -168,8 +168,13 @@ pub fn spawn_elf(
 		let l = object_entries.len();
 
 		unsafe {
-			// Push address + UUID entries on the stack
 			let mut sp = addr.as_ptr().add(stack_pages);
+
+			// Push arguments
+			sp = sp.cast::<usize>().sub(1).cast();
+			sp.cast::<usize>().write(0);
+
+			// Push address + UUID entries on the stack
 			sp = sp.cast::<usize>().sub(1).cast();
 			sp.cast::<usize>().write(object_entries.len());
 			for (addr, uuid) in object_entries {

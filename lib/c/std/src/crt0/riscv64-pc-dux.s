@@ -37,6 +37,38 @@ _start:
 	la		gp, __global_pointer$
 	.option pop
 
+	## Load the argument count & pointer & make all the argument strings
+	## zero-terminated.
+	ld		a0, -8(sp)
+	ld		a1, -16(sp)
+	addi	sp, sp, -8
+	# Multiply by 8
+	slli	s0, a0, 3
+	add		s0, sp, s0
+
+	# Iterate all strings
+	j		1f
+0:
+	ld		t0, -8(sp)
+	lh		t1, 0(s1)
+
+	# Shift the string to the left by two bytes
+2:
+	# Since strings must be aligned on a 2 byte boundary we can safely use
+	# lh/sh
+	lh		t2, 2(t0)
+	sh		t2, 0(t0)
+	addi	t1, t1, -2
+	bnez	t1, 2b
+
+	# Put a null terminator
+	sb		zero, 0(t0)
+
+	addi	sp, sp, -8
+1:
+	# Repeat if we haven't reached the end
+	bne		s0, sp, 0b
+
 	## Set up stdin, stdout and stderr.
 	# the stack pointer is set to the very top of the stack
 	# Amount of entries
@@ -122,38 +154,6 @@ _start:
 0:
 
 3:
-
-	## Load the argument count & pointer & make all the argument strings
-	## zero-terminated.
-	ld		a0, -8(sp)
-	ld		a1, -16(sp)
-	addi	sp, sp, -8
-	# Multiply by 8
-	slli	s0, a0, 3
-	add		s0, sp, s0
-
-	# Iterate all strings
-	j		1f
-0:
-	ld		t0, -8(sp)
-	lh		t1, 0(s1)
-
-	# Shift the string to the left by two bytes
-2:
-	# Since strings must be aligned on a 2 byte boundary we can safely use
-	# lh/sh
-	lh		t2, 2(t0)
-	sh		t2, 0(t0)
-	addi	t1, t1, -2
-	bnez	t1, 2b
-
-	# Put a null terminator
-	sb		zero, 0(t0)
-
-	addi	sp, sp, -8
-1:
-	# Repeat if we haven't reached the end
-	bne		s0, sp, 0b
 
 	## Set return address to zero to indicate end of call stack
 	addi	sp, sp, -8
