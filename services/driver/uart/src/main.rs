@@ -194,6 +194,10 @@ fn main() {
 	// FIXME move this to rtbegin
 	unsafe { dux::init() };
 
+	for a in rtbegin::args() {
+		kernel::dbg!(core::str::from_utf8(a).unwrap());
+	}
+
 	// Set up the notification handler _now_.
 	let ret = unsafe { kernel::io_set_notify_handler(notification_handler_entry) };
 	assert_eq!(ret.status, 0, "failed to set notify handler");
