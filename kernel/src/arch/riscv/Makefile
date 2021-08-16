@@ -14,7 +14,6 @@ current_dir := $(dir $(mkfile_path))
 QEMU=qemu-system-riscv64 \
 		-s \
 		-machine virt \
-		-nographic \
 		-m 256M \
 		-smp 1 \
 		-bios $(FIRMWARE) \

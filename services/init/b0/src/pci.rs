@@ -89,6 +89,8 @@ pub fn init_blk_device() {
 	}
 	for bus in unsafe { PCI.as_mut().unwrap() }.iter() {
 		for dev in bus.iter() {
+			kernel::dbg!(dev);
+			/*
 			if let Ok(vdev) = virtio::pci::new_device(dev, &Handler, FuckingRust) {
 				unsafe {
 					BLK = Some(vdev);
@@ -97,6 +99,8 @@ pub fn init_blk_device() {
 				//core::mem::forget(vdev); // FIXME I suspect this is unsound. Investigate.
 				return;
 			}
+			*/
 		}
 	}
+	panic!()
 }

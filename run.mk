@@ -5,13 +5,14 @@ VIRTIO_DISK ?= target/disk
 QEMU=qemu-system-riscv64 \
 		-s \
 		-machine virt \
-		-nographic \
 		-m 256M \
 		-smp 1 \
 		-bios $(FIRMWARE) \
 		-kernel $(KERNEL) \
 		-drive file=$(VIRTIO_DISK),format=raw,if=none,id=disk0 \
-		-device virtio-blk-pci,drive=disk0
+		-device virtio-blk-pci,drive=disk0 \
+		-device virtio-gpu-pci \
+		-serial stdio \
 
 dump-dtb:
 	$(QEMU) --machine dumpdtb=/tmp/machine.dtb

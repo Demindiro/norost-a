@@ -10,6 +10,7 @@
 #![feature(ptr_metadata)]
 
 use core::cell::Cell;
+use core::fmt;
 use core::mem;
 use core::ptr::NonNull;
 use simple_endian::{u16le, u32le};
@@ -370,6 +371,16 @@ impl<'a> Device<'a> {
 
 	pub fn header(&self) -> Header {
 		self.pci.get(self.bus, self.device, 0).unwrap()
+	}
+}
+
+impl fmt::Debug for Device<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct("Device")
+			.field("vendor_id", &format_args!("0x{:x}", self.vendor_id()))
+			.field("device_id", &format_args!("0x{:x}", self.device_id()))
+			.field("location", &format_args!("{} -> {}", self.bus, self.device))
+			.finish_non_exhaustive()
 	}
 }
 
