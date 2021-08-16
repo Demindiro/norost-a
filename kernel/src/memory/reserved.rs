@@ -37,6 +37,7 @@
 //! commercial CPUs in the future.
 
 use crate::arch::{Page, PageData};
+use core::mem;
 use core::ptr::NonNull;
 
 /// Structure used to denote a start and end range.
@@ -199,7 +200,7 @@ macro_rules! range {
 			range![@dump LOCAL $($l_name,)*];
 		}
 
-		const _: usize = unsafe { (LOCAL.start.as_ptr() as usize) } - $limit; // Limit check
+		const _: usize = unsafe { mem::transmute::<_, usize>(LOCAL.start.as_ptr()) } - $limit; // Limit check
 	};
 }
 

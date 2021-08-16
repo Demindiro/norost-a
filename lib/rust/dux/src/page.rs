@@ -1,4 +1,5 @@
 use core::fmt;
+use core::mem;
 use core::ptr::NonNull;
 
 /// Error returned if an address isn't properly aligned.
@@ -43,7 +44,7 @@ impl Page {
 	pub const unsafe fn new_unchecked(ptr: *mut kernel::Page) -> Self {
 		// These allow the compiler to catch errors at compile time.
 		//let _: usize = 0 - ptr.align_offset(kernel::Page::SIZE);
-		let _: usize = 0 - (ptr as usize & (kernel::Page::SIZE - 1));
+		let _: usize = 0 - (mem::transmute::<_, usize>(ptr) & (kernel::Page::SIZE - 1));
 		let _: u8 = 0 - !ptr.is_null() as u8;
 		Self(NonNull::new_unchecked(ptr))
 	}

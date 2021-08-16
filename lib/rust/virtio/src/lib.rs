@@ -3,6 +3,7 @@
 #![feature(alloc_prelude)]
 #![feature(bindings_after_at)]
 #![feature(const_btree_new)]
+#![feature(int_log)]
 
 extern crate alloc;
 

@@ -199,28 +199,6 @@ impl Notify {
 	}
 }
 
-trait Log2 {
-	type Output;
-
-	fn log2(&self) -> Self::Output;
-}
-
-impl Log2 for u32 {
-	type Output = u8;
-
-	#[track_caller]
-	fn log2(&self) -> Self::Output {
-		assert_ne!(*self, 0, "Can't take logarithm of 0");
-		let mut l = 0;
-		let mut s = *self;
-		while s & 1 == 0 {
-			l += 1;
-			s >>= 1;
-		}
-		l
-	}
-}
-
 pub trait DeviceHandlerError<A>
 where
 	Self: fmt::Debug,
@@ -301,7 +279,7 @@ where
 						// though, so I can't be bothered.
 						todo!("MMIO area larger than 4GB");
 					}
-					Some(NonZeroU8::new(size.log2() | BAR_64_FLAG).unwrap())
+					Some(NonZeroU8::new(size.log2() as u8 | BAR_64_FLAG).unwrap())
 				}
 				0x6 => panic!("Type bit 0x3 is reserved"),
 				_ => unreachable!(),

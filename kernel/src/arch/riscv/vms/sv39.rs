@@ -18,7 +18,7 @@ use core::ptr::NonNull;
 
 /// The start index of the global kernel table.
 const GLOBAL_KERNEL_TABLE_START_INDEX: usize =
-	unsafe { (GLOBAL.start.as_ptr() as usize >> 30) & 0x1ff };
+	unsafe { (mem::transmute::<_, usize>(GLOBAL.start.as_ptr()) >> 30) & 0x1ff };
 
 /// The root table (level 2).
 const ROOT: NonNull<[Entry; 512]> = VMM_ROOT.start.as_non_null_ptr().cast();
