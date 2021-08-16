@@ -440,10 +440,6 @@ extern "C" fn main(
 
 	let _ = (boot_args, stdout, model);
 
-	// Enable interrupts now that the important setup is done
-	// We could also do this earlier but whatever.
-	arch::enable_interrupts(true);
-
 	task::Executor::init(hart_id.try_into().expect("hart id higher than supported"));
 	task::Executor::next();
 }

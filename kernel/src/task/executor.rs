@@ -65,7 +65,7 @@ impl Executor<'_> {
 				let wait_time = task.inner().wait_time;
 				if wait_time < curr_time {
 					unsafe { NEXT_ID = id };
-					arch::schedule_timer(1_000_000 / 10);
+					arch::schedule_timer(10_000_000 / 10);
 					// If the task is already claimed, just try again.
 					let _ = task.execute(Self::id());
 				}
