@@ -1,22 +1,5 @@
 .globl _start
 
-# Put the pages in the data section such that these pages are included in
-# the final binary
-.section .data
-.align 12
-ppn2:
-	.rept	4096
-	.byte	0
-	.endr
-ppn1:
-	.rept	4096
-	.byte	0
-	.endr
-ppn0:
-	.rept	4096
-	.byte	0
-	.endr
-
 .section .data
 .align 12
 kernel:
@@ -61,6 +44,8 @@ init_size:
 	assert_ge	\rhs, \lhs, \msg
 .endm
 
+# FIXME yikes
+.equ	PAGE_ALLOC_BASE_ADDR, 0x83500000
 
 .section .text
 _start:
@@ -87,11 +72,19 @@ _start:
 	#   s8: Page mask for lower bits (0xfff)
 	#   s9: Page mask for higher bits (~0xfff)
 	#   s10: ELF LOAD constant (1)
+	#
+	#   s11: page alloc
 
 	# Set up global registers
-	la		s0, ppn0
-	la		s1, ppn1
-	la		s2, ppn2
+	li		s11, PAGE_ALLOC_BASE_ADDR
+
+	li		t0, 4096
+	mv		s0, s11
+	add		s11, s11, t0
+	mv		s1, s11
+	add		s11, s11, t0
+	mv		s2, s11
+	add		s11, s11, t0
 
 	la		s3, kernel
 	la		s4, kernel_end
@@ -128,20 +121,38 @@ _start:
 	ld		t0,  4(s5)			# Get flags
 	ld		t1,  8(s5)			# Get offset
 	ld		t2, 16(s5)			# Get virtual address
+	ld		t6, 32(s5)			# Get file size
 	ld		t3, 40(s5)			# Get memory size
+	and		t4, t1, s8			# Lower 12 bits of offset.
+	and		t1, t1, s9			# Higher 52 bits of PPN
 
-	# Round memory size up to a page boundary with (x + PAGE_MASK) & !PAGE_MASK
+	# Ensure that filesz <= memsz
+	assert_ge	t3, t6, err_filesz_ge_memsz
+
+	# Round file size up to a page boundary with (x + mask_offset + PAGE_MASK) & !PAGE_MASK
+	# The base address is automatically rounded down by (x >> MASK_BITS)
+	add		t6, t6, t4
+	add		t6, t6, s8
+	and		t6, t6, s9
+
+	# Round memory size up to a page boundary with (x + mask_offset + PAGE_MASK) & !PAGE_MASK
+	# The base address is automatically rounded down by (x >> MASK_BITS)
+	add		t3, t3, t4
 	add		t3, t3, s8
 	and		t3, t3, s9
 
-	# Create a PTE for each page.
-	add		t1, s3, t1			# Pointer to physical page
-	add		t3, t1, t3			# Pointer to physical end address
+	# Set the actual amount of pages to allocate
+	sub		t3, t3, t6
+
+	# Create a PTE for each file page.
+	add		t1, s3, t1			# Pointer to physical ELF page
+	add		t6, t1, t6			# Pointer to physical end address
 
 	srli	t2, t2, 12			# Get index (pointer) in page table
 	andi	t2, t2, 0x1ff		# TODO check if upper bits are all on
 	slli	t2, t2, 3
 
+	j		3f
 2:
 	# Create PTE
 	srli	t4, t1, 12			# Set PPN[2:0]
@@ -150,16 +161,55 @@ _start:
 	ori		t4, t4, 0x0e		# TODO set RWX flags properly
 
 	# Store PTE
-	add		t5, s0, t2
-	sd		t4, 0(t5)
+	li			t5, 511 * 8
+	assert_le	t2, t5, err_pte_oob
+	add			t5, s0, t2
+	sd			t4, 0(t5)
 
 	# Increment & check if another PTE needs to be inserted.
 	add		t1, t1, s7
 	addi	t2, t2, 8
-	bne		t1, t3, 2b
+3:
+	bne		t1, t6, 2b
 
-	# Perform next iteration or finish.
+	# TODO should we clear the remaining bytes?
+
+	# Allocate pages for the remaining memory
+	add		t3, s11, t3			# Pointer to physical end address
+
+	j		3f
+2:
+	# Clear memory
+	mv		t4, s11
+	add		t5, s11, s7
+4:
+	sd		zero, 0(t4)
+	sd		zero, 8(t4)
+	sd		zero, 16(t4)
+	sd		zero, 24(t4)
+	addi	t4, t4, 32
+	bne		t4, t5, 4b
+
+	# Create PTE
+	srli	t4, s11, 12			# Set PPN[2:0]
+	slli	t4, t4, 10
+	ori		t4, t4, 0xc1		# Set valid, dirty & accessed bits
+	ori		t4, t4, 0x0e		# TODO set RWX flags properly
+
+	# Store PTE
+	li			t5, 511 * 8
+	assert_le	t2, t5, err_pte_oob
+	add			t5, s0, t2
+	sd			t4, 0(t5)
+
+	# Increment & check if another PTE needs to be inserted.
+	add		s11, s11, s7
+	addi	t2, t2, 8
+3:
+	bne		s11, t3, 2b
+
 1:
+	# Perform next iteration or finish.
 	addi	s5, s5, 56
 	bne		s5, s6, 0b
 
@@ -268,3 +318,9 @@ err_pte_pointer_nonzero:
 
 err_identity_map_pte_nonzero:
 	.asciz	"Identity map PTE is non-zero"
+
+err_filesz_ge_memsz:
+	.asciz	"File size larger than memory size"
+
+err_pte_oob:
+	.asciz	"PTE index out of bounds"
