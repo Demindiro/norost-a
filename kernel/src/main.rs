@@ -440,6 +440,7 @@ extern "C" fn main(
 
 	let _ = (boot_args, stdout, model);
 
+	arch::enable_interrupts(true);
 	task::Executor::init(hart_id.try_into().expect("hart id higher than supported"));
 	task::Executor::next();
 }
