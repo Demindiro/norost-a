@@ -323,6 +323,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "virtio_gpu"
+version = "0.1.0"
+dependencies = [
+ "fatfs",
+ "pci",
+ "simple_endian",
+ "syscalls",
+ "vcell",
+ "virtio",
+]
+
+[[package]]
+name = "virtio_gpu_driver"
+version = "0.1.0"
+dependencies = [
+ "driver",
+ "dux",
+ "pci",
+ "syscalls",
+ "virtio",
+ "virtio_gpu",
+]
+
+[[package]]
 name = "wasi"
 version = "0.10.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

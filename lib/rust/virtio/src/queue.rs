@@ -117,6 +117,8 @@ unsafe fn return_table<'s, T>(ptr: &'s mut NonNull<T>, mask: u16) -> &'s mut [T]
 	slice::from_raw_parts_mut(ptr.as_ptr(), size)
 }
 
+static mut DMA_ADDR: usize = 0x300_0000; // FIXME get rid of this crap.
+
 impl<'a> Queue<'a> {
 	/// Create a new split virtqueue and attach it to the device.
 	///
@@ -126,7 +128,10 @@ impl<'a> Queue<'a> {
 		index: u16,
 		max_size: u16,
 	) -> Result<Self, OutOfMemory> {
-		const DMA_ADDR: usize = 0x300_0000; // FIXME *something* else is allocating at this address
+		// FIXME something very, VERY bad is happening here...
+		if unsafe { DMA_ADDR } == 0 {
+			unsafe { DMA_ADDR = 0x300_0000 };
+		}
 
 		// TODO ensure max_size is a power of 2
 		let size = u16::from(config.queue_size.get()).min(max_size) as usize;
@@ -184,6 +189,8 @@ impl<'a> Queue<'a> {
 		config.queue_device.set((u_phys as u64).into());
 		config.queue_size.set((size as u16).into());
 		config.queue_enable.set(1.into());
+
+		unsafe { DMA_ADDR += 4096 * 0x2 };
 
 		Ok(Queue {
 			_config: config,

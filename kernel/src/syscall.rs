@@ -359,6 +359,7 @@ mod sys {
 	sys! {
 		[_] dev_dma_alloc(address, size, _flags) {
 			logcall!("dev_dma_alloc 0x{:x}, {}, 0b{:b}", address, size, _flags);
+			log!("dev_dma_alloc 0x{:x}, {}, 0b{:b}", address, size, _flags);
 			assert_ne!(size, 0, "TODO just return an error doof");
 			// FIXME this should be in the PMM
 			let mut ppns = [None, None, None, None, None, None, None, None];

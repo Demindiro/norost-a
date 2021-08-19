@@ -1,1 +1,2 @@
 virtio_blk		1af4	1001	target/riscv64gc-unknown-none-elf/release/virtio_block_manager
+virtio_gpu		1af4	1050	target/riscv64gc-unknown-none-elf/release/virtio_gpu_driver

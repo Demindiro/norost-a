@@ -12,10 +12,12 @@ members = [
 	"lib/rust/pci",
 	"lib/rust/virtio",
 	"lib/rust/virtio_block",
+	"lib/rust/virtio_gpu",
 	"services/driver/fat",
 	"services/driver/pci",
 	"services/driver/plic",
 	"services/driver/virtio_block",
+	"services/driver/virtio_gpu",
 	"services/driver/uart",
 	"services/init/b0",
 ]

@@ -1,0 +1,14 @@
+[package]
+name = "virtio_gpu_driver"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+kernel = { path = "../../../lib/rust/kernel/", package = "syscalls" }
+dux = { path = "../../../lib/rust/dux/" }
+driver = { path = "../../../lib/rust/driver/" }
+virtio_gpu = { path = "../../../lib/rust/virtio_gpu/" }
+virtio = { path = "../../../lib/rust/virtio/" }
+pci = { path = "../../../lib/rust/pci/" }
