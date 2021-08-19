@@ -12,12 +12,94 @@
 use core::cell::Cell;
 use core::fmt;
 use core::mem;
+use core::num::NonZeroU32;
 use core::ptr::NonNull;
 use simple_endian::{u16le, u32le};
 use vcell::VolatileCell;
 
 pub const BAR_IO_SPACE: u32 = 1;
 pub const BAR_TYPE_MASK: u32 = 0x6;
+
+/// Representation of a base address (BAR).
+///
+/// I/O bar layout:
+///
+/// ```
+/// +------------------------+----------+----------+
+/// | 31 - 2                 | 1        | 0        |
+/// +------------------------+----------+----------+
+/// | 4 byte aligned address | reserved | always 0 |
+/// +------------------------+----------+----------+
+/// ```
+///
+/// MMIO bar layout:
+///
+/// ```
+/// +-------------------------+--------------+-------+----------+
+/// | 31 - 4                  | 3            | 1 - 2 | 0        |
+/// +-------------------------+--------------+-------+----------+
+/// | 16 byte aligned address | prefetchable | type  | always 1 |
+/// +-------------------------+--------------+-------+----------+
+/// ```
+#[repr(transparent)]
+pub struct BaseAddress(VolatileCell<u32le>);
+
+impl BaseAddress {
+	/// Check if a BAR value indicates an MMIO BAR.
+	pub fn is_mmio(value: u32) -> bool {
+		value & 1 == 0
+	}
+
+	/// Check if a BAR value indicates an I/O BAR.
+	pub fn is_io(value: u32) -> bool {
+		value & 1 == 1
+	}
+
+	/// Check if a BAR value indicates a 32 bit BAR.
+	pub fn is_64bit(value: u32) -> bool {
+		value & 0x6 == 0x4
+	}
+
+	/// Check if a BAR value indicates a 64 bit BAR.
+	pub fn is_32bit(value: u32) -> bool {
+		value & 0x6 == 0x0
+	}
+
+	/// Return the size of the memory area a BAR points to.
+	///
+	/// This dirties the register, so the original value must be restored afterwards (if any).
+	///
+	/// If the returned size is None, the original value does not need to be restored.
+	///
+	/// # Returns
+	///
+	/// The size as well as the original value. The size is None if the masked value is 0.
+	#[must_use = "this call dirties the register"]
+	pub fn size(&self) -> (Option<NonZeroU32>, u32) {
+		let og = self.get();
+		let mask = match Self::is_mmio(og) {
+			true => !0xf,
+			false => !0x3,
+		};
+		self.set(u32::MAX);
+		let masked = self.get() & mask;
+		(
+			(masked != 0).then(|| NonZeroU32::new(!masked + 1).unwrap()),
+			og,
+		)
+	}
+
+	/// Return the raw value.
+	#[must_use = "volatile loads cannot be optimized out"]
+	pub fn get(&self) -> u32 {
+		self.0.get().into()
+	}
+
+	/// Set the raw value.
+	pub fn set(&self, value: u32) {
+		self.0.set(value.into());
+	}
+}
 
 /// Common header fields.
 #[repr(C)]
@@ -56,7 +138,7 @@ impl HeaderCommon {
 pub struct Header0 {
 	pub common: HeaderCommon,
 
-	pub base_address: [VolatileCell<u32le>; 6],
+	pub base_address: [BaseAddress; 6],
 
 	cardbus_cis_pointer: VolatileCell<u32le>,
 
@@ -108,7 +190,7 @@ impl Header0 {
 pub struct Header1 {
 	common: HeaderCommon,
 
-	base_address: [VolatileCell<u32le>; 2],
+	base_address: [BaseAddress; 2],
 
 	primary_bus_number: VolatileCell<u8>,
 	secondary_bus_number: VolatileCell<u8>,
@@ -158,8 +240,43 @@ impl<'a> Header<'a> {
 		}
 	}
 
+	pub fn vendor_id(&self) -> u16 {
+		self.common().vendor_id.get().into()
+	}
+
+	pub fn device_id(&self) -> u16 {
+		self.common().device_id.get().into()
+	}
+
+	pub fn base_addresses(&self) -> &[BaseAddress] {
+		match self {
+			Self::H0(h) => &h.base_address[..],
+			Self::H1(h) => &h.base_address[..],
+			Self::Unknown(_) => &[],
+		}
+	}
+
 	pub fn header_type(&self) -> u8 {
 		self.common().header_type.get()
+	}
+
+	pub fn set_command(&self, flags: u16) {
+		self.common().set_command(flags);
+	}
+
+	/// The total size of the header, including padding and capabilities region.
+	#[inline(always)]
+	pub fn size(&self) -> usize {
+		1 << 12
+	}
+
+	pub unsafe fn from_raw(address: *const kernel::Page) -> Self {
+		let hc = &*(address as *const HeaderCommon);
+		match hc.header_type.get() & 0x7f {
+			0 => Self::H0(&*(address as *const Header0)),
+			1 => Self::H1(&*(address as *const Header1)),
+			_ => Self::Unknown(hc),
+		}
 	}
 }
 
@@ -214,6 +331,8 @@ impl<'a> Iterator for CapabilityIter<'a> {
 pub struct PCI {
 	/// The start of the area
 	start: NonNull<kernel::Page>,
+	/// The physical address of the area.
+	physical_address: usize,
 	/// The size of the area in bytes
 	size: usize,
 	/// MMIO ranges for use with base addresses
@@ -231,7 +350,12 @@ impl PCI {
 	/// ## Safety
 	///
 	/// The range must map to a valid PCI MMIO area.
-	pub unsafe fn new(start: NonNull<kernel::Page>, size: usize, mem: &[PhysicalMemory]) -> Self {
+	pub unsafe fn new(
+		start: NonNull<kernel::Page>,
+		physical_address: usize,
+		size: usize,
+		mem: &[PhysicalMemory],
+	) -> Self {
 		let mut mm = [None; 8];
 		for (i, m) in mem.iter().copied().enumerate() {
 			mm[i] = Some(m);
@@ -240,6 +364,7 @@ impl PCI {
 		let alloc_counter = Cell::new(0);
 		Self {
 			start,
+			physical_address,
 			size,
 			mem,
 			alloc_counter,
@@ -253,7 +378,7 @@ impl PCI {
 
 	/// Return a reference to the configuration header for a function.
 	///
-	/// Returns `None` if `vendor_id == 0xffff`
+	/// Returns `None` if `vendor_id == 0xffff`.
 	///
 	/// ## Panics
 	///
@@ -267,15 +392,35 @@ impl PCI {
 		}
 	}
 
+	/// Return the physical address of the configuration header for a function.
+	///
+	/// Useful if passing to a separate driver task.
+	///
+	/// ## Panics
+	///
+	/// If either the device or function are out of bounds.
+	fn get_physical_address(&self, bus: u8, device: u8, function: u8) -> usize {
+		self.physical_address + Self::offset(bus, device, function)
+	}
+
+	/// Return the byte offset for a function configuration area.
+	///
+	/// ## Panics
+	///
+	/// If either the device or function are out of bounds.
+	fn offset(bus: u8, device: u8, function: u8) -> usize {
+		assert!(device < 32 && function < 8);
+		(usize::from(bus) << 20) | (usize::from(device) << 15) | (usize::from(function) << 12)
+	}
+
 	/// Return a reference to the configuration header for a function. This won't
 	/// return `None`, but the header values may be all `1`s.
 	///
 	/// ## Panics
 	///
-	/// If the bus + device + function are out of the MMIO range.
+	/// If either the device or function are out of bounds.
 	fn get_unchecked<'a>(&'a self, bus: u8, device: u8, function: u8) -> Header<'a> {
-		let offt = ((bus as usize) << 20) | ((device as usize) << 15) | ((function as usize) << 12);
-		assert!(offt < self.size);
+		let offt = Self::offset(bus, device, function);
 		unsafe {
 			let h = self.start.as_ptr().cast::<u8>().add(offt);
 			let hc = &*h.cast::<HeaderCommon>();
@@ -317,6 +462,16 @@ pub struct PhysicalMemory {
 	pub virt: NonNull<kernel::Page>,
 	/// The size in bytes
 	pub size: usize,
+}
+
+impl fmt::Debug for PhysicalMemory {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(PhysicalMemory))
+			.field("physical", &format_args!("0x{:x}", self.physical))
+			.field("virt", &self.virt)
+			.field("size", &format_args!("0x{:x}", self.size))
+			.finish()
+	}
 }
 
 /// A MMIO region
@@ -370,7 +525,11 @@ impl<'a> Device<'a> {
 	}
 
 	pub fn header(&self) -> Header {
-		self.pci.get(self.bus, self.device, 0).unwrap()
+		self.pci.get_unchecked(self.bus, self.device, 0)
+	}
+
+	pub fn header_physical_address(&self) -> usize {
+		self.pci.get_physical_address(self.bus, self.device, 0)
 	}
 }
 

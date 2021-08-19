@@ -1,5 +1,3 @@
-use alloc::prelude::v1::*;
-use core::alloc::Allocator;
 use core::fmt;
 use core::num::NonZeroU8;
 use core::ptr::NonNull;
@@ -7,25 +5,6 @@ use simple_endian::{u16le, u32le, u64le};
 use vcell::VolatileCell;
 
 /// The type of a device handler
-/*
-pub type DeviceHandler<A> =
-	for<'a> fn(
-		&'a CommonConfig,
-		&'a DeviceConfig,
-		&'a Notify,
-		A,
-	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>>;
-	*/
-
-// Using a newtype because https://github.com/rust-lang/rust/issues/64552
-pub struct DeviceHandler<A: Allocator>(
-	pub  for<'a> fn(
-		&'a CommonConfig,
-		&'a DeviceConfig,
-		&'a Notify,
-		A,
-	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>>,
-);
 
 /*
 // TODO move this to a separate "sync" crate.
@@ -199,54 +178,18 @@ impl Notify {
 	}
 }
 
-pub trait DeviceHandlerError<A>
-where
-	Self: fmt::Debug,
-	A: Allocator,
-{
-}
-
-/// A list of handlers that can initialize devices.
-pub trait DeviceHandlers<'a, A>
-where
-	A: Allocator + 'a,
-{
-	fn can_handle(&self, ty: DeviceType) -> bool;
-
-	/// Get a handler for a device of the given type.
-	fn handle(
-		&self,
-		device_type: DeviceType,
-		common: &'a CommonConfig,
-		device: &'a DeviceConfig,
-		notify: &'a Notify,
-		allocator: A,
-	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>>;
-}
-
 /// Setup a virtio device on a PCI bus.
-// TODO figure out how to get `A: Allocator` to work. I'm 99% certain there's a bug in the compiler
-// because static lifetimes keep slipping in somehow
-pub fn new_device<'a, A>(
-	device: pci::Device<'a>,
-	handlers: impl DeviceHandlers<'a, A>,
-	allocator: A,
-) -> Result<Box<dyn Device<A> + 'a, A>, SetupError<A>>
+pub fn new_device<'a, D, H, R>(device: pci::Device<'a>, handler: H) -> Result<D, R>
 where
-	A: Allocator + 'a,
+	D: Device + 'a,
+	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, &'a Notify) -> Result<D, R>,
 {
-	let key = DeviceType::new(device.vendor_id(), device.device_id());
-
-	handlers
-		.can_handle(key)
-		.then(|| ())
-		.ok_or(SetupError::NoHandler(key))?;
-
 	let cmd = pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK;
 
 	let header = match device.header() {
 		pci::Header::H0(h) => h,
-		h => return Err(SetupError::UnexpectedHeaderType(h.header_type())),
+		// TODO not actually unreachable, but meh.
+		_ => unreachable!(),
 	};
 
 	const BAR_64_FLAG: u8 = 0x80;
@@ -458,81 +401,211 @@ where
 	isr_config.status.set(0x0);
 	kernel::dbg!("done isr");
 
-	handlers
-		.handle(key, common_config, device_config, notify_config, allocator)
-		.map_err(SetupError::Handler)
+	handler(common_config, device_config, notify_config)
 }
 
-/// # Safety
-///
-/// Because `TypeId` cannot be used on non-`'static` items, the `DeviceType` is used instead.
-///
-/// To ensure it is safe, there may be only exactly one device struct per `DeviceType`.
-pub unsafe trait Device<A>
+/// Setup a new virtio device on a PCI bus.
+pub fn new_device2<'a, D, H, R>(
+	header: pci::Header<'a>,
+	base_address_regions: &[Option<NonNull<()>>],
+	handler: H,
+) -> Result<D, R>
 where
-	A: Allocator,
+	D: Device + 'a,
+	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, &'a Notify) -> Result<D, R>,
 {
-	fn device_type(&self) -> DeviceType;
-}
+	let cmd = pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK;
 
-/// # Safety
-///
-/// Because `TypeId` cannot be used on non-`'static` items, the `DeviceType` is used instead.
-///
-/// To ensure it is safe, there may be only exactly one device struct per `DeviceType`.
-pub unsafe trait StaticDeviceType<A>
-where
-	A: Allocator,
-{
-	fn device_type_of() -> DeviceType;
-}
+	let header = match header {
+		pci::Header::H0(h) => h,
+		// TODO not actually unreachable, but meh.
+		_ => unreachable!(),
+	};
 
-impl<'a, A> dyn Device<A> + 'a
-where
-	A: Allocator + 'a,
-{
-	pub fn is<D: StaticDeviceType<A> + Device<A>>(&self) -> bool {
-		self.device_type() == D::device_type_of()
-	}
+	const BAR_64_FLAG: u8 = 0x80;
 
-	pub fn downcast_ref<'s, D: StaticDeviceType<A> + Device<A>>(&'s self) -> Option<&'s D> {
-		if self.is::<D>() {
-			unsafe { Some(&*(self as *const _ as *const D)) }
+	let mut bar_sizes = [None; pci::Header0::BASE_ADDRESS_COUNT as usize];
+	let mut skip = false;
+	for (i, bs) in bar_sizes.iter_mut().enumerate() {
+		if skip {
+			skip = false;
+			continue;
+		}
+		let bar = header.base_address(i);
+		if bar & pci::BAR_IO_SPACE > 0 {
+			// Ignore I/O BARs for now.
 		} else {
-			None
+			*bs = match bar & pci::BAR_TYPE_MASK {
+				0x0 => {
+					header.set_base_address(i, 0xffff_ffff);
+					let size = !(header.base_address(i) & !0xf) + 1;
+					header.set_base_address(i, bar);
+					(size > 0).then(|| NonZeroU8::new(size.log2() as u8).unwrap())
+				}
+				0x2 => panic!("Type bit 0x1 is reserved"),
+				0x4 => {
+					header.set_base_address(i, 0xffff_ffff);
+					let size = !(header.base_address(i) & !0xf) + 1;
+					header.set_base_address(i, bar);
+					if size == 0x10 {
+						// Technically possible. I doubt it'll happen in practice any time soon
+						// though, so I can't be bothered.
+						todo!("MMIO area larger than 4GB");
+					}
+					Some(NonZeroU8::new(size.log2() as u8 | BAR_64_FLAG).unwrap())
+				}
+				0x6 => panic!("Type bit 0x3 is reserved"),
+				_ => unreachable!(),
+			};
 		}
 	}
 
-	pub fn downcast_mut<'s, D: StaticDeviceType<A> + Device<A>>(&'s mut self) -> Option<&mut D> {
-		if self.is::<D>() {
-			unsafe { Some(&mut *(self as *mut _ as *mut D)) }
-		} else {
-			None
+	let mut common_config = None;
+	let mut notify_config = None;
+	let mut isr_config = None;
+	let mut device_config = None;
+	let mut pci_config = None;
+
+	for cap in header.capabilities() {
+		kernel::dbg!(cap.id());
+		if cap.id() == 0x9 {
+			let cap = unsafe { cap.data::<Capability>() };
+			if bar_sizes[usize::from(cap.base_address.get())].is_some() {
+				match cap.config_type.get() {
+					Capability::COMMON_CONFIGURATION => {
+						if common_config.is_none() {
+							common_config = Some(cap);
+						}
+					}
+					Capability::NOTIFY_CONFIGURATION => {
+						if notify_config.is_none() {
+							notify_config = Some(cap);
+						}
+					}
+					Capability::ISR_CONFIGURATION => {
+						if isr_config.is_none() {
+							isr_config = Some(cap);
+						}
+					}
+					Capability::DEVICE_CONFIGURATION => {
+						if device_config.is_none() {
+							device_config = Some(cap);
+						}
+					}
+					Capability::PCI_CONFIGURATION => {
+						if pci_config.is_none() {
+							pci_config = Some(cap);
+						}
+					}
+					// There may exist other config types. We should ignore any we don't know.
+					_ => (),
+				}
+			}
+		} else if cap.id() == 0x5 {
+			// MSI
+			kernel::dbg!("lesgo");
+			#[repr(C)]
+			struct MSI {
+				msg_ctrl: VolatileCell<[u8; 2]>,
+				msg_addr: VolatileCell<[u8; 8]>,
+				_reserved: VolatileCell<[u8; 2]>,
+				msg_data: VolatileCell<[u8; 2]>,
+				mask: VolatileCell<[u8; 4]>,
+				pending: VolatileCell<[u8; 4]>,
+			}
+			let data = unsafe { cap.data::<MSI>() };
+			kernel::dbg!("set msi");
+			data.msg_ctrl.set([0x1, 0x0]);
+			kernel::dbg!("done msi");
+		} else if cap.id() == 0x11 {
+			// MSI-X
+			kernel::dbg!("LESGO");
+			#[repr(C)]
+			#[repr(packed)]
+			struct MSIX {
+				msg_ctrl: VolatileCell<u16le>,
+				table_offt_and_bir: VolatileCell<u32le>,
+				pending_bit_offt_and_bir: VolatileCell<u32le>,
+			}
+			let data = unsafe { cap.data::<MSIX>() };
+			kernel::dbg!("set msi-x");
+
+			unsafe {
+				data.msg_ctrl.set(((1 << 15) | 1).into());
+
+				kernel::dbg!(data.msg_ctrl.get());
+				kernel::dbg!(data.table_offt_and_bir.get());
+				kernel::dbg!(data.pending_bit_offt_and_bir.get());
+			}
+
+			//data.table_offt_and_bir
+
+			kernel::dbg!("done msi-x");
+
+			/*
+			match device.header() {
+				::pci::Header::H0(h) => {
+					kernel::dbg!("set msi-x h");
+					kernel::dbg!("done msi-x h");
+				}
+				_ => panic!("bad header type"),
+			}
+			*/
 		}
 	}
+
+	kernel::dbg!("set int");
+	header.interrupt_line.set(0);
+	header.interrupt_pin.set(1);
+	kernel::dbg!("done int");
+
+	let mmio = base_address_regions;
+	assert_eq!(mmio.len(), pci::Header0::BASE_ADDRESS_COUNT as usize);
+
+	let mut setup_mmio = |bar: u8, offset: u32| -> NonNull<u8> {
+		let mmio = mmio[usize::from(bar)]
+			.expect("BAR not mapped to region")
+			.cast::<u8>();
+		unsafe { NonNull::new_unchecked(mmio.as_ptr().add(offset as usize)) }
+	};
+
+	let common_config = common_config
+		.map(|cfg| unsafe {
+			setup_mmio(cfg.base_address.get(), cfg.offset.get().into())
+				.cast::<CommonConfig>()
+				.as_ref()
+		})
+		.expect("No common config map defined");
+
+	let device_config = device_config
+		.map(|cfg| unsafe {
+			setup_mmio(cfg.base_address.get(), cfg.offset.get().into())
+				.cast::<DeviceConfig>()
+				.as_ref()
+		})
+		.expect("No common config map defined");
+
+	let notify_config = notify_config
+		.map(|cfg| unsafe {
+			setup_mmio(cfg.base_address.get(), cfg.offset.get().into())
+				.cast::<Notify>()
+				.as_ref()
+		})
+		.expect("No common config map defined");
+
+	let isr_config = isr_config
+		.map(|cfg| unsafe {
+			setup_mmio(cfg.base_address.get(), cfg.offset.get().into())
+				.cast::<ISRConfig>()
+				.as_ref()
+		})
+		.expect("No isr config map defined");
+
+	kernel::dbg!("set isr");
+	isr_config.status.set(0x0);
+	kernel::dbg!("done isr");
+
+	handler(common_config, device_config, notify_config)
 }
 
-pub enum SetupError<'a, A>
-where
-	A: Allocator + 'a,
-{
-	/// No handler was found for the device.
-	NoHandler(DeviceType),
-	/// The header is not of an expected type, i.e. `header_type != 0`.
-	UnexpectedHeaderType(u8),
-	/// An error occured in the device handler.
-	Handler(Box<dyn DeviceHandlerError<A> + 'a, A>),
-}
-
-impl<'a, A> fmt::Debug for SetupError<'a, A>
-where
-	A: Allocator + 'a,
-{
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::NoHandler(id) => write!(f, "no handler for {:?}", id),
-			Self::UnexpectedHeaderType(t) => write!(f, "unexpected header type 0x{:x}", t),
-			Self::Handler(e) => e.fmt(f),
-		}
-	}
-}
+pub trait Device {}

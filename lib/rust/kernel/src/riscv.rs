@@ -1,3 +1,5 @@
+use core::mem;
+
 macro_rules! syscall {
 	($name:ident, $code:literal) => {
 		#[inline(always)]
@@ -73,11 +75,33 @@ macro_rules! syscall {
 /// Representation of a single memory page.
 #[repr(align(4096))]
 #[repr(C)]
-pub struct Page([u8; Self::SIZE]);
+pub struct Page([u128; Self::SIZE / mem::size_of::<u128>()]);
 
 impl Page {
 	pub const OFFSET_BITS: u8 = 12;
 	pub const SIZE: usize = 1 << Self::OFFSET_BITS;
 	pub const ALIGN: usize = Self::SIZE;
 	pub const MASK: usize = Self::SIZE - 1;
+
+	pub fn zeroize(&mut self) {
+		self.0.iter_mut().for_each(|e| *e = 0);
+	}
+
+	pub const fn zeroed() -> Self {
+		Self([0; Self::SIZE / mem::size_of::<u128>()])
+	}
 }
+
+impl AsRef<[u8; Self::SIZE]> for Page {
+	fn as_ref(&self) -> &[u8; 4096] {
+		unsafe { &*(self as *const Self as *const [u8; Self::SIZE]) }
+	}
+}
+
+impl AsMut<[u8; Self::SIZE]> for Page {
+	fn as_mut(&mut self) -> &mut [u8; 4096] {
+		unsafe { &mut *(self as *mut Self as *mut [u8; Self::SIZE]) }
+	}
+}
+
+const _: usize = Page::SIZE - mem::size_of::<Page>();

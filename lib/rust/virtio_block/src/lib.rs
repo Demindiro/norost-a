@@ -1,20 +1,9 @@
 #![no_std]
-#![feature(allocator_api)]
-#![feature(alloc_prelude)]
 
-extern crate alloc;
-
-#[cfg(feature = "fatfs_io")]
-mod fatfs;
 mod sector;
 
-#[cfg(feature = "fatfs_io")]
-pub use crate::fatfs::Proxy;
 pub use sector::Sector;
 
-use alloc::prelude::v1::*;
-
-use core::alloc::Allocator;
 use core::fmt;
 use core::mem;
 use simple_endian::{u16le, u32le, u64le};
@@ -45,15 +34,11 @@ const EVENT_IDX: u32 = 1 << 28;
 const INDIRECT_DESC: u32 = 1 << 29;
 
 /// A driver for a virtio block device.
-pub struct BlockDevice<'a, A>
-where
-	A: Allocator,
-{
+pub struct BlockDevice<'a> {
 	queue: queue::Queue<'a>,
 	notify: &'a virtio::pci::Notify,
 	/// The amount of sectors available
 	capacity: u64,
-	_p: core::marker::PhantomData<A>,
 }
 
 #[repr(C)]
@@ -109,10 +94,7 @@ struct RequestStatus {
 
 use virtio::pci::*;
 
-impl<'a, A> BlockDevice<'a, A>
-where
-	A: Allocator + 'a,
-{
+impl<'a> BlockDevice<'a> {
 	/// Setup a block device
 	///
 	/// This is meant to be used as a handler by the `virtio` crate.
@@ -120,8 +102,7 @@ where
 		common: &'a CommonConfig,
 		device: &'a DeviceConfig,
 		notify: &'a Notify,
-		allocator: A,
-	) -> Result<Box<dyn Device<A> + 'a, A>, Box<dyn DeviceHandlerError<A> + 'a, A>> {
+	) -> Result<Self, SetupError> {
 		let features = SIZE_MAX | SEG_MAX | GEOMETRY | BLK_SIZE | TOPOLOGY;
 		common.device_feature_select.set(0.into());
 
@@ -149,15 +130,11 @@ where
 				| CommonConfig::STATUS_DRIVER_OK,
 		);
 
-		Ok(Box::new_in(
-			Self {
-				queue,
-				notify,
-				capacity: blk_cfg.capacity.into(),
-				_p: core::marker::PhantomData,
-			},
-			allocator,
-		))
+		Ok(Self {
+			queue,
+			notify,
+			capacity: blk_cfg.capacity.into(),
+		})
 	}
 
 	/// Write out sectors
@@ -265,32 +242,13 @@ where
 	}
 }
 
-impl<A> Drop for BlockDevice<'_, A>
-where
-	A: Allocator,
-{
+impl Drop for BlockDevice<'_> {
 	fn drop(&mut self) {
 		todo!("ensure the device doesn't read/write memory after being dropped");
 	}
 }
 
-unsafe impl<'a, A> Device<A> for BlockDevice<'a, A>
-where
-	A: Allocator,
-{
-	fn device_type(&self) -> DeviceType {
-		Self::device_type_of()
-	}
-}
-
-unsafe impl<'a, A> StaticDeviceType<A> for BlockDevice<'a, A>
-where
-	A: Allocator,
-{
-	fn device_type_of() -> DeviceType {
-		DeviceType::new(0x1af4, 0x1001)
-	}
-}
+impl<'a> Device for BlockDevice<'a> {}
 
 pub enum SetupError {}
 

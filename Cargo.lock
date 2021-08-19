@@ -75,6 +75,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver"
+version = "0.1.0"
+
+[[package]]
 name = "dux"
 version = "0.1.0"
 dependencies = [
@@ -101,6 +105,15 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
+]
+
+[[package]]
+name = "fat_driver"
+version = "0.1.0"
+dependencies = [
+ "dux",
+ "fatfs",
+ "syscalls",
 ]
 
 [[package]]
@@ -212,6 +225,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "pci_manager"
+version = "0.1.0"
+dependencies = [
+ "driver",
+ "dux",
+ "pci",
+ "syscalls",
+]
+
+[[package]]
+name = "plic_driver"
+version = "0.1.0"
+dependencies = [
+ "driver",
+ "syscalls",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -294,6 +325,18 @@ dependencies = [
  "syscalls",
  "vcell",
  "virtio",
+]
+
+[[package]]
+name = "virtio_block_manager"
+version = "0.1.0"
+dependencies = [
+ "driver",
+ "dux",
+ "pci",
+ "syscalls",
+ "virtio",
+ "virtio_block",
 ]
 
 [[package]]

@@ -469,7 +469,7 @@ mod sys {
 							Err(e) => {
 								if let Some(l) = e.error_len() {
 									let v = e.valid_up_to();
-									f.write_str(str::from_utf8(&self.0[i..e.valid_up_to()]).unwrap())?;
+									f.write_str(str::from_utf8(&self.0[i..i + v]).unwrap())?;
 									f.write_str("\u{FFFD}")?;
 									i += v + l;
 								} else {
@@ -499,7 +499,6 @@ mod sys {
 		/// This may only be called once.
 		[_] sys_set_interrupt_controller(ppn, page_count, max_devices) {
 			logcall!("sys_set_interrupt_controller 0x{:x}, {}", (ppn as u128) << 12, page_count);
-			log!("sys_set_interrupt_controller 0x{:x}, {}", (ppn as u128) << 12, page_count);
 			use crate::memory::reserved::PLIC;
 			assert!(page_count <= PLIC.page_count());
 			let ppn = PPNBox::try_from(ppn).unwrap();

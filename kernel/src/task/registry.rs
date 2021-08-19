@@ -16,9 +16,11 @@ static REGISTRY: LOL = LOL([
 	UnsafeCell::new(None),
 	UnsafeCell::new(None),
 	UnsafeCell::new(None),
+	UnsafeCell::new(None),
+	UnsafeCell::new(None),
 ]);
 
-struct LOL([UnsafeCell<Option<Entry>>; 4]);
+struct LOL([UnsafeCell<Option<Entry>>; 6]);
 
 unsafe impl Sync for LOL {}
 

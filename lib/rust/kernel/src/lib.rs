@@ -57,12 +57,21 @@ pub mod ipc {
 		y: u64,
 	}
 
-	impl From<u128> for UUID {
-		fn from(uuid: u128) -> Self {
+	impl UUID {
+		/// A UUID that indicates the invalid / no-UUID value.
+		pub const INVALID: Self = Self::new(0);
+
+		pub const fn new(uuid: u128) -> Self {
 			Self {
 				x: uuid as u64,
 				y: (uuid >> 64) as u64,
 			}
+		}
+	}
+
+	impl From<u128> for UUID {
+		fn from(uuid: u128) -> Self {
+			Self::new(uuid)
 		}
 	}
 
@@ -96,7 +105,7 @@ pub mod ipc {
 	}
 
 	/// Structure used to communicate with other tasks.
-	#[derive(Debug, Default)]
+	#[derive(Clone, Debug, Default)]
 	#[repr(C)]
 	pub struct Packet {
 		pub uuid: UUID,

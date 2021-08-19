@@ -1,4 +1,5 @@
 #include "common.h"
+#include "fd.h"
 #include <dirent.h>
 #include <dux.h>
 #include <errno.h>
@@ -57,7 +58,7 @@ DIR *opendir(const char *path)
 
 	// Fill out the request entry
 	pkt->flags = 0;
-	pkt->address = 0;
+	pkt->address = __files_list[3]._address;
 	pkt->uuid = kernel_uuid(0, 0);
 	pkt->offset = 0;
 	pkt->name = NULL;

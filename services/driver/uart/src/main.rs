@@ -195,10 +195,12 @@ fn main() {
 	unsafe { dux::init() };
 
 	let mut args = rtbegin::args();
+	let arg = args.next().unwrap();
 	let mut addr = args.next().unwrap();
 	let mut size = args.next().unwrap();
 	args.next().ok_or(()).unwrap_err();
 
+	assert_eq!(arg, b"--reg");
 	let addr = usize::from_str_radix(core::str::from_utf8(addr).unwrap(), 16).unwrap();
 	let size = usize::from_str_radix(core::str::from_utf8(size).unwrap(), 16).unwrap();
 

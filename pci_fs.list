@@ -1,0 +1,1 @@
+virtio_blk		1af4	1001	target/riscv64gc-unknown-none-elf/release/virtio_block_manager

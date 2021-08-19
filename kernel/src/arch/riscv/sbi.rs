@@ -23,4 +23,5 @@ pub fn set_timer(value: u64) {
 	unsafe {
 		asm!("ecall", in("a7") 0x54494d45, in("a6") 0, in("a0") value);
 	}
+	unsafe { asm!("csrs sie, {0}", in(reg) (1 << 5) | (1 << 9)) };
 }

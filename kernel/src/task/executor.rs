@@ -35,10 +35,9 @@ pub struct Executor<'a> {
 pub struct NoTask;
 
 // FIXME lol wtf
-// FIXME the boot elf parser doesn't zero initialize this. Workaround is to set it to 1 first (lmao)
 // FIXME this really needs to be fixed, it just got out of sync due to an interrupt which caused
 // some very strange buggy behaviour.
-static mut NEXT_ID: usize = 1;
+static mut NEXT_ID: usize = 0;
 
 impl Executor<'_> {
 	/// Suspend the current task (if any) and begin executing another task.
@@ -54,7 +53,8 @@ impl Executor<'_> {
 		let group = group::Group::get(0).expect("No root group");
 
 		let prev_id = unsafe { NEXT_ID };
-		let mut id = (prev_id + 1) & 0xf;
+		// Incrementing by prime numbers because I'm a genius hacker hmmm yes yes
+		let mut id = (prev_id + 7) & 0xf;
 
 		let mut min_time = u64::MAX;
 		let mut curr_time = arch::current_time();
@@ -67,11 +67,12 @@ impl Executor<'_> {
 					unsafe { NEXT_ID = id };
 					arch::schedule_timer(10_000_000 / 10);
 					// If the task is already claimed, just try again.
+					arch::enable_interrupts(true);
 					let _ = task.execute(Self::id());
 				}
 				min_time = min_time.min(wait_time);
 			};
-			id = id.wrapping_add(1) & 0xf;
+			id = id.wrapping_add(7) & 0xf;
 			if id == prev_id {
 				stop_next = true;
 			} else if stop_next {

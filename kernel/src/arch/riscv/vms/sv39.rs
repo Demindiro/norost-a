@@ -625,12 +625,7 @@ impl VirtualMemorySystem for Sv39 {
 		let mut va = virtual_address;
 		// FIXME deallocate pages on failure.
 		for _ in 0..count {
-			Self::remove(va)
-				.map_err(|e| {
-					dbg!("panic!", va, count);
-					e
-				})
-				.unwrap();
+			Self::remove(va).unwrap();
 			va = va.next().unwrap();
 		}
 		Ok(())

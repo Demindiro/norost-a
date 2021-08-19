@@ -152,11 +152,14 @@ FILE *fopen(const char *path, const char *mode)
 	// Take a free file
 	FILE *f = __std_pop_free_file();
 
+	// Get cwd address
+	size_t address = __files_list[3]._address;
+
 	size_t len = strlen(path);
 	len = len < sizeof(path_buf) - 1 ? len : sizeof(path_buf) - 1;
 	memcpy(path_buf, path, len);
 	path_buf[len] = '\0';
-	f->_address = 0;
+	f->_address = address;
 	f->_uuid = kernel_uuid(0, 0);
 	f->_path = path_buf;
 	f->_position = 0;

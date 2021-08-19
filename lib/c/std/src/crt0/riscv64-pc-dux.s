@@ -75,7 +75,7 @@ _start:
 	bne		s0, sp, 0b
 
 
-	## Set up stdin, stdout and stderr.
+	## Set up stdin (0), stdout (1), stderr (2) and cwd (3)
 	# the stack pointer is set to the very top of the stack
 	# Amount of entries
 	ld		s1, -8(sp)
@@ -153,10 +153,15 @@ _start:
 	sd		t0, 2 * SIZEOF_FILE + FILE_ADDRESS (t4)
 	sd		t1, 2 * SIZEOF_FILE + FILE_UUID + 0 (t4)
 	sd		t2, 2 * SIZEOF_FILE + FILE_UUID + 8 (t4)
+0:
 
-	# Adjust the file count as appropriate
-	li		t0, 3
-	sd		t0, 0(t5)
+	# Clear cwd (fill with -1) if it is not defined
+	addi	t0, t3, -3
+	bgtz	t0, 0f
+	li		t0, -1
+	sd		t0, 3 * SIZEOF_FILE + FILE_ADDRESS (t4)
+	sd		t0, 3 * SIZEOF_FILE + FILE_UUID + 0 (t4)
+	sd		t0, 3 * SIZEOF_FILE + FILE_UUID + 8 (t4)
 0:
 
 3:

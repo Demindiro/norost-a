@@ -8,9 +8,11 @@ use core::slice;
 /// byte units.
 #[repr(align(512))]
 #[repr(C)]
-pub struct Sector(pub [u8; 512]);
+pub struct Sector(pub [u8; Self::SIZE]);
 
 impl Sector {
+	pub const SIZE: usize = 512;
+
 	/// Return a slice of sectors as a byte array.
 	pub fn slice_as_u8<'a>(slice: &'a [Self]) -> &'a [u8] {
 		// SAFETY: the size matches in terms of bytes & the address is properly aligned.
@@ -26,6 +28,24 @@ impl Sector {
 		unsafe {
 			let ratio = mem::size_of::<Self>() / mem::size_of::<u8>();
 			slice::from_raw_parts_mut(slice.as_mut_ptr().cast(), slice.len() * ratio)
+		}
+	}
+
+	/// Create a slice of sectors from a slice of pages.
+	pub fn pages_to_sectors<'a>(pages: &'a [kernel::Page]) -> &'a [Self] {
+		// SAFETY: the size matches in terms of bytes & the address is properly aligned.
+		unsafe {
+			let ratio = mem::size_of::<kernel::Page>() / mem::size_of::<Self>();
+			slice::from_raw_parts(pages.as_ptr().cast(), pages.len() * ratio)
+		}
+	}
+
+	/// Create a slice of sectors from a slice of pages.
+	pub fn pages_to_sectors_mut<'a>(pages: &'a mut [kernel::Page]) -> &'a mut [Self] {
+		// SAFETY: the size matches in terms of bytes & the address is properly aligned.
+		unsafe {
+			let ratio = mem::size_of::<kernel::Page>() / mem::size_of::<Self>();
+			slice::from_raw_parts_mut(pages.as_mut_ptr().cast(), pages.len() * ratio)
 		}
 	}
 }

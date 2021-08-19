@@ -5,12 +5,17 @@ cargo-features = ["strip"]
 members = [
 	"kernel",
 	"lib/rust/device_tree",
+	"lib/rust/driver",
 	"lib/rust/dux",
 	"lib/rust/dux_ar",
 	"lib/rust/kernel",
 	"lib/rust/pci",
 	"lib/rust/virtio",
 	"lib/rust/virtio_block",
+	"services/driver/fat",
+	"services/driver/pci",
+	"services/driver/plic",
+	"services/driver/virtio_block",
 	"services/driver/uart",
 	"services/init/hello_world_virtio",
 	"services/init/multi_process",
@@ -26,3 +31,8 @@ debug = true
 panic = "abort"
 lto = true
 strip = "symbols"
+
+[profile.release.package.plic_driver]
+codegen-units = 1
+strip = "symbols"
+opt-level = 'z'

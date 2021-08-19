@@ -115,6 +115,17 @@ pub fn spawn_elf(
 			let addr =
 				mem::allocate_range(None, mem_pages, flags).map_err(SpawnElfError::ReserveError)?;
 
+			// FIXME ensure there is no garbage in the pages.
+			//
+			// This should be done by the kernel...
+			unsafe {
+				let to_zero = core::slice::from_raw_parts_mut(
+					addr.as_ptr().cast::<kernel::Page>(),
+					mem_pages,
+				);
+				to_zero.iter_mut().for_each(kernel::Page::zeroize);
+			}
+
 			reserved_ranges.0[reserved_ranges.1] = Some((addr, mem_pages));
 			reserved_ranges.1 += 1;
 

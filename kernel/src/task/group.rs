@@ -22,8 +22,10 @@ static GROUPS: arena::Arena<GroupData> = unsafe {
 
 /// A group of tasks
 pub struct GroupData {
-	/// A list of tasks. This is currently hardcoded to 4 because I'm lazy.
-	tasks: [AtomicPtr<super::TaskData>; 4],
+	/// A list of tasks. This is currently hardcoded to 16 because I'm lazy.
+	///
+	/// Increment as needed until it's no longer manageable.
+	tasks: [AtomicPtr<super::TaskData>; 16],
 }
 
 // FIXME Task is not sync yet. We also need to ensure tasks can't be removed/freed while referenced.
@@ -55,6 +57,18 @@ impl Group<'_> {
 		GROUPS.insert(GroupData {
 			tasks: [
 				AtomicPtr::new(task.0.as_ptr()),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
+				AtomicPtr::default(),
 				AtomicPtr::default(),
 				AtomicPtr::default(),
 				AtomicPtr::default(),
