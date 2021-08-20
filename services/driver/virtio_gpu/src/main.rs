@@ -104,7 +104,9 @@ fn main() {
 		b: u8,
 		a: u8,
 	}
-	let size = 16;
+	let (w, h) = (800, 600);
+	let size = (w * h * core::mem::size_of::<RGBA8>() + kernel::Page::MASK) / kernel::Page::SIZE;
+	kernel::dbg!(size);
 	let addr = core::ptr::NonNull::new(0x3333_0000 as *mut _).unwrap();
 	let ret = unsafe { kernel::mem_alloc(addr.as_ptr(), size, 0b11) };
 	assert_eq!(ret.status, 0);
@@ -116,17 +118,19 @@ fn main() {
 	};
 
 	// Set up scan
-	let rect = virtio_gpu::Rect::new(0, 0, 32 * 4, 32 * 4);
+	let rect = virtio_gpu::Rect::new(0, 0, w.try_into().unwrap(), h.try_into().unwrap());
 	let ret = unsafe { device.init_scanout(virtio_gpu::Format::RGBA8Unorm, rect, addr, size) };
 	ret.unwrap();
 
 	kernel::dbg!(buffer.len());
-	for x in 0..32 * 4 {
-		for y in 0..32 * 4 {
-			buffer[usize::from(x) + usize::from(y) * 128] = RGBA8 {
-				r: x * 2,
-				g: y * 2,
-				b: 255 - x - y,
+	for x in 0..w {
+		for y in 0..h {
+			let r = (x * 127 / w) as u8;
+			let g = (y * 127 / h) as u8;
+			buffer[x + y * w] = RGBA8 {
+				r: r * 2,
+				g: g * 2,
+				b: 255 - r - g,
 				a: 255,
 			};
 		}
@@ -143,6 +147,36 @@ fn main() {
 	assert_eq!(ret.status, 0, "failed to add self to registry");
 
 	loop {
+		let rx = dux::ipc::receive();
+
+		const OP_OPEN: u8 = 128;
+		const OP_FLUSH: u8 = 129;
+
+		use core::slice;
+
+		match rx.opcode.map(|n| n.get()).unwrap_or(0) {
+			OP_OPEN => {
+				kernel::sys_log!("OP_OPEN");
+				*dux::ipc::transmit() = kernel::ipc::Packet {
+					uuid: kernel::ipc::UUID::INVALID,
+					data: Some(addr),
+					length: w * h * core::mem::size_of::<RGBA8>(),
+					address: rx.address,
+					id: rx.id,
+					name: None,
+					name_len: 0,
+					flags: 0,
+					offset: 0,
+					opcode: rx.opcode,
+				};
+			}
+			OP_FLUSH => {
+				kernel::sys_log!("OP_FLUSH");
+				device.draw(rect).expect("failed to draw");
+			}
+			_ => todo!(),
+		}
+
 		unsafe {
 			kernel::io_wait(u64::MAX);
 		}

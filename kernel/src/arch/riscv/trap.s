@@ -103,6 +103,13 @@ trap_handler:
 	# Execute the appropriate routine
 	jalr	ra, x28						# jmp
 
+	# == FIXME save the FP registers
+	li		t0, 1 << 13
+	csrc	sstatus, t0
+	li		t0, 1 << 14
+	csrs	sstatus, t0
+	# ==
+
 	# Restore all integer registers
 	csrr		x31, sscratch
 	load_gp_regs	1, 31, x31
@@ -134,6 +141,13 @@ trap_syscall:
 	# Perform the call
 	jalr	ra, t0
 
+	# == FIXME save the FP registers
+	li		t0, 1 << 13
+	csrc	sstatus, t0
+	li		t0, 1 << 14
+	csrs	sstatus, t0
+	# ==
+
 	# Restore all integer registers except a0 and a1, then return
 0:
 	csrr	x31, sscratch
@@ -164,6 +178,12 @@ trap_start_task:
 	# Switch to U-mode when executing mret.
 	li		t0, 1 << 8
 	csrc	sstatus, t0
+	# == FIXME save the FP registers
+	li		t0, 1 << 13
+	csrc	sstatus, t0
+	li		t0, 1 << 14
+	csrs	sstatus, t0
+	# ==
 	# Set up the VMS.
 	ld		t0, REGSTATE_SIZE + 1 * GP_REGBYTES (a0)
 	csrw	satp, t0

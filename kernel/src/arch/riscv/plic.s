@@ -121,5 +121,12 @@ external_interrupt_handler:
 	load_gp_regs 12, 16, x31
 	load_gp_regs 18, 31, x31
 
+	# == FIXME save the FP registers
+	li		t0, 1 << 13
+	csrc	sstatus, t0
+	li		t0, 1 << 14
+	csrs	sstatus, t0
+	# ==
+
 	# Jump to notification handler
 	sret

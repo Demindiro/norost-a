@@ -68,6 +68,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_driver"
+version = "0.1.0"
+dependencies = [
+ "dux",
+ "syscalls",
+]
+
+[[package]]
 name = "device_tree"
 version = "0.1.0"
 dependencies = [

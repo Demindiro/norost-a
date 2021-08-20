@@ -126,7 +126,7 @@ fn main() {
 
 	BINARIES
 		.iter()
-		.filter(|e| e.compatible == "fs")
+		.filter(|e| ["fs", "console"].contains(&e.compatible))
 		.for_each(|e| {
 			// FIXME completely, utterly unsound
 			let data = unsafe {

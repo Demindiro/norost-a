@@ -65,6 +65,13 @@ syscall_io_notify_return:
 	# Disable SUM
 	csrc	sstatus, a2
 
+	# == FIXME save the FP registers
+	li		t0, 1 << 13
+	csrc	sstatus, t0
+	li		t0, 1 << 14
+	csrs	sstatus, t0
+	# ==
+
 	# Restore all registers except a[017] and sp
 	load_gp_regs	1, 9, x31
 	load_gp_regs	12, 16, x31

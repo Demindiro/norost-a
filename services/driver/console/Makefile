@@ -1,7 +1,7 @@
 include ../../../common.mk
 include ../../../common_rust.mk
 
-NAME = virtio_gpu_driver
+NAME = console_driver
 
 build:
 	cargo build --release

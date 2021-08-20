@@ -258,6 +258,7 @@ pub fn spawn_elf(
 			(0x8000_0000 - stack_offset) as *const _,
 		)
 	};
+	kernel::dbg!(ret.value);
 	match ret.status {
 		kernel::Return::OK => Ok(Address(ret.value)),
 		r => unreachable!("{}", r),

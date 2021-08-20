@@ -199,9 +199,11 @@ impl<'a> Device<'a> {
 		let res_id = 1;
 		let scan_id = 0;
 
+		const MAX_PAGES: usize = 1024;
+
 		// Get storage phys addresses
-		assert!(count <= 16, "todo: support large page counts");
-		let mut phys_addrs = [0; 16];
+		assert!(count <= MAX_PAGES, "todo: use dyn alloc");
+		let mut phys_addrs = [0; MAX_PAGES];
 		let phys_addrs = &mut phys_addrs[..count];
 		let ret = unsafe {
 			kernel::mem_physical_address(
@@ -213,10 +215,6 @@ impl<'a> Device<'a> {
 		assert_eq!(ret.status, 0, "backend not allocated");
 		//let phys_addrs = &phys_addrs[..ret.value];
 		let phys_addrs = &phys_addrs[..];
-		kernel::dbg!(backend);
-		phys_addrs.iter().for_each(|a| {
-			kernel::dbg!(format_args!("0x{:x}", a));
-		});
 
 		// Response buffer
 		let mut resp_buffer = ControlHeader::new(0, None);
@@ -255,7 +253,7 @@ impl<'a> Device<'a> {
 		#[repr(C)]
 		struct Storage {
 			attach: controlq::resource::AttachBacking,
-			mem_entries: [controlq::resource::MemoryEntry; 16],
+			mem_entries: [controlq::resource::MemoryEntry; MAX_PAGES],
 		}
 		let mut storage = Storage {
 			attach: controlq::resource::AttachBacking::new(
@@ -263,7 +261,7 @@ impl<'a> Device<'a> {
 				phys_addrs.len().try_into().unwrap(),
 				Some(0),
 			),
-			mem_entries: [controlq::resource::MemoryEntry::new(0, 0); 16],
+			mem_entries: [controlq::resource::MemoryEntry::new(0, 0); MAX_PAGES],
 		};
 		for (w, r) in storage
 			.mem_entries
