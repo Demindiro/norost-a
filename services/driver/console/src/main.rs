@@ -81,40 +81,31 @@ fn main() {
 	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name.len(), usize::MAX) };
 	assert_eq!(ret.status, 0, "failed to add self to registry");
 
-	let mut a = fcvt_s_lu(0);
-
-	unsafe {
-		kernel::dbg!(core::ptr::read_volatile(&A));
-		kernel::dbg!(core::ptr::read_volatile(&B));
-		kernel::dbg!(core::ptr::read_volatile(&C));
-	}
-
-	let (mut a, mut b) = (fcvt_s_lu(1), fcvt_s_lu(0));
+	let (mut a, mut b) = (1.0, 0.0);
 
 	loop {
 		//let rx = dux::ipc::receive();
 
-		let fw = fcvt_s_lu(w);
-		let fh = fcvt_s_lu(h);
-		let d = fcvt_s_lu(1) / fcvt_s_lu(2);
-		for x in 0..w {
-			for y in 0..h {
-				let r = fcvt_s_lu(x) / fw - d;
-				let g = fcvt_s_lu(y) / fh - d;
+		let d = 0.5;
+		for x in 0u16..w {
+			for y in 0u16..h {
+				let r = f32::from(x) / f32::from(w) - d;
+				let g = f32::from(y) / f32::from(h) - d;
 				let (r, g) = (r * a - g * b, r * b + g * a);
-				if (r * r + g * g) * fcvt_s_lu(100) <= fcvt_s_lu(25) {
+				let i = usize::from(x) + usize::from(y) * usize::from(w);
+				if (r * r + g * g) * 100.0 <= 25.0 {
 					let (r, g) = (d + r, d + g);
-					let r8 = fcvt_lu_s(r * fcvt_s_lu(127)) as u8;
-					let g8 = fcvt_lu_s(g * fcvt_s_lu(127)) as u8;
+					let r8 = (r * (255.0 / 2.0)) as u8;
+					let g8 = (g * (255.0 / 2.0)) as u8;
 					let (r, g) = (r8, g8);
-					buffer[x + y * w] = RGBA8 {
+					buffer[i] = RGBA8 {
 						r: r * 2,
 						g: g * 2,
 						b: 255 - r - g,
 						a: 255,
 					};
 				} else {
-					buffer[x + y * w] = RGBA8 {
+					buffer[i] = RGBA8 {
 						r: 0,
 						g: 0,
 						b: 0,
@@ -127,6 +118,7 @@ fn main() {
 		let (x, y) = rotate(a, b);
 		a = x;
 		b = y;
+		kernel::dbg!(x * x + y * y);
 
 		use core::slice;
 
@@ -160,30 +152,10 @@ static B: f32 = 255.0;
 static mut C: f32 = 255.0;
 
 fn rotate(x: f32, y: f32) -> (f32, f32) {
-	//let (dx, dy) = (0.95, 0.31225);
-	let r = fcvt_s_lu(1_000_000);
-	let (dx, dy) = (fcvt_s_lu(999_000) / r, fcvt_s_lu(44_710) / r);
+	let r = 1.0 / 32.0;
+	let (dx, dy) = (0.999, 0.0447101778122163142);
 	let (x, y) = (x * dx - y * dy, x * dy + y * dx);
 	let d = (1.0 - (x * x + y * y));
-	(x - d / r, y - d / r)
-}
-
-// FIXME Rust's/LLVM codegen for float <-> int conversions is broken
-//
-// We should report this, but I have no idea how to create a minimal reproduction that others can use...
-#[inline(always)]
-fn fcvt_s_lu(n: usize) -> f32 {
-	unsafe {
-		let f: f32;
-		asm!("fcvt.s.lu {0}, {1}", out(freg) f, in(reg) n);
-		f
-	}
-}
-#[inline(always)]
-fn fcvt_lu_s(f: f32) -> usize {
-	unsafe {
-		let n: usize;
-		asm!("fcvt.lu.s {0}, {1}", out(reg) n, in(freg) f);
-		n
-	}
+	// Perhaps not mathematically accurate, but it works
+	(x - d * r, y - d * r)
 }

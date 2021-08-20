@@ -2,6 +2,7 @@
 
 use crate::mem;
 use crate::{Page, RWX};
+use core::convert::TryInto;
 use core::fmt;
 use core::slice;
 
@@ -110,6 +111,7 @@ pub fn spawn_elf(
 			_ => Err(SpawnElfError::BadRWXFlags)?,
 		};
 
+		kernel::dbg!(format_args!("{:x}", ph.file_size()));
 		if ph.flags().is_write() {
 			// We must copy the pages as they may be written to.
 			let addr =
@@ -129,17 +131,19 @@ pub fn spawn_elf(
 			reserved_ranges.0[reserved_ranges.1] = Some((addr, mem_pages));
 			reserved_ranges.1 += 1;
 
-			let addr = addr.as_ptr().cast::<u8>();
+			let copy = unsafe {
+				let addr = addr.as_ptr().cast::<u8>().add(page_offset);
+				slice::from_raw_parts_mut(addr, ph.file_size().try_into().unwrap())
+			};
 
 			let data = match ph {
 				xmas_elf::program::ProgramHeader::Ph64(ph) => ph.raw_data(&elf),
 				_ => unreachable!(),
 			};
-			for k in 0..ph.file_size() {
-				unsafe { *addr.add(k as usize) = data[k as usize] };
-			}
+			kernel::dbg!(format_args!("{:x?}", &data[..ph.file_size() as usize]));
+			copy.copy_from_slice(&data);
 			for k in 0..mem_pages {
-				let self_address = addr.wrapping_add((k * Page::SIZE) as usize) as *mut _;
+				let self_address = addr.as_ptr().wrapping_add(k);
 				mappings[i] = kernel::TaskSpawnMapping {
 					typ: 0,
 					flags: flags.into(),
