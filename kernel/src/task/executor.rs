@@ -96,7 +96,7 @@ impl Executor<'_> {
 			// TODO move this to arch::
 			asm!("csrw sscratch, {0}", in(reg) IDLE_TASK_STUB.0.get());
 		}
-		arch::schedule_timer(time);
+		arch::set_timer(time);
 		arch::enable_kernel_interrupts(true);
 		loop {
 			crate::powerstate::halt();

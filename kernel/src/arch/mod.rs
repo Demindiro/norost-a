@@ -133,6 +133,13 @@ pub fn enable_kernel_interrupts(enable: bool) {
 	}
 }
 
+/// Set the timer at certain amount of microseconds
+#[inline]
+pub fn set_timer(time: u64) {
+	// Clamp the duration in case delay is very high.
+	riscv::sbi::set_timer(time);
+}
+
 /// Schedule the timer for a certain amount of microseconds in the future
 #[inline]
 pub fn schedule_timer(delay: u64) {
