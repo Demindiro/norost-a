@@ -162,7 +162,7 @@ trap_init:
 ## - a0: A pointer to the task structure.
 trap_start_task:
 	# Switch to U-mode when executing mret.
-	li		t0, 1 << 11
+	li		t0, 1 << 8
 	csrc	sstatus, t0
 	# Set up the VMS.
 	ld		t0, REGSTATE_SIZE + 1 * GP_REGBYTES (a0)

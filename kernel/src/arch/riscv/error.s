@@ -11,6 +11,8 @@ stval_msg:
 	.asciz	"stval   0x"
 satp_msg:
 	.asciz	"satp    0x"
+sstatus_msg:
+	.asciz	"sstatus 0x"
 sp_msg:
 	.asciz	"sp      0x"
 
@@ -44,6 +46,12 @@ mini_panic:
 	la		s0, stval_msg
 	call	trap_print_msg
 	csrr	s0, stval
+	call	trap_print_num
+
+	# Print sstatus
+	la		s0, sstatus_msg
+	call	trap_print_msg
+	csrr	s0, sstatus
 	call	trap_print_num
 
 	# Print satp
