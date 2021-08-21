@@ -350,7 +350,7 @@ extern "C" fn main(
 	// Initialize the memory manager
 	//let (address, size) = heap.expect("No memory device (check the DTB!)");
 	// FIXME this is utter shit
-	let (address, size) = (0x8400_0000, 1024 * arch::Page::SIZE);
+	let (address, size) = (0x8400_0000, 2048 * arch::Page::SIZE);
 	// SAFETY: The DTB told us this address range is valid. We also ensured no existing memory will
 	// be overwritten.
 	let mm = unsafe {

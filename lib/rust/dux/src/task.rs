@@ -79,7 +79,7 @@ pub fn spawn_elf(
 
 	// SAFETY: all zeroes TaskSpawnMapping is valid.
 	let mut mappings =
-		unsafe { core::mem::MaybeUninit::<[kernel::TaskSpawnMapping; 64]>::zeroed().assume_init() };
+		unsafe { core::mem::MaybeUninit::<[kernel::TaskSpawnMapping; 96]>::zeroed().assume_init() };
 	let mut i = 0;
 	let mut pc = 0;
 

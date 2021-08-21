@@ -224,7 +224,11 @@ impl<'a> Device<'a> {
 		let mut phys = 0;
 		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
-		let resp_data = (phys + offt, mem::size_of::<ControlHeader>(), true);
+		let resp_data = (
+			(phys + offt).try_into().unwrap(),
+			mem::size_of::<ControlHeader>().try_into().unwrap(),
+			true,
+		);
 
 		// Create resource
 		let res =
@@ -237,17 +241,19 @@ impl<'a> Device<'a> {
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 		let data = [
 			(
-				phys + offt,
-				mem::size_of::<controlq::resource::Create2D>(),
+				(phys + offt).try_into().unwrap(),
+				mem::size_of::<controlq::resource::Create2D>()
+					.try_into()
+					.unwrap(),
 				false,
 			),
 			resp_data,
 		];
 		self.controlq
-			.send(data.iter().copied())
+			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None);
+		self.controlq.wait_for_used(None, None);
 
 		// Attach storage
 		#[repr(C)]
@@ -280,12 +286,19 @@ impl<'a> Device<'a> {
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 		let size = mem::size_of::<controlq::resource::AttachBacking>()
 			+ mem::size_of::<controlq::resource::MemoryEntry>() * phys_addrs.len();
-		let data = [(phys + offt, size, false), resp_data];
+		let data = [
+			(
+				(phys + offt).try_into().unwrap(),
+				size.try_into().unwrap(),
+				false,
+			),
+			resp_data,
+		];
 		self.controlq
-			.send(data.iter().copied())
+			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None);
+		self.controlq.wait_for_used(None, None);
 
 		// Attach scanout
 		let scanout = controlq::SetScanout::new(scan_id, res_id, rect, Some(0));
@@ -295,14 +308,18 @@ impl<'a> Device<'a> {
 		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 		let data = [
-			(phys + offt, mem::size_of::<controlq::SetScanout>(), false),
+			(
+				(phys + offt).try_into().unwrap(),
+				mem::size_of::<controlq::SetScanout>().try_into().unwrap(),
+				false,
+			),
 			resp_data,
 		];
 		self.controlq
-			.send(data.iter().copied())
+			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None);
+		self.controlq.wait_for_used(None, None);
 
 		Ok(())
 	}
@@ -318,7 +335,11 @@ impl<'a> Device<'a> {
 		let mut phys = 0;
 		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
-		let resp_data = (phys + offt, mem::size_of::<ControlHeader>(), true);
+		let resp_data = (
+			(phys + offt).try_into().unwrap(),
+			mem::size_of::<ControlHeader>().try_into().unwrap(),
+			true,
+		);
 
 		// Transfer to host
 		let res = controlq::TransferToHost2D::new(res_id, 0, rect, Some(0));
@@ -329,17 +350,19 @@ impl<'a> Device<'a> {
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 		let data = [
 			(
-				phys + offt,
-				mem::size_of::<controlq::TransferToHost2D>(),
+				(phys + offt).try_into().unwrap(),
+				mem::size_of::<controlq::TransferToHost2D>()
+					.try_into()
+					.unwrap(),
 				false,
 			),
 			resp_data,
 		];
 		self.controlq
-			.send(data.iter().copied())
+			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None);
+		self.controlq.wait_for_used(None, None);
 
 		// Flush resource
 		let flush = controlq::resource::Flush::new(res_id.try_into().unwrap(), rect, Some(0));
@@ -351,17 +374,19 @@ impl<'a> Device<'a> {
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 		let data = [
 			(
-				phys + offt,
-				mem::size_of::<controlq::resource::Flush>(),
+				(phys + offt).try_into().unwrap(),
+				mem::size_of::<controlq::resource::Flush>()
+					.try_into()
+					.unwrap(),
 				false,
 			),
 			resp_data,
 		];
 		self.controlq
-			.send(data.iter().copied())
+			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None);
+		self.controlq.wait_for_used(None, None);
 
 		Ok(())
 	}

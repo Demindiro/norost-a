@@ -4,6 +4,7 @@ mod sector;
 
 pub use sector::Sector;
 
+use core::convert::TryInto;
 use core::fmt;
 use core::mem;
 use simple_endian::{u16le, u32le, u64le};
@@ -167,22 +168,32 @@ impl<'a> BlockDevice<'a> {
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 
 		let data = [
-			(phys_header + ho, mem::size_of::<RequestHeader>(), false),
 			(
-				phys_data + d_,
-				data.as_ref().len() * mem::size_of::<Sector>(),
+				(phys_header + ho).try_into().unwrap(),
+				mem::size_of::<RequestHeader>().try_into().unwrap(),
 				false,
 			),
-			(phys_status + so, mem::size_of::<RequestStatus>(), true),
+			(
+				(phys_data + d_).try_into().unwrap(),
+				(data.as_ref().len() * mem::size_of::<Sector>())
+					.try_into()
+					.unwrap(),
+				false,
+			),
+			(
+				(phys_status + so).try_into().unwrap(),
+				mem::size_of::<RequestStatus>().try_into().unwrap(),
+				true,
+			),
 		];
 
 		self.queue
-			.send(data.iter().copied())
+			.send(data.iter().copied(), None, None)
 			.expect("Failed to send data");
 
 		self.flush();
 
-		self.queue.wait_for_used(None);
+		self.queue.wait_for_used(None, None);
 
 		Ok(())
 	}
@@ -217,22 +228,32 @@ impl<'a> BlockDevice<'a> {
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 
 		let data = [
-			(phys_header + ho, mem::size_of::<RequestHeader>(), false),
 			(
-				phys_data + d_,
-				data.as_mut().len() * mem::size_of::<Sector>(),
+				(phys_header + ho).try_into().unwrap(),
+				mem::size_of::<RequestHeader>().try_into().unwrap(),
+				false,
+			),
+			(
+				(phys_data + d_).try_into().unwrap(),
+				(data.as_mut().len() * mem::size_of::<Sector>())
+					.try_into()
+					.unwrap(),
 				true,
 			),
-			(phys_status + so, mem::size_of::<RequestStatus>(), true),
+			(
+				(phys_status + so).try_into().unwrap(),
+				mem::size_of::<RequestStatus>().try_into().unwrap(),
+				true,
+			),
 		];
 
 		self.queue
-			.send(data.iter().copied())
+			.send(data.iter().copied(), None, None)
 			.expect("Failed to send data");
 
 		self.flush();
 
-		self.queue.wait_for_used(None);
+		self.queue.wait_for_used(None, None);
 
 		Ok(())
 	}

@@ -46,7 +46,7 @@ pub struct Allocator {
 
 impl Stacks {
 	/// The amount of PPNs per stack. Must be a power of `2`.
-	const STACK_SIZE: u16 = 1 << 10;
+	const STACK_SIZE: u16 = 2048;
 
 	/// The amount of bytes used by a single stack, excluding top and bottom.
 	const MEM_STACK_SIZE: usize = Self::STACK_SIZE as usize * mem::size_of::<PPN>();
@@ -54,22 +54,20 @@ impl Stacks {
 	/// The amount of bytes used by a single stack, including top and bottom.
 	pub(super) const MEM_TOTAL_SIZE: usize = Self::MEM_STACK_SIZE + mem::size_of::<(u16, u16)>();
 
-	/// Pushes a PPN on the given stack. Returns `true` if successful, `false` if the
-	/// stack is full.
-	#[must_use]
-	fn push(&mut self, stack_index: usize, ppn: PPN) -> bool {
+	/// Pushes a PPN on the given stack. Returns the page if the stack is full.
+	fn push(&mut self, stack_index: usize, ppn: PPN) -> Result<(), PPN> {
 		let stack = &mut self.stacks[stack_index];
 		// SAFETY: the pointers point to arrays at least as large as stacks, and if the index
 		// was OOB we'd have paniced already.
 		let top_base = unsafe { &mut *self.top_base.add(stack_index) };
 		if top_base.0 == top_base.1.wrapping_add(Self::STACK_SIZE) {
 			// The stack is full.
-			return false;
+			return Err(ppn);
 		}
 		let index = top_base.0 & (Self::STACK_SIZE - 1);
 		stack[index as usize] = ppn.into_raw();
 		top_base.0 = top_base.0.wrapping_add(1);
-		true
+		Ok(())
 	}
 
 	/// Pops a PPN from the stack. Returns `None` if there are no entries left.
@@ -198,8 +196,11 @@ impl Allocator {
 	/// Free a page.
 	pub fn free(&mut self, page: PPN) {
 		// FIXME use hart IDs.
-		if !self.stacks.push(0, page) {
-			todo!()
+		match self.stacks.push(0, page) {
+			Ok(()) => (),
+			Err(page) => {
+				todo!()
+			}
 		}
 	}
 

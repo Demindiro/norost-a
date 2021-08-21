@@ -206,9 +206,21 @@ impl<'a> Queue<'a> {
 
 	/// Convert an iterator of `(address, data)` into a linked list of descriptors and put it in the
 	/// available ring.
-	pub fn send<I>(&mut self, iterator: I) -> Result<(), NoBuffers>
+	///
+	/// Two callback functions can be specified:
+	///
+	/// * The first will return a descriptor associated with each entry in the iterator
+	///
+	/// * The second will return the descriptor, physical address and size associated with each
+	///   buffer that may be collected.
+	pub fn send<I>(
+		&mut self,
+		iterator: I,
+		mut used: Option<&mut dyn FnMut(u16)>,
+		callback: Option<&mut dyn FnMut(u16, u64, u32)>,
+	) -> Result<(), NoBuffers>
 	where
-		I: ExactSizeIterator<Item = (usize, usize, bool)>,
+		I: ExactSizeIterator<Item = (u64, u32, bool)>,
 	{
 		let count = iterator.len().try_into().unwrap();
 		if count == 0 {
@@ -217,7 +229,7 @@ impl<'a> Queue<'a> {
 		}
 
 		if self.free_count < count {
-			self.collect_used();
+			self.collect_used(callback);
 			(self.free_count < count).then(|| ()).ok_or(NoBuffers)?;
 		}
 
@@ -227,16 +239,19 @@ impl<'a> Queue<'a> {
 		let mut head = u16le::from(0);
 		let mut prev_next = &mut head;
 		let mut iterator = iterator.peekable();
+		let mut free_count = self.free_count;
 		while let Some((address, length, write)) = iterator.next() {
-			self.free_count -= 1;
-			let i = usize::from(self.free_descriptors[usize::from(self.free_count)]);
+			free_count = free_count.checked_sub(1).ok_or(NoBuffers)?;
+			let i = usize::from(self.free_descriptors[usize::from(free_count)]);
 			desc[i].address = u64le::from(u64::try_from(address).expect("Address out of bounds"));
 			desc[i].length = u32le::from(u32::try_from(length).expect("Length too large"));
 			desc[i].flags = u16le::from(u16::from(write) * Descriptor::WRITE);
 			desc[i].flags |= u16le::from(u16::from(iterator.peek().is_some()) * Descriptor::NEXT);
+			used.as_mut().map(|f| f(i as u16));
 			*prev_next = u16le::from(i as u16);
 			prev_next = &mut desc[i].next;
 		}
+		self.free_count = free_count;
 
 		avail_ring[usize::from(u16::from(avail_head.index) & self.mask)].index = head;
 		atomic::fence(Ordering::AcqRel);
@@ -247,17 +262,13 @@ impl<'a> Queue<'a> {
 
 	/// Collect used buffers from the device and add them to the free_descriptors list.
 	///
-	/// Returns the amount of buffers collected.
-	pub fn collect_used(&mut self) -> usize {
-		loop {
-			atomic::fence(Ordering::AcqRel);
-			let (avail, _) = available_ring!(self);
-			let (used, _) = used_ring!(self);
-			if avail.index == used.index {
-				break;
-			}
-		}
-
+	/// A callback function can be specified which will return the descriptor, physical address
+	/// and size associated with each buffer.
+	///
+	/// # Returns
+	///
+	/// The amount of buffers collected.
+	pub fn collect_used(&mut self, mut callback: Option<&mut dyn FnMut(u16, u64, u32)>) -> usize {
 		let (head, ring) = used_ring!(self);
 		let table = descriptors_table!(self);
 
@@ -265,15 +276,17 @@ impl<'a> Queue<'a> {
 		let head_index = u16::from(head.index);
 		while index != head_index {
 			// TODO maybe we should use unwrap?
-			let mut descr = u32::from(ring[usize::from(index & self.mask)].index) as u16;
-			//#[cfg(debug_assertions)]
-			ring[usize::from(index & self.mask)].index = 0xffff.into();
+			let mut descr_index = u32::from(ring[usize::from(index & self.mask)].index) as u16;
 			loop {
-				self.free_descriptors[usize::from(self.free_count)] = descr;
+				assert_ne!(descr_index, u16::MAX);
+				let descr = &table[usize::from(descr_index)];
+				callback
+					.as_mut()
+					.map(|f| f(descr_index, descr.address.into(), descr.length.into()));
+				self.free_descriptors[usize::from(self.free_count)] = descr_index;
 				self.free_count += 1;
-				let d = &table[usize::from(descr)];
-				if u16::from(d.flags) & Descriptor::NEXT > 0 {
-					descr = d.next.into();
+				if u16::from(descr.flags) & Descriptor::NEXT > 0 {
+					descr_index = descr.next.into();
 				} else {
 					break;
 				}
@@ -289,8 +302,15 @@ impl<'a> Queue<'a> {
 	///
 	/// An optional wait function can be specified to do other work instead of idly
 	/// wasting cycles.
-	pub fn wait_for_used(&mut self, mut wait_fn: Option<&mut dyn FnMut()>) {
-		while self.collect_used() == 0 {
+	pub fn wait_for_used(
+		&mut self,
+		mut callback: Option<&mut FnMut(u16, u64, u32)>,
+		mut wait_fn: Option<&mut dyn FnMut()>,
+	) {
+		let cb = &mut |a, b, c| {
+			callback.as_mut().map(|f| f(a, b, c));
+		};
+		while self.collect_used(Some(cb)) == 0 {
 			wait_fn.as_mut().map(|f| f());
 		}
 	}

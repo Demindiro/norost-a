@@ -12,6 +12,8 @@ QEMU=qemu-system-riscv64 \
 		-drive file=$(VIRTIO_DISK),format=raw,if=none,id=disk0 \
 		-device virtio-blk-pci,drive=disk0 \
 		-device virtio-gpu-pci \
+		-device virtio-keyboard-pci \
+		-device virtio-tablet-pci \
 		-serial stdio
 
 dump-dtb:
