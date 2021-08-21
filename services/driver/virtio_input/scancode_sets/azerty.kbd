@@ -1,0 +1,138 @@
+#	modifiers	scancode	char/action
+				01			escape
+				02			&
+				03			é
+				04			"
+				05			'
+				06			(
+				07			§
+				08			è
+				09			!
+				0a			ç
+				0b			à
+				0c			)
+				0d			-
+				0e			backspace
+				0f			tab
+				10			a
+				11			z
+				12			e
+				13			r
+				14			t
+				15			y
+				16			u
+				17			i
+				18			o
+				19			p
+				1a			^
+				1b			$
+				1c			enter
+				1d			lctrl
+				1e			q
+				1f			s
+				20			d
+				21			f
+				22			g
+				23			h
+				24			j
+				25			k
+				26			l
+				27			m
+				28			ù
+				2a			lshift
+				2b			µ
+				2c			w
+				2d			x
+				2e			c
+				2f			v
+				30			b
+				31			n
+				32			,
+				33			;
+				34			:
+				35			=
+				36			rshift
+
+				38			alt
+				39			space
+
+
+
+				3b			f1
+				3c			f2
+				3d			f3
+				3e			f4
+				3f			f5
+				40			f6
+				41			f7
+				42			f8
+				43			f9
+				44			f10
+
+				57			f11
+				58			f12
+
+				61			rctrl
+
+				64			altgr
+
+				67			arrowu
+
+				69			arrowl
+
+				6a			arrowr
+
+				6c			arrowd
+
+				77			pause
+
+				7d			lsuper
+				7f			rsuper
+
+	caps		02			1
+	caps		03			2
+	caps		04			3
+	caps		05			4
+	caps		06			5
+	caps		07			6
+	caps		08			7
+	caps		09			8
+	caps		0a			9
+	caps		0b			0
+	caps		0c			°
+	caps		0d			_
+	caps		10			A
+	caps		11			Z
+	caps		12			E
+	caps		13			R
+	caps		14			T
+	caps		15			Y
+	caps		16			U
+	caps		17			I
+	caps		18			O
+	caps		19			P
+	caps		1a			¨
+	caps		1b			*
+	caps		1e			Q
+	caps		1f			S
+	caps		20			D
+	caps		21			F
+	caps		22			G
+	caps		23			H
+	caps		24			J
+	caps		25			K
+	caps		26			L
+	caps		27			M
+	caps		28			%
+	caps		2a			lshift
+	caps		2b			£
+	caps		2c			W
+	caps		2d			X
+	caps		2e			C
+	caps		2f			V
+	caps		30			B
+	caps		31			N
+	caps		32			?
+	caps		33			.
+	caps		34			/
+	caps		35			+

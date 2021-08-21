@@ -24,8 +24,10 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 }
 
 mod rtbegin;
+mod scancode;
 
 use core::convert::{TryFrom, TryInto};
+use core::num::NonZeroU8;
 use core::ptr;
 use kernel::Page;
 
@@ -94,32 +96,16 @@ fn main() {
 	let mut device = virtio::pci::new_device2(pci, &virt_bars[..], virtio_input::Device::new)
 		.expect("failed to create device");
 
-	// Create draw buffer
-	#[repr(C)]
-	struct RGBA8 {
-		r: u8,
-		g: u8,
-		b: u8,
-		a: u8,
-	}
-	let (w, h) = (800, 600);
-	let size = (w * h * core::mem::size_of::<RGBA8>() + kernel::Page::MASK) / kernel::Page::SIZE;
-	let addr = core::ptr::NonNull::new(0x3333_0000 as *mut _).unwrap();
-	let ret = unsafe { kernel::mem_alloc(addr.as_ptr(), size, 0b11) };
-	assert_eq!(ret.status, 0);
-	let buffer = unsafe {
-		let ptr = addr.as_ptr().cast::<RGBA8>();
-		let size = size * kernel::Page::SIZE / core::mem::size_of::<RGBA8>();
-		// SAFETY: while the device will read from it, only we will write to it.
-		core::slice::from_raw_parts_mut(ptr, size)
-	};
-
 	/*
 	// Add self to registry
 	let name = "virtio_input";
 	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name.len(), usize::MAX) };
 	assert_eq!(ret.status, 0, "failed to add self to registry");
 	*/
+
+	let mut key = None;
+	let (mut lshift, mut rshift, mut capslock) = (false, false, false);
+	let set = scancode::default();
 
 	loop {
 		/*
@@ -155,7 +141,40 @@ fn main() {
 		*/
 
 		device.receive(&mut |evt| {
-			kernel::dbg!(evt);
+			/*
+			match evt.code() {
+				2..8 => {
+
+				}
+				42 => lshift = evt.value() > 0,
+				code => {
+					kernel::dbg!(code);
+					return;
+				}
+			}
+			kernel::dbg!((lshift, key));
+			*/
+			key = Some(0);
+			if let Some(k) = NonZeroU8::new(evt.code().try_into().unwrap()) {
+				use scancode::*;
+				let mut mods = Modifiers::new();
+				mods.set_caps((lshift || rshift) != capslock);
+				let on = evt.value() > 0;
+				match set.get(mods, k) {
+					Some(Key::Char(c)) => {
+						if on {
+							kernel::dbg!(format_args!("{:?}", c));
+						}
+					}
+					Some(Key::LShift) => lshift = on,
+					Some(Key::RShift) => rshift = on,
+					Some(Key::Capslock) => capslock = on,
+					_ => todo!(),
+					None => {
+						kernel::dbg!(format_args!("0x{:x}", evt.code()));
+					}
+				}
+			}
 		});
 
 		unsafe {
