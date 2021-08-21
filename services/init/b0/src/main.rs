@@ -151,9 +151,19 @@ fn main() {
 		unsafe { kernel::io_wait(0) };
 	};
 
-	// Wait for uart to come online
+	// Wait for uart / console to come online
 	let uart_addr = loop {
 		let name = b"uart";
+		let ret = unsafe { kernel::sys_registry_get(name.as_ptr(), name.len()) };
+		if ret.status == 0 {
+			break ret.value;
+		}
+		unsafe { kernel::io_wait(0) };
+	};
+
+	// Wait for uart / console to come online
+	let console_addr = loop {
+		let name = b"console";
 		let ret = unsafe { kernel::sys_registry_get(name.as_ptr(), name.len()) };
 		if ret.status == 0 {
 			break ret.value;
@@ -179,11 +189,11 @@ fn main() {
 					kernel::ipc::UUID::from(0x0),
 				),
 				(
-					dux::task::Address::from(uart_addr),
+					dux::task::Address::from(console_addr),
 					kernel::ipc::UUID::from(0x0),
 				),
 				(
-					dux::task::Address::from(uart_addr),
+					dux::task::Address::from(console_addr),
 					kernel::ipc::UUID::from(0x0),
 				),
 				(

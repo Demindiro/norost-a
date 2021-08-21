@@ -106,7 +106,6 @@ fn main() {
 	}
 	let (w, h) = (800, 600);
 	let size = (w * h * core::mem::size_of::<RGBA8>() + kernel::Page::MASK) / kernel::Page::SIZE;
-	kernel::dbg!(size);
 	let addr = core::ptr::NonNull::new(0x3333_0000 as *mut _).unwrap();
 	let ret = unsafe { kernel::mem_alloc(addr.as_ptr(), size, 0b11) };
 	assert_eq!(ret.status, 0);
@@ -122,7 +121,6 @@ fn main() {
 	let ret = unsafe { device.init_scanout(virtio_gpu::Format::RGBA8Unorm, rect, addr, size) };
 	ret.unwrap();
 
-	kernel::dbg!(buffer.len());
 	for x in 0..w {
 		for y in 0..h {
 			let r = (x * 127 / w) as u8;

@@ -18,7 +18,31 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 	loop {}
 }
 
+mod letter;
 mod rtbegin;
+
+use core::convert::TryInto;
+use letter::Letter;
+use letter::*;
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct RGBA8 {
+	r: u8,
+	g: u8,
+	b: u8,
+	a: u8,
+}
+
+impl RGBA8 {
+	const fn rgb(r: u8, g: u8, b: u8) -> Self {
+		Self::rgba(r, g, b, 255)
+	}
+
+	const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
+		Self { r, g, b, a }
+	}
+}
 
 #[export_name = "main"]
 fn main() {
@@ -36,13 +60,6 @@ fn main() {
 	};
 
 	// Request draw buffer
-	#[repr(C)]
-	struct RGBA8 {
-		r: u8,
-		g: u8,
-		b: u8,
-		a: u8,
-	}
 	unsafe {
 		dux::ipc::add_free_range(dux::Page::new_unchecked(0x3333_0000 as *mut _), 2048).unwrap()
 	};
@@ -83,50 +100,72 @@ fn main() {
 
 	let (mut a, mut b) = (1.0, 0.0);
 
+	let (mut cursor_x, mut cursor_y) = (0, 0);
+	let (cursor_w, cursor_h) = (50, 24);
+
 	loop {
-		//let rx = dux::ipc::receive();
-
-		let d = 0.5;
-		for x in 0u16..w {
-			for y in 0u16..h {
-				let r = f32::from(x) / f32::from(w) - d;
-				let g = f32::from(y) / f32::from(h) - d;
-				let (r, g) = (r * a - g * b, r * b + g * a);
-				let i = usize::from(x) + usize::from(y) * usize::from(w);
-				if (r * r + g * g) * 100.0 <= 25.0 {
-					let (r, g) = (d + r, d + g);
-					let r8 = (r * (255.0 / 2.0)) as u8;
-					let g8 = (g * (255.0 / 2.0)) as u8;
-					let (r, g) = (r8, g8);
-					buffer[i] = RGBA8 {
-						r: r * 2,
-						g: g * 2,
-						b: 255 - r - g,
-						a: 255,
-					};
-				} else {
-					buffer[i] = RGBA8 {
-						r: 0,
-						g: 0,
-						b: 0,
-						a: 255,
-					};
-				}
-			}
-		}
-
-		let (x, y) = rotate(a, b);
-		a = x;
-		b = y;
-		kernel::dbg!(x * x + y * y);
-
 		use core::slice;
 
-		/*
+		let rx = dux::ipc::receive();
 		match rx.opcode.map(|n| n.get()).unwrap_or(0) {
+			op if op == kernel::ipc::Op::Write as u8 => {
+				let data = unsafe {
+					slice::from_raw_parts(rx.data.unwrap().as_ptr().cast::<u8>(), rx.length)
+				};
+				let mut iter = data.iter();
+				let fg = RGBA8::rgb(255, 255, 255);
+				let bg = RGBA8::rgb(0, 0, 0);
+				while let Some(c) = iter.next() {
+					match c {
+						b'\n' => {
+							cursor_x = 0;
+							cursor_y += 1;
+						}
+						b'\r' => cursor_x = 0,
+						b'\x1b' => {
+							assert_eq!(iter.next(), Some(&b'['));
+							match iter.next().unwrap() {
+								b'2' => match iter.next().unwrap() {
+									b'K' => {
+										for x in 0..cursor_w {
+											let (x, y) =
+												(x * Letter::WIDTH, cursor_y * Letter::HEIGHT);
+											letter::get(0).copy(x, y, buffer, w, h, fg, bg);
+										}
+										cursor_x = 0;
+									}
+									_ => panic!(),
+								},
+								_ => panic!(),
+							}
+						}
+						c => {
+							let (x, y) = (cursor_x * Letter::WIDTH, cursor_y * Letter::HEIGHT);
+							letter::get(*c).copy(x, y, buffer, w, h, fg, bg);
+							cursor_x += 1;
+							if cursor_x >= cursor_w {
+								cursor_x = 0;
+								cursor_y += 1;
+							}
+						}
+					}
+				}
+				*dux::ipc::transmit() = kernel::ipc::Packet {
+					flags: 0,
+					id: rx.id,
+					opcode: rx.opcode,
+					offset: 0,
+					uuid: kernel::ipc::UUID::INVALID,
+					data: None,
+					length: rx.length,
+					name: None,
+					name_len: 0,
+					address: rx.address,
+				};
+			}
 			_ => todo!(),
 		}
-		*/
+		drop(rx);
 
 		*dux::ipc::transmit() = kernel::ipc::Packet {
 			flags: 0,
@@ -140,22 +179,5 @@ fn main() {
 			name_len: 0,
 			address,
 		};
-
-		unsafe {
-			kernel::io_wait(33_333);
-		}
 	}
-}
-
-const A: f32 = 255.0;
-static B: f32 = 255.0;
-static mut C: f32 = 255.0;
-
-fn rotate(x: f32, y: f32) -> (f32, f32) {
-	let r = 1.0 / 32.0;
-	let (dx, dy) = (0.999, 0.0447101778122163142);
-	let (x, y) = (x * dx - y * dy, x * dy + y * dx);
-	let d = (1.0 - (x * x + y * y));
-	// Perhaps not mathematically accurate, but it works
-	(x - d * r, y - d * r)
 }

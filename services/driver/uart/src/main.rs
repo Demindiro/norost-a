@@ -225,7 +225,9 @@ fn main() {
 
 	// Wait for & respond to requests
 	loop {
-		let rxq = dux::ipc::receive();
+		let rx = dux::ipc::receive();
+		let rxq = rx.clone();
+		drop(rx);
 		let op = rxq.opcode.unwrap();
 		match kernel::ipc::Op::try_from(op) {
 			Ok(kernel::ipc::Op::Read) => {

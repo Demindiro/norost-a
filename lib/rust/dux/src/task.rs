@@ -111,7 +111,6 @@ pub fn spawn_elf(
 			_ => Err(SpawnElfError::BadRWXFlags)?,
 		};
 
-		kernel::dbg!(format_args!("{:x}", ph.file_size()));
 		if ph.flags().is_write() {
 			// We must copy the pages as they may be written to.
 			let addr =
@@ -140,7 +139,6 @@ pub fn spawn_elf(
 				xmas_elf::program::ProgramHeader::Ph64(ph) => ph.raw_data(&elf),
 				_ => unreachable!(),
 			};
-			kernel::dbg!(format_args!("{:x?}", &data[..ph.file_size() as usize]));
 			copy.copy_from_slice(&data);
 			for k in 0..mem_pages {
 				let self_address = addr.as_ptr().wrapping_add(k);
@@ -262,7 +260,6 @@ pub fn spawn_elf(
 			(0x8000_0000 - stack_offset) as *const _,
 		)
 	};
-	kernel::dbg!(ret.value);
 	match ret.status {
 		kernel::Return::OK => Ok(Address(ret.value)),
 		r => unreachable!("{}", r),

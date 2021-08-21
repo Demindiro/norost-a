@@ -3,5 +3,8 @@ include ../../../common_rust.mk
 
 NAME = console_driver
 
-build:
+build: font.bitmap
 	cargo build --release
+
+font.bitmap: font.bitmap.xz
+	xz -dk $<
