@@ -6,6 +6,8 @@
 
 #![no_std]
 
+mod ev;
+
 use core::convert::{TryFrom, TryInto};
 use core::fmt;
 use core::mem;
@@ -28,19 +30,19 @@ struct Config {
 }
 
 impl Config {
-	const UNSET: usize = 0x00;
-	const ID_NAME: usize = 0x01;
-	const ID_SERIAL: usize = 0x02;
-	const ID_DEVIDS: usize = 0x03;
+	const UNSET: u8 = 0x00;
+	const ID_NAME: u8 = 0x01;
+	const ID_SERIAL: u8 = 0x02;
+	const ID_DEVIDS: u8 = 0x03;
 
-	const PROP_BITS: usize = 0x10;
-	const EV_BITS: usize = 0x11;
-	const ABS_INFO: usize = 0x12;
+	const PROP_BITS: u8 = 0x10;
+	const EV_BITS: u8 = 0x11;
+	const ABS_INFO: u8 = 0x12;
 }
 
 union ConfigUnion {
-	string: mem::ManuallyDrop<[VolatileCell<u8>; 128]>,
-	bitmap: mem::ManuallyDrop<[VolatileCell<u8>; 128]>,
+	string: mem::ManuallyDrop<VolatileCell<[u8; 128]>>,
+	bitmap: mem::ManuallyDrop<VolatileCell<[u8; 128]>>,
 	abs: mem::ManuallyDrop<AbsInfo>,
 	ids: mem::ManuallyDrop<DevIds>,
 }
@@ -204,6 +206,30 @@ impl<'a> Device<'a> {
 		self.flush();
 
 		Ok(())
+	}
+
+	pub fn name(&self, buf: &mut [u8; 128]) -> u8 {
+		self.config.select.set(Config::ID_NAME);
+		self.config.sub_select.set(0);
+		let size = self.config.size.get().saturating_sub(1);
+		buf.copy_from_slice(unsafe { &self.config.u.string.get() });
+		size
+	}
+
+	pub fn serial_id(&self, buf: &mut [u8; 128]) -> u8 {
+		self.config.select.set(Config::ID_SERIAL);
+		self.config.sub_select.set(0);
+		let size = self.config.size.get();
+		buf.copy_from_slice(unsafe { &self.config.u.string.get() });
+		size
+	}
+
+	pub fn ev_bits(&self, buf: &mut [u8; 128], ev: u8) -> u8 {
+		self.config.select.set(Config::EV_BITS);
+		self.config.sub_select.set(ev);
+		let size = self.config.size.get();
+		buf.copy_from_slice(unsafe { &self.config.u.bitmap.get() });
+		size
 	}
 
 	fn flush(&self) {

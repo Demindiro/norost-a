@@ -1,6 +1,6 @@
 use core::num::NonZeroU8;
 
-const DEFAULT: &str = include_str!("../scancode_sets/azerty.kbd");
+const DEFAULT: &str = include_str!("../scancode_sets/evdev.kbd");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Key {

@@ -10,8 +10,16 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 // TODO use a radix tree instead of a dumb list.
 
 /// -1 means it's locked.
-static REGISTRY_ENTRY_COUNT: AtomicUsize = AtomicUsize::new(1); // FIXME HACK HACK HACK godfuckingdamnit
+static REGISTRY_ENTRY_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY: LOL = LOL([
+	UnsafeCell::new(None),
+	UnsafeCell::new(None),
+	UnsafeCell::new(None),
+	UnsafeCell::new(None),
+	UnsafeCell::new(None),
+	UnsafeCell::new(None),
+	UnsafeCell::new(None),
+	UnsafeCell::new(None),
 	UnsafeCell::new(None),
 	UnsafeCell::new(None),
 	UnsafeCell::new(None),
@@ -22,7 +30,7 @@ static REGISTRY: LOL = LOL([
 	UnsafeCell::new(None),
 ]);
 
-struct LOL([UnsafeCell<Option<Entry>>; 8]);
+struct LOL([UnsafeCell<Option<Entry>>; 16]);
 
 unsafe impl Sync for LOL {}
 
@@ -82,12 +90,12 @@ fn lock() -> usize {
 			Ordering::Acquire,
 			Ordering::Relaxed,
 		) {
-			Ok(_) => break len - 1,
+			Ok(_) => break len,
 			Err(v) => len = v,
 		}
 	}
 }
 
 fn unlock(len: usize) {
-	REGISTRY_ENTRY_COUNT.store(len + 1, Ordering::Release);
+	REGISTRY_ENTRY_COUNT.store(len, Ordering::Release);
 }

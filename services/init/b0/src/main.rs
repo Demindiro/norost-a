@@ -154,6 +154,7 @@ fn main() {
 	// Wait for uart / console to come online
 	let uart_addr = loop {
 		let name = b"uart";
+		let name = b"QEMU Virtio Keyboard";
 		let ret = unsafe { kernel::sys_registry_get(name.as_ptr(), name.len()) };
 		if ret.status == 0 {
 			break ret.value;
