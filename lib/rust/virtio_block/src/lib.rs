@@ -122,8 +122,7 @@ impl<'a> BlockDevice<'a> {
 		let blk_cfg = unsafe { device.cast::<Config>() };
 
 		// Set up queue.
-		let msix = Some(0x0);
-		let queue = queue::Queue::<'a>::new(common, 0, 8, msix).expect("OOM");
+		let queue = queue::Queue::<'a>::new(common, 0, 8, None).expect("OOM");
 
 		common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE
@@ -252,9 +251,9 @@ impl<'a> BlockDevice<'a> {
 			.send(data.iter().copied(), None, None)
 			.expect("Failed to send data");
 
-		unsafe { kernel::io_wait(10_000_000) };
-
 		self.flush();
+
+		unsafe { kernel::io_wait(10_000_000) };
 
 		self.queue.wait_for_used(None, None);
 

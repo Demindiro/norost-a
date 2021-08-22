@@ -197,13 +197,7 @@ fn main() {
 					core::slice::from_raw_parts_mut(data, length)
 				};
 
-				unsafe {
-					kernel::dbg!(virtio::pci::MSIX_TEST_STUPIDITY);
-				}
 				device.read(data, offset).expect("failed to read sectors");
-				unsafe {
-					kernel::dbg!(virtio::pci::MSIX_TEST_STUPIDITY);
-				}
 
 				// Send completion event
 				*dux::ipc::transmit() = kernel::ipc::Packet {
