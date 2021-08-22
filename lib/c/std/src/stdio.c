@@ -289,7 +289,6 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE * stream)
 			} else {
 				dux_defer_received_entry(slot);
 			}
-			kernel_io_wait(-1);
 		}
 
 		// Check if the "stream" ended early

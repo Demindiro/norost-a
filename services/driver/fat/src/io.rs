@@ -62,10 +62,8 @@ impl<'a> GlobalIO<'a> {
 		loop {
 			let pkt = dux::ipc::receive();
 			if pkt.address != unsafe { ADDRESS } {
-				panic!();
 				pkt.defer();
-				//unsafe { kernel::io_wait(u64::MAX) };
-				unsafe { kernel::io_wait(10_000_000) };
+				unsafe { kernel::io_wait(10_000) };
 				continue;
 			}
 			break;
@@ -149,8 +147,7 @@ impl Write for GlobalIO<'_> {
 			let pkt = dux::ipc::receive();
 			if pkt.address != unsafe { ADDRESS } {
 				pkt.defer();
-				//unsafe { kernel::io_wait(u64::MAX) };
-				unsafe { kernel::io_wait(1_000_000) };
+				unsafe { kernel::io_wait(10_000) };
 				continue;
 			}
 			break;

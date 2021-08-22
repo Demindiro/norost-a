@@ -431,7 +431,7 @@ pub(crate) mod ipc {
 					slot: entries[usize::from(i & mask)].get(),
 				};
 			}
-			let _ = unsafe { kernel::io_wait(u64::MAX) };
+			unsafe { kernel::io_wait(u64::MAX) };
 		}
 	}
 
@@ -473,13 +473,15 @@ pub(crate) mod ipc {
 			let last_index = GLOBAL.part.last_received_index.get();
 			let mask = GLOBAL.part.ring_mask.get();
 
+			let prev_index = index.wrapping_sub(1);
 			let a = entries[usize::from(last_index & mask)].get();
-			let b = entries[usize::from(index & mask)].get();
+			let b = entries[usize::from(prev_index & mask)].get();
 			debug_assert_eq!(a, self.slot, "current received entry mutated while locked");
 			assert_eq!(a, self.slot, "current received entry mutated while locked");
-			entries[usize::from(index & mask)].set(a);
+			entries[usize::from(prev_index & mask)].set(a);
 			entries[usize::from(last_index & mask)].set(b);
 
+			mem::forget(self);
 			unsafe { util::SpinLockGuard::from_raw(&GLOBAL.part.received_lock, false) };
 		}
 	}
