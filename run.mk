@@ -38,3 +38,9 @@ gdb-run: build
 
 $(VIRTIO_DISK):
 	fallocate -l $$((32 * 512)) $@
+
+help-log-trace:
+	$(QEMU) $(QEMU_OPT) -d trace:help
+
+help-log:
+	$(QEMU) $(QEMU_OPT) -d help

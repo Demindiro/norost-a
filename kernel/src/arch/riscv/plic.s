@@ -5,6 +5,8 @@
 
 external_interrupt_handler:
 
+	j mini_panic # Temporary while learning about MSI-X
+
 	# Save _all_ the general purpose registers.
 	# This isn't strictly necessary when the interrupt is addressed at the
 	# active task, but a branch to compare the TID is likely more expensive

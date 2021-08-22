@@ -1,3 +1,4 @@
+use core::convert::TryFrom;
 use core::fmt;
 use core::num::NonZeroU8;
 use core::ptr::NonNull;
@@ -303,9 +304,9 @@ where
 			unsafe {
 				data.msg_ctrl.set(((1 << 15) | 1).into());
 
-				kernel::dbg!(data.msg_ctrl.get());
-				kernel::dbg!(data.table_offt_and_bir.get());
-				kernel::dbg!(data.pending_bit_offt_and_bir.get());
+				kernel::dbg!(format_args!("{:x}", data.msg_ctrl.get()));
+				kernel::dbg!(format_args!("{:x}", data.table_offt_and_bir.get()));
+				kernel::dbg!(format_args!("{:x}", data.pending_bit_offt_and_bir.get()));
 			}
 
 			//data.table_offt_and_bir
@@ -403,6 +404,8 @@ where
 
 	handler(common_config, device_config, notify_config)
 }
+
+pub static mut MSIX_TEST_STUPIDITY: u32 = u32::MAX;
 
 /// Setup a new virtio device on a PCI bus.
 pub fn new_device2<'a, D, H, R>(
@@ -519,7 +522,7 @@ where
 			kernel::dbg!("done msi");
 		} else if cap.id() == 0x11 {
 			// MSI-X
-			kernel::dbg!("LESGO");
+			kernel::dbg!("LESGOOOO");
 			#[repr(C)]
 			#[repr(packed)]
 			struct MSIX {
@@ -528,14 +531,66 @@ where
 				pending_bit_offt_and_bir: VolatileCell<u32le>,
 			}
 			let data = unsafe { cap.data::<MSIX>() };
+			data.msg_ctrl.set(((1 << 15) | (0 << 14)).into());
+			let msg_ctrl = u16::from(data.msg_ctrl.get());
+			let table_offt_and_bir = u32::from(data.table_offt_and_bir.get());
+			let pending_bit_offt_and_bir = u32::from(data.pending_bit_offt_and_bir.get());
 			kernel::dbg!("set msi-x");
 
-			unsafe {
-				data.msg_ctrl.set(((1 << 15) | 1).into());
+			#[derive(Debug)]
+			#[repr(C)]
+			struct MSIXTableEntry {
+				message_address_low: u32le,
+				message_address_high: u32le,
+				message_data: u32le,
+				vector_control: u32le,
+			}
 
-				kernel::dbg!(data.msg_ctrl.get());
-				kernel::dbg!(data.table_offt_and_bir.get());
-				kernel::dbg!(data.pending_bit_offt_and_bir.get());
+			let bar = usize::try_from(table_offt_and_bir & 0x7).unwrap();
+			let offt = usize::try_from(table_offt_and_bir & !0x7).expect("offset out of range");
+			let msix_table = unsafe {
+				&mut *base_address_regions[bar]
+					.unwrap()
+					.as_ptr()
+					.cast::<u8>()
+					.add(offt)
+					.cast::<[MSIXTableEntry; 0x1]>()
+			};
+			kernel::dbg!(&msix_table[0x0]);
+
+			let phys = unsafe {
+				let addr = &MSIX_TEST_STUPIDITY as *const _ as usize;
+				let (lo, hi) = (addr & 0xfff, addr & !0xfff);
+				let mut phys = 0;
+				let ret = kernel::mem_physical_address(hi as *const _, &mut phys, 1);
+				assert_eq!(ret.status, 0);
+				phys + lo
+			};
+
+			msix_table[0x0].message_address_high = u32::try_from(phys >> 32).unwrap().into();
+			msix_table[0x0].message_address_low = u32::try_from(phys & 0xffff_ffff).unwrap().into();
+			// vector | edgetrigger | deassert
+			msix_table[0x0].message_data = (0x20 | (1 << 15) | (0 << 14)).into();
+			msix_table[0x0].vector_control = u32le::from(0);
+			kernel::dbg!(&msix_table[0x0]);
+
+			let bar = usize::try_from(pending_bit_offt_and_bir & 0x7).unwrap();
+			let offt =
+				usize::try_from(pending_bit_offt_and_bir & !0x7).expect("offset out of range");
+			let pit_table = unsafe {
+				&mut *base_address_regions[bar]
+					.unwrap()
+					.as_ptr()
+					.cast::<u8>()
+					.add(offt)
+					.cast::<u32>()
+			};
+			kernel::dbg!(&pit_table);
+
+			unsafe {
+				kernel::dbg!(format_args!("{:x}", msg_ctrl));
+				kernel::dbg!(format_args!("{:x}", table_offt_and_bir));
+				kernel::dbg!(format_args!("{:x}", pending_bit_offt_and_bir));
 			}
 
 			//data.table_offt_and_bir
@@ -563,6 +618,7 @@ where
 	assert_eq!(mmio.len(), pci::Header0::BASE_ADDRESS_COUNT as usize);
 
 	let mut setup_mmio = |bar: u8, offset: u32| -> NonNull<u8> {
+		kernel::dbg!(bar);
 		let mmio = mmio[usize::from(bar)]
 			.expect("BAR not mapped to region")
 			.cast::<u8>();

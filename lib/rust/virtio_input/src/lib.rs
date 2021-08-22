@@ -132,8 +132,10 @@ impl<'a> Device<'a> {
 
 		let config = unsafe { device.cast::<Config>() };
 
-		let eventq = virtio::queue::Queue::<'a>::new(common, 0, Self::MAX_EVENTS).expect("OOM");
-		let statusq = virtio::queue::Queue::<'a>::new(common, 1, Self::MAX_STATUS).expect("OOM");
+		let eventq =
+			virtio::queue::Queue::<'a>::new(common, 0, Self::MAX_EVENTS, None).expect("OOM");
+		let statusq =
+			virtio::queue::Queue::<'a>::new(common, 1, Self::MAX_STATUS, None).expect("OOM");
 
 		// Push events to the event queue for the device to use.
 		let events = dux::mem::allocate_range(None, 1, dux::RWX::RW).unwrap();

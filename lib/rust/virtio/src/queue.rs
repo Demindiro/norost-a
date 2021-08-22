@@ -127,6 +127,7 @@ impl<'a> Queue<'a> {
 		config: &'a super::pci::CommonConfig,
 		index: u16,
 		max_size: u16,
+		msix: Option<u16>,
 	) -> Result<Self, OutOfMemory> {
 		// FIXME something very, VERY bad is happening here...
 		if unsafe { DMA_ADDR } == 0 {
@@ -191,6 +192,8 @@ impl<'a> Queue<'a> {
 		config.queue_enable.set(1.into());
 
 		unsafe { DMA_ADDR += 4096 * 0x2 };
+
+		msix.map(|msix| config.queue_msix_vector.set(msix.into()));
 
 		Ok(Queue {
 			_config: config,

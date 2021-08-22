@@ -171,8 +171,8 @@ impl<'a> Device<'a> {
 
 		let config = unsafe { device.cast::<Config>() };
 
-		let controlq = virtio::queue::Queue::<'a>::new(common, 0, 8).expect("OOM");
-		let cursorq = virtio::queue::Queue::<'a>::new(common, 1, 8).expect("OOM");
+		let controlq = virtio::queue::Queue::<'a>::new(common, 0, 8, None).expect("OOM");
+		let cursorq = virtio::queue::Queue::<'a>::new(common, 1, 8, None).expect("OOM");
 
 		common.device_status.set(
 			virtio::pci::CommonConfig::STATUS_ACKNOWLEDGE
