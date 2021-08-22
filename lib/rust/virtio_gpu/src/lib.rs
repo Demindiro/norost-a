@@ -155,6 +155,7 @@ impl<'a> Device<'a> {
 		common: &'a virtio::pci::CommonConfig,
 		device: &'a virtio::pci::DeviceConfig,
 		notify: &'a virtio::pci::Notify,
+		isr: &'a virtio::pci::ISR,
 	) -> Result<Self, SetupError> {
 		let features = FEATURE_EDID;
 		common.device_feature_select.set(0.into());
@@ -253,7 +254,7 @@ impl<'a> Device<'a> {
 			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None, None);
+		self.controlq.wait_for_used(None, || ());
 
 		// Attach storage
 		#[repr(C)]
@@ -298,7 +299,7 @@ impl<'a> Device<'a> {
 			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None, None);
+		self.controlq.wait_for_used(None, || ());
 
 		// Attach scanout
 		let scanout = controlq::SetScanout::new(scan_id, res_id, rect, Some(0));
@@ -319,7 +320,7 @@ impl<'a> Device<'a> {
 			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None, None);
+		self.controlq.wait_for_used(None, || ());
 
 		Ok(())
 	}
@@ -362,7 +363,7 @@ impl<'a> Device<'a> {
 			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None, None);
+		self.controlq.wait_for_used(None, || ());
 
 		// Flush resource
 		let flush = controlq::resource::Flush::new(res_id.try_into().unwrap(), rect, Some(0));
@@ -386,7 +387,7 @@ impl<'a> Device<'a> {
 			.send(data.iter().copied(), None, None)
 			.expect("failed to send data");
 		self.flush();
-		self.controlq.wait_for_used(None, None);
+		self.controlq.wait_for_used(None, || ());
 
 		Ok(())
 	}

@@ -190,6 +190,8 @@ fn main() {
 		let length = rxq.length / virtio_block::Sector::SIZE;
 		let offset = rxq.offset * ratio as u64;
 
+		let mut wait = || unsafe { kernel::io_wait(u64::MAX) };
+
 		match kernel::ipc::Op::try_from(op) {
 			Ok(kernel::ipc::Op::Read) => {
 				let data = unsafe {
@@ -197,7 +199,10 @@ fn main() {
 					core::slice::from_raw_parts_mut(data, length)
 				};
 
-				device.read(data, offset).expect("failed to read sectors");
+				kernel::dbg!(device.was_interrupted());
+				device
+					.read(data, offset, &mut wait)
+					.expect("failed to read sectors");
 
 				// Send completion event
 				*dux::ipc::transmit() = kernel::ipc::Packet {
@@ -219,7 +224,10 @@ fn main() {
 					core::slice::from_raw_parts(data, length)
 				};
 
-				device.write(data, offset).expect("failed to write sectors");
+				kernel::dbg!(device.was_interrupted());
+				device
+					.write(data, offset, &mut wait)
+					.expect("failed to write sectors");
 
 				// Confirm reception.
 				*dux::ipc::transmit() = kernel::ipc::Packet {

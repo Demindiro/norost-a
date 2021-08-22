@@ -149,13 +149,36 @@ impl CommonConfig {
 }
 
 #[repr(C)]
-pub struct ISRConfig {
-	pub status: VolatileCell<u8>,
+pub struct ISR {
+	status: VolatileCell<ISRStatus>,
 }
 
-impl ISRConfig {
-	pub const QUEUE_INTERRUPT: u8 = 0x1;
-	pub const DEVICE_CONFIGURATION_INTERRUPT: u8 = 0x2;
+impl ISR {
+	/// Read the ISR status, clearing it.
+	pub fn read(&self) -> ISRStatus {
+		self.status.get()
+	}
+}
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct ISRStatus(u8);
+
+impl ISRStatus {
+	const QUEUE_INTERRUPT: u8 = 0x1;
+	const CONFIGURATION_INTERRUPT: u8 = 0x2;
+
+	/// Whether an interrupt for a queue update was issued.
+	#[inline]
+	pub fn queue_update(&self) -> bool {
+		self.0 & Self::QUEUE_INTERRUPT > 0
+	}
+
+	/// Whether an interrupt for a configuration update was issued.
+	#[inline]
+	pub fn configuration_update(&self) -> bool {
+		self.0 & Self::CONFIGURATION_INTERRUPT > 0
+	}
 }
 
 /// Device specific configuration struct.
@@ -187,7 +210,7 @@ pub fn new_device<'a, D, H, R>(
 ) -> Result<D, R>
 where
 	D: Device + 'a,
-	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, &'a Notify) -> Result<D, R>,
+	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, &'a Notify, &'a ISR) -> Result<D, R>,
 {
 	let cmd = pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK;
 
@@ -242,7 +265,6 @@ where
 	let mut pci_config = None;
 
 	for cap in header.capabilities() {
-		kernel::dbg!(cap.id());
 		if cap.id() == 0x9 {
 			let cap = unsafe { cap.data::<Capability>() };
 			if bar_sizes[usize::from(cap.base_address.get())].is_some() {
@@ -279,16 +301,13 @@ where
 		}
 	}
 
-	kernel::dbg!("set int");
 	header.interrupt_line.set(0);
 	header.interrupt_pin.set(1);
-	kernel::dbg!("done int");
 
 	let mmio = base_address_regions;
 	assert_eq!(mmio.len(), pci::Header0::BASE_ADDRESS_COUNT as usize);
 
 	let mut setup_mmio = |bar: u8, offset: u32| -> NonNull<u8> {
-		kernel::dbg!(bar);
 		let mmio = mmio[usize::from(bar)]
 			.expect("BAR not mapped to region")
 			.cast::<u8>();
@@ -322,16 +341,12 @@ where
 	let isr_config = isr_config
 		.map(|cfg| unsafe {
 			setup_mmio(cfg.base_address.get(), cfg.offset.get().into())
-				.cast::<ISRConfig>()
+				.cast::<ISR>()
 				.as_ref()
 		})
 		.expect("No isr config map defined");
 
-	kernel::dbg!("set isr");
-	isr_config.status.set(0x0);
-	kernel::dbg!("done isr");
-
-	handler(common_config, device_config, notify_config)
+	handler(common_config, device_config, notify_config, isr_config)
 }
 
 pub trait Device {}

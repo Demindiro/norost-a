@@ -308,13 +308,13 @@ impl<'a> Queue<'a> {
 	pub fn wait_for_used(
 		&mut self,
 		mut callback: Option<&mut FnMut(u16, u64, u32)>,
-		mut wait_fn: Option<&mut dyn FnMut()>,
+		mut wait_fn: impl FnMut(),
 	) {
 		let cb = &mut |a, b, c| {
 			callback.as_mut().map(|f| f(a, b, c));
 		};
 		while self.collect_used(Some(cb)) == 0 {
-			wait_fn.as_mut().map(|f| f());
+			wait_fn();
 		}
 	}
 

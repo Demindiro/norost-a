@@ -38,6 +38,7 @@ const INDIRECT_DESC: u32 = 1 << 29;
 pub struct BlockDevice<'a> {
 	queue: queue::Queue<'a>,
 	notify: &'a virtio::pci::Notify,
+	isr: &'a virtio::pci::ISR,
 	/// The amount of sectors available
 	capacity: u64,
 }
@@ -103,6 +104,7 @@ impl<'a> BlockDevice<'a> {
 		common: &'a CommonConfig,
 		device: &'a DeviceConfig,
 		notify: &'a Notify,
+		isr: &'a virtio::pci::ISR,
 	) -> Result<Self, SetupError> {
 		let features = SIZE_MAX | SEG_MAX | GEOMETRY | BLK_SIZE | TOPOLOGY;
 		common.device_feature_select.set(0.into());
@@ -134,6 +136,7 @@ impl<'a> BlockDevice<'a> {
 		Ok(Self {
 			queue,
 			notify,
+			isr,
 			capacity: blk_cfg.capacity.into(),
 		})
 	}
@@ -143,6 +146,7 @@ impl<'a> BlockDevice<'a> {
 		&'s mut self,
 		data: impl AsRef<[Sector]> + 's,
 		sector_start: u64,
+		mut wait: impl FnMut(),
 	) -> Result<(), WriteError> {
 		let header = RequestHeader {
 			typ: RequestHeader::WRITE.into(),
@@ -193,7 +197,7 @@ impl<'a> BlockDevice<'a> {
 
 		self.flush();
 
-		self.queue.wait_for_used(None, None);
+		self.queue.wait_for_used(None, wait);
 
 		Ok(())
 	}
@@ -203,6 +207,7 @@ impl<'a> BlockDevice<'a> {
 		&'s mut self,
 		mut data: impl AsMut<[Sector]> + 's,
 		sector_start: u64,
+		mut wait: impl FnMut(),
 	) -> Result<(), WriteError> {
 		let header = RequestHeader {
 			typ: RequestHeader::READ.into(),
@@ -253,15 +258,18 @@ impl<'a> BlockDevice<'a> {
 
 		self.flush();
 
-		unsafe { kernel::io_wait(10_000_000) };
-
-		self.queue.wait_for_used(None, None);
+		self.queue.wait_for_used(None, wait);
 
 		Ok(())
 	}
 
 	pub fn flush(&self) {
 		self.notify.send(0);
+	}
+
+	#[inline]
+	pub fn was_interrupted(&self) -> bool {
+		self.isr.read().queue_update()
 	}
 }
 

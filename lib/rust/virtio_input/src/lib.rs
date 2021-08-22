@@ -116,6 +116,7 @@ impl<'a> Device<'a> {
 		common: &'a virtio::pci::CommonConfig,
 		device: &'a virtio::pci::DeviceConfig,
 		notify: &'a virtio::pci::Notify,
+		isr: &'a virtio::pci::ISR,
 	) -> Result<Self, SetupError> {
 		let features = 0;
 		common.device_feature_select.set(0.into());
