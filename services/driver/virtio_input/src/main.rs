@@ -148,7 +148,7 @@ fn main() {
 	);
 
 	// Set up device
-	let dev = virtio::pci::new_device2(pci, &virt_bars[..], virtio_input::Device::new)
+	let dev = virtio::pci::new_device(pci, &virt_bars[..], virtio_input::Device::new)
 		.expect("failed to create device");
 
 	// Add self to registry

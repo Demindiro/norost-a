@@ -172,7 +172,7 @@ fn main() {
 	);
 
 	// Set up block device
-	let mut device = virtio::pci::new_device2(pci, &virt_bars[..], virtio_block::BlockDevice::new)
+	let mut device = virtio::pci::new_device(pci, &virt_bars[..], virtio_block::BlockDevice::new)
 		.expect("failed to create device");
 
 	// Add self to registry

@@ -93,7 +93,7 @@ fn main() {
 	);
 
 	// Set up block device
-	let mut device = virtio::pci::new_device2(pci, &virt_bars[..], virtio_gpu::Device::new)
+	let mut device = virtio::pci::new_device(pci, &virt_bars[..], virtio_gpu::Device::new)
 		.expect("failed to create device");
 
 	// Create draw buffer
