@@ -126,6 +126,8 @@ impl HeaderCommon {
 	pub const COMMAND_MMIO_MASK: u16 = 0x2;
 	/// Flag used to toggle bus mastering.
 	pub const COMMAND_BUS_MASTER_MASK: u16 = 0x4;
+	/// Flag used to disable interrupts.
+	pub const COMMAND_INTERRUPT_DISABLE: u16 = 1 << 10;
 
 	/// Set the flags in the command register.
 	pub fn set_command(&self, flags: u16) {

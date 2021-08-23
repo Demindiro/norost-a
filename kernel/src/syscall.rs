@@ -81,6 +81,7 @@ pub enum Status {
 	NotFound = 9,
 	TooLong = 10,
 	Occupied = 11,
+	Unavailable = 12,
 }
 
 impl From<Status> for u8 {
@@ -198,6 +199,16 @@ mod sys {
 			};
 			logcall!("io_wait {}", time);
 
+			extern "C" {
+				fn syscall_return_transparent() -> !;
+			}
+
+			if task.was_notified() {
+				task.clear_notified();
+				// Return immediately so the task doesn't deadlock.
+				unsafe { syscall_return_transparent() };
+			}
+
 			task.wait_duration(time);
 			task.process_io(task::Executor::current_address());
 
@@ -247,16 +258,20 @@ mod sys {
 
 	sys! {
 		/// Return from a notification handler.
-		[task] io_notify_return() {
+		[task] io_notify_return(defer_to) {
 			logcall!("io_notify_return");
-			// TODO we should call this directly
-			//
-			// The main reason we don't yet is that logcall won't work.
 			extern "C" {
-				fn syscall_io_notify_return(_: crate::task::Task) -> !;
+				fn syscall_io_notify_return(task: crate::task::Task) -> !;
+				fn syscall_io_notify_defer(from: task::Task, from_address: task::Address, to_address: task::Address) -> !;
 			}
 			unsafe {
-				syscall_io_notify_return(task.clone());
+				if defer_to == usize::MAX {
+					syscall_io_notify_return(task.clone());
+				} else {
+					let from_addr = task::Executor::current_address();
+					let to_addr = task::Address::from(defer_to);
+					syscall_io_notify_defer(task.clone(), from_addr, to_addr);
+				}
 			}
 		}
 	}
@@ -445,8 +460,12 @@ mod sys {
 		/// cause a notification to be sent to the calling task.
 		[_] sys_reserve_interrupt(interrupt) {
 			let address = task::Executor::current_address();
-			arch::interrupts::reserve(interrupt as u16, address).unwrap();
-			Return(Status::Ok, 0)
+			use arch::interrupts::{self, ReserveError};
+			match interrupts::reserve(interrupt as u16, address) {
+				Ok(()) => Return(Status::Ok, 0),
+				Err(ReserveError::Occupied) => Return(Status::Occupied, 0),
+				Err(ReserveError::NonExistent) => Return(Status::Unavailable, 0),
+			}
 		}
 	}
 

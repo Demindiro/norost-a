@@ -95,9 +95,7 @@ fn main() {
 				let length = file.read(&mut data[..rxq.length]).unwrap();
 
 				// Send completion event
-				//*dux::ipc::transmit() = kernel::ipc::Packet {
-				let mut tx = dux::ipc::transmit();
-				*tx = kernel::ipc::Packet {
+				*dux::ipc::transmit() = kernel::ipc::Packet {
 					uuid: kernel::ipc::UUID::INVALID,
 					opcode: Some(opcode),
 					name: None,
@@ -109,8 +107,6 @@ fn main() {
 					length,
 					offset: rxq.offset,
 				};
-				// Drop now to prevent a deadlock
-				drop(tx);
 			}
 			Ok(kernel::ipc::Op::Write) => {
 				// Figure out object to write to.

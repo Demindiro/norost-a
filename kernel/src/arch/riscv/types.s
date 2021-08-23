@@ -89,24 +89,24 @@
 .equ		REGSTATE_SIZE, (GP_REGSTATE_SIZE + FP_REGSTATE_SIZE)
 
 
-# The offset of the tasks' stack, which shouldn't even be present in the
-# task struct.
+# The offset of the tasks' fields.
 .equ		TASK_STACK, REGSTATE_SIZE
-
-# The offset of the task's VMS address
 .equ		TASK_VMS, (TASK_STACK + GP_REGBYTES)
-
-# The offset of the task's notification handler
 .equ		TASK_NOTIFY_HANDLER, (TASK_VMS + GP_REGBYTES)
+.equ		TASK_IRQ, (TASK_NOTIFY_HANDLER + GP_REGBYTES)
+.equ		TASK_FLAGS, (TASK_IRQ + 4)
+.equ		TASK_EXECUTOR_ID, (TASK_FLAGS + 2)
+.equ		TASK_PRIORITY, (TASK_EXECUTOR_ID + 2)
+.equ		TASK_PRIORITY_FACTOR, (TASK_PRIORITY + 2)
+.ifdef	__RISCV64__
+	.equ		_TASK_PADDING_0, (TASK_PRIORITY_FACTOR + 4)
+.else
+	.equ		_TASK_PADDING_0, (TASK_PRIORITY_FACTOR + 0)
+.endif
+.equ		TASK_WAIT_UNTIL, (_TASK_PADDING_0 + 2)
 
-# The offset of the task's flags
-.equ		TASK_FLAGS, (TASK_NOTIFY_HANDLER + GP_REGBYTES)
-
-# The offset of the task's current IRQ value
-.equ		TASK_IRQ, (TASK_FLAGS + 2)
-
-# Mask to toggle the NOTIFY flag
-.equ		TASK_FLAG_NOTIFY, 0x1
+.equ		TASK_FLAG_NOTIFYING, 0x1
+.equ		TASK_FLAG_NOTIFIED, 0x2
 
 # The total amount of system calls, including placeholders
 .equ		SYSCALL_MAX,			20

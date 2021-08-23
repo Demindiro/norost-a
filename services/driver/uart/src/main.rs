@@ -163,6 +163,7 @@ extern "C" fn notification_handler_entry() {
 			ld		ra, 12 * GP_REGBYTES (sp)
 			addi	sp, sp, (13 + 4) * GP_REGBYTES
 			li		a7, NOTIFY_RETURN
+			li		a0, -1
 			ecall
 		",
 			options(noreturn)

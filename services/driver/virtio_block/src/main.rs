@@ -23,6 +23,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 	loop {}
 }
 
+mod notification;
 mod rtbegin;
 
 use core::convert::{TryFrom, TryInto};
@@ -30,61 +31,6 @@ use core::ptr;
 use kernel::Page;
 
 static mut DEVICE: Option<virtio_block::BlockDevice> = None;
-
-#[naked]
-extern "C" fn notification_handler_entry() {
-	unsafe {
-		asm!(
-			"
-			# a0: type
-			# a1: value
-			# a7: address
-			#
-			# The original a[0-2] are stored on the stack by the kernel.
-			.equ	GP_REGBYTES, 8
-			.equ	NOTIFY_RETURN, 9
-			addi	sp, sp, -(13 + 4) * GP_REGBYTES
-			sd		t0, 0 * GP_REGBYTES (sp)
-			sd		t1, 1 * GP_REGBYTES (sp)
-			sd		t2, 2 * GP_REGBYTES (sp)
-			sd		t3, 3 * GP_REGBYTES (sp)
-			sd		t4, 4 * GP_REGBYTES (sp)
-			sd		t5, 5 * GP_REGBYTES (sp)
-			sd		t6, 6 * GP_REGBYTES (sp)
-			sd		a3, 7 * GP_REGBYTES (sp)
-			sd		a4, 8 * GP_REGBYTES (sp)
-			sd		a5, 9 * GP_REGBYTES (sp)
-			sd		a6, 10 * GP_REGBYTES (sp)
-			sd		a2, 11 * GP_REGBYTES (sp)
-			sd		ra, 12 * GP_REGBYTES (sp)
-			mv		a2, a7
-			call	notification_handler
-			ld		t0, 0 * GP_REGBYTES (sp)
-			ld		t1, 1 * GP_REGBYTES (sp)
-			ld		t2, 2 * GP_REGBYTES (sp)
-			ld		t3, 3 * GP_REGBYTES (sp)
-			ld		t4, 4 * GP_REGBYTES (sp)
-			ld		t5, 5 * GP_REGBYTES (sp)
-			ld		t6, 6 * GP_REGBYTES (sp)
-			ld		a3, 7 * GP_REGBYTES (sp)
-			ld		a4, 8 * GP_REGBYTES (sp)
-			ld		a5, 9 * GP_REGBYTES (sp)
-			ld		a6, 10 * GP_REGBYTES (sp)
-			ld		a2, 11 * GP_REGBYTES (sp)
-			ld		ra, 12 * GP_REGBYTES (sp)
-			addi	sp, sp, (13 + 4) * GP_REGBYTES
-			li		a7, NOTIFY_RETURN
-			ecall
-		",
-			options(noreturn)
-		);
-	}
-}
-
-#[export_name = "notification_handler"]
-extern "C" fn notification_handler(typ: usize, value: usize, address: usize) {
-	kernel::sys_log!("oh my {:x} {:x} {:x}", typ, value, address);
-}
 
 #[export_name = "main"]
 fn main() {
@@ -94,22 +40,6 @@ fn main() {
 	// Parse arguments
 	let mut pci = None;
 	let mut bars = [None; 6];
-
-	rtbegin::args().for_each(|a| {
-		kernel::dbg!(core::str::from_utf8(a).unwrap());
-	});
-
-	let ret = unsafe { kernel::io_set_notify_handler(notification_handler_entry) };
-	assert_eq!(ret.status, 0, "failed to set notify handler");
-
-	let ret = unsafe { kernel::sys_reserve_interrupt(0x20) };
-	assert_eq!(ret.status, 0, "failed to reserve interrupt");
-	let ret = unsafe { kernel::sys_reserve_interrupt(0x21) };
-	assert_eq!(ret.status, 0, "failed to reserve interrupt");
-	let ret = unsafe { kernel::sys_reserve_interrupt(0x22) };
-	assert_eq!(ret.status, 0, "failed to reserve interrupt");
-	let ret = unsafe { kernel::sys_reserve_interrupt(0x23) };
-	assert_eq!(ret.status, 0, "failed to reserve interrupt");
 
 	driver::parse_args(rtbegin::args(), |arg, _| {
 		match arg {
@@ -171,6 +101,19 @@ fn main() {
 		pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK,
 	);
 
+	// TODO move this to behind block device setup but right before we allocate an interrupt.
+	notification::init();
+
+	// Enable interrupts now
+	// TODO do this after device setup
+	match pci {
+		pci::Header::H0(pci) => {
+			//pci.interrupt_line.set(0);
+			//pci.interrupt_pin.set(1);
+		}
+		_ => todo!(),
+	}
+
 	// Set up block device
 	let mut device = virtio::pci::new_device(pci, &virt_bars[..], virtio_block::BlockDevice::new)
 		.expect("failed to create device");
@@ -182,7 +125,6 @@ fn main() {
 
 	// Wait for & respond to requests
 	loop {
-		unsafe { kernel::io_wait(u64::MAX) };
 		let rxq = dux::ipc::receive();
 		let op = rxq.opcode.unwrap();
 

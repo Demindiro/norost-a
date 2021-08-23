@@ -32,9 +32,8 @@ pub use group::Group;
 use crate::arch::vms::{self, VirtualMemorySystem, RWX};
 use crate::arch::{self, Map, Page};
 use crate::memory::{self, AllocateError};
-use core::num::NonZeroU16;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 
 #[derive(Debug)]
 struct Claimed(u16);
@@ -43,12 +42,25 @@ struct Claimed(u16);
 #[repr(transparent)]
 struct Flags(u16);
 
-impl Flags {}
+impl Flags {
+	#[allow(dead_code)]
+	const NOTIFYING: u16 = 0x1;
+	const NOTIFIED: u16 = 0x2;
+}
 
 /// An IRQ source / identifier
+///
+/// Note that it is 32 bits wide: while atomic operations on sub-word size is possible for RISC-V,
+/// it leads to much more verbose code. The increased size is considered worth it.
 // TODO move this to arch::
 #[repr(transparent)]
-struct IRQ(NonZeroU16);
+struct IRQ(AtomicU32);
+
+impl Default for IRQ {
+	fn default() -> Self {
+		Self(AtomicU32::new(0))
+	}
+}
 
 /// A wrapper around a task pointer.
 #[derive(Clone)]
@@ -74,12 +86,12 @@ pub struct TaskData {
 	shared_state: SharedState,
 	/// The address of a notification handler.
 	notification_handler: Option<notification::Handler>,
-	/// Flags pertaining to this task
-	flags: Flags,
 	/// The IRQ this task is currently handling, if any.
 	///
 	/// Only relevant for drivers.
-	current_irq: Option<IRQ>,
+	current_irq: IRQ,
+	/// Flags pertaining to this task
+	flags: Flags,
 	/// The executor / hart that is executing this task.
 	///
 	/// This value is u16::MAX if no executor has claimed it.
@@ -121,7 +133,7 @@ impl Task {
 					virtual_memory: vms,
 				},
 				notification_handler: None,
-				current_irq: None,
+				current_irq: IRQ::default(),
 				flags: Flags(0),
 				executor_id: AtomicU16::new(u16::MAX),
 				priority: 0,
@@ -129,6 +141,11 @@ impl Task {
 				wait_time: 0,
 				ipc: None,
 			});
+			dbg!(-task
+				.0
+				.as_ptr()
+				.cast::<u8>()
+				.offset_from(&task.0.as_ref().wait_time as *const _ as *const _));
 		}
 		unsafe { TASK_DATA_ADDRESS = TASK_DATA_ADDRESS.next().unwrap() };
 		Ok(task)
@@ -178,6 +195,21 @@ impl Task {
 	/// Set the task transmit & receive queue pointers and sizes.
 	pub fn set_queues(&self, buffers: Option<ipc::IPC>) {
 		self.inner().ipc = buffers;
+	}
+
+	/// Check if the task recently ran its notification handler.
+	pub fn was_notified(&self) -> bool {
+		self.inner().flags.0 & Flags::NOTIFIED > 0
+	}
+
+	/// Clear the notified flag.
+	pub fn clear_notified(&self) {
+		self.inner().flags.0 &= !Flags::NOTIFIED;
+	}
+
+	/// Get the current IRQ being processed.
+	pub fn current_irq(&self) -> u32 {
+		self.inner().current_irq.0.load(Ordering::Relaxed)
 	}
 
 	fn inner<'a>(&'a self) -> &'a mut TaskData {

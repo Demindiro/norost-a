@@ -1,8 +1,10 @@
 #![no_std]
 #![no_main]
+#![feature(asm)]
 #![feature(global_asm)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_uninit_array)]
+#![feature(naked_functions)]
 #![feature(panic_info_message)]
 
 use core::convert::TryFrom;
@@ -22,6 +24,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 	loop {}
 }
 
+mod notification;
 mod rtbegin;
 
 include!(concat!(env!("OUT_DIR"), "/list.rs"));
@@ -186,12 +189,17 @@ fn main() {
 					mmio += size;
 				}
 
-				dux::task::spawn_elf(data, &mut [].iter().copied(), &args[..argc]);
+				let ret = dux::task::spawn_elf(data, &mut [].iter().copied(), &args[..argc]);
+				let ret = ret.unwrap();
+				kernel::sys_log!("Spawned driver as {}", ret);
 			} else {
 				kernel::sys_log!("No driver found for {:x}|{:x}", v, d);
 			}
 		}
 	}
+
+	// Enable notifications / interrupts
+	notification::init(&[0x20, 0x21, 0x22, 0x23]);
 
 	loop {
 		unsafe { kernel::io_wait(u64::MAX) };

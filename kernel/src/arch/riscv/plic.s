@@ -62,38 +62,55 @@ external_interrupt_handler:
 
 	# Get a pointer to the task with the given address
 	call	executor_get_task
-
-	# Put the interrupt source in a1, as intended
-	mv		a1, s0
-
 	# FIXME don't panic you doof
 	beqz	a0, mini_panic
 
-	# We need a0 to be in x31 regardless, so just do it now.
+	# Set the IRQ field.
+	# FIXME this needs to be atomic
+	sh		s0, TASK_IRQ (a0)
+
+	# Enter notification handler
 	mv		x31, a0
+	# Set address, which is -1 for the kernel
+	li		a7, -1
+	# Set the interrupt source
+	mv		a1, s0
+	# Set type (0 == external interrupt)
+	li		a0, 0
+	j		notification_enter
+
+
+# a0: type
+# a1: value
+# a7: address
+# x31: task pointer
+notification_enter:
+
+	# Switch to U-mode when executing sret.
+	li		t0, 1 << 8
+	csrc	sstatus, t0
+
+	# Clear the wait timer to avoid deadlocks
+	sd		zero, TASK_WAIT_UNTIL (x31)
 
 	# Update sscratch for the trap handler
 	csrw	sscratch, x31
 
 	# Load the task's VMS
-	gp_load	a0, TASK_VMS, x31
-	csrw	satp, a0
+	gp_load	t0, TASK_VMS, x31
+	csrw	satp, t0
 	sfence.vma
 
-	# Set the IRQ field.
-	# FIXME this needs to be atomic
-	sh		a1, TASK_IRQ (x31)
-
 	# Set sepc to that of the notification handler
-	gp_load		a0, 2 * GP_REGBYTES + REGSTATE_SIZE, x31
-	csrw		sepc, a0
+	gp_load		t0, 2 * GP_REGBYTES + REGSTATE_SIZE, x31
+	csrw		sepc, t0
 
 	# Restore stack
 	load_gp_regs 2, 2, x31
 
 	# Enable SUM
-	li		a2, 1 << 18
-	csrs	sstatus, a2
+	li		t0, 1 << 18
+	csrs	sstatus, t0
 
 	# Push original a[017] and pc to stack
 	gp_load		x30, 10 * GP_REGBYTES, x31
@@ -106,20 +123,7 @@ external_interrupt_handler:
 	gp_store	x30, -1 * GP_REGBYTES, sp
 
 	# Disable SUM and SPP to ensure we will enter usermode
-	ori		a2, a2, 1 << 8
-	csrc	sstatus, a2
-
-	# Set address, which is -1 for the kernel
-	li		a7, -1
-	# Set type (0 == external interrupt)
-	li		a0, 0
-
-	# Load all registers except the stack pointer (x2), since
-	# the stack pointer is already loaded, and a[017] (x10/11/17).
-	load_gp_regs 1, 1, x31
-	load_gp_regs 3, 9, x31
-	load_gp_regs 12, 16, x31
-	load_gp_regs 18, 31, x31
+	csrc	sstatus, t0
 
 	# == FIXME save the FP registers
 	li		t0, 1 << 13
@@ -127,6 +131,13 @@ external_interrupt_handler:
 	li		t0, 1 << 14
 	csrs	sstatus, t0
 	# ==
+
+	# Load all registers except the stack pointer (x2), since
+	# the stack pointer is already loaded, and a[017] (x10/11/17).
+	load_gp_regs 1, 1, x31
+	load_gp_regs 3, 9, x31
+	load_gp_regs 12, 16, x31
+	load_gp_regs 18, 31, x31
 
 	# Jump to notification handler
 	sret

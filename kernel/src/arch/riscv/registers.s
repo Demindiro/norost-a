@@ -1,5 +1,8 @@
 ## Macros & constants pertaining to saving & restoring registers
 
+# TODO 'from' and 'to' are swapped for the load functions.
+# 'to' is always an immediate and 'from' is 'rd'
+
 # Save the given range of general purpose registers
 .macro save_gp_regs		from, to, in
 	.altmacro

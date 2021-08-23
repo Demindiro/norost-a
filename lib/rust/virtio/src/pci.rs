@@ -301,9 +301,6 @@ where
 		}
 	}
 
-	header.interrupt_line.set(0);
-	header.interrupt_pin.set(1);
-
 	let mmio = base_address_regions;
 	assert_eq!(mmio.len(), pci::Header0::BASE_ADDRESS_COUNT as usize);
 

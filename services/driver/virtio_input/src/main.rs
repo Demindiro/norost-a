@@ -144,7 +144,9 @@ fn main() {
 	}
 
 	pci.set_command(
-		pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK,
+		pci::HeaderCommon::COMMAND_INTERRUPT_DISABLE
+			| pci::HeaderCommon::COMMAND_MMIO_MASK
+			| pci::HeaderCommon::COMMAND_BUS_MASTER_MASK,
 	);
 
 	// Set up device

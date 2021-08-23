@@ -110,6 +110,10 @@ trap_handler:
 	csrs	sstatus, t0
 	# ==
 
+	# Not needed since it's right behind this routine
+	#j syscall_return_transparent
+
+syscall_return_transparent:
 	# Restore all integer registers
 	csrr		x31, sscratch
 	load_gp_regs	1, 31, x31
@@ -175,7 +179,7 @@ trap_init:
 ## Arguments:
 ## - a0: A pointer to the task structure.
 trap_start_task:
-	# Switch to U-mode when executing mret.
+	# Switch to U-mode when executing sret.
 	li		t0, 1 << 8
 	csrc	sstatus, t0
 	# == FIXME save the FP registers
