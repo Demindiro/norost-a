@@ -41,6 +41,10 @@ fn main() {
 	let mut pci = None;
 	let mut bars = [None; 6];
 
+	rtbegin::args().for_each(|a| {
+		kernel::dbg!(core::str::from_utf8(a).unwrap());
+	});
+
 	driver::parse_args(rtbegin::args(), |arg, _| {
 		match arg {
 			driver::Arg::Pci(p) => pci
@@ -74,13 +78,10 @@ fn main() {
 	let pci = unsafe { pci::Header::from_raw(virt) };
 	virt = virt.wrapping_add(size / Page::SIZE);
 
-	match pci {
-		pci::Header::H0(h) => {
-			h.interrupt_line.set(0x0);
-			h.interrupt_pin.set(0x1);
-		}
+	let irq = match pci {
+		pci::Header::H0(h) => h.interrupt_pin.get(),
 		_ => todo!(),
-	}
+	};
 
 	// Map BARs
 	let mut virt_bars = [None; 6];
@@ -97,22 +98,31 @@ fn main() {
 		});
 	}
 
+	// Route interrupts to us
+	{
+		//let uuid =  | irq[usize::from(irq)] ;
+		let uuid = 0x21;
+		let uuid = u128::from(irq);
+		*dux::ipc::transmit() = kernel::ipc::Packet {
+			address: 1,
+			data: None,
+			uuid: kernel::ipc::UUID::new(uuid),
+			id: 0,
+			flags: 0,
+			length: 0,
+			name: None,
+			name_len: 0,
+			offset: 0,
+			opcode: core::num::NonZeroU8::new(128), // OP_OPEN
+		};
+	}
+
 	pci.set_command(
 		pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK,
 	);
 
 	// TODO move this to behind block device setup but right before we allocate an interrupt.
 	notification::init();
-
-	// Enable interrupts now
-	// TODO do this after device setup
-	match pci {
-		pci::Header::H0(pci) => {
-			//pci.interrupt_line.set(0);
-			//pci.interrupt_pin.set(1);
-		}
-		_ => todo!(),
-	}
 
 	// Set up block device
 	let mut device = virtio::pci::new_device(pci, &virt_bars[..], virtio_block::BlockDevice::new)

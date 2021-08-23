@@ -10,7 +10,7 @@ edition = "2018"
 device_tree = { path = "../../../lib/rust/device_tree/" }
 kernel = { path = "../../../lib/rust/kernel/", package = "syscalls" }
 dux = { path = "../../../lib/rust/dux/" }
-xmas-elf = { path = "../../../thirdparty/rust/xmas-elf/" }
+driver = { path = "../../../lib/rust/driver/" }
 virtio = { path = "../../../lib/rust/virtio" }
 virtio_block = { path = "../../../lib/rust/virtio_block" }
 pci = { path = "../../../lib/rust/pci" }

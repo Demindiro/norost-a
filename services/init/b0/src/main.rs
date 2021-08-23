@@ -26,7 +26,6 @@ include!(concat!(env!("OUT_DIR"), "/list.rs"));
 
 use core::convert::TryFrom;
 use kernel::sys_log;
-use xmas_elf::ElfFile;
 
 #[export_name = "main"]
 fn main() {
@@ -55,55 +54,41 @@ fn main() {
 			// Push arguments
 			let mut buf = [0u8; 4096];
 			let mut buf = &mut buf[..];
-			let mut args = [&[][..]; 64];
+			let mut args = [&[][..]; 128];
 			let mut argc = 0;
 
-			fn fmt(buf: &mut [u8], mut num: u128) -> (&mut [u8], &mut [u8]) {
-				let mut i = buf.len() - 1;
-				while {
-					let d = (num % 16) as u8;
-					buf[i] = (d < 10).then(|| b'0').unwrap_or(b'a' - 10) + d;
-					num /= 16;
-					i -= 1;
-					num != 0
-				} {}
-				buf.split_at_mut(i + 1)
+			fn alloc<'a>(
+				buf: &'a mut [u8],
+				size: usize,
+			) -> Result<(&'a mut [u8], &'a mut [u8]), driver::OutOfMemory> {
+				if size <= buf.len() {
+					Ok(buf.split_at_mut(size))
+				} else {
+					Err(driver::OutOfMemory)
+				}
+			};
+			let mut add_arg = |arg| {
+				*args.get_mut(argc).ok_or(driver::OutOfMemory)? = str::as_bytes(arg);
+				argc += 1;
+				Ok(())
+			};
+
+			for &r in dev.reg.iter() {
+				buf = r.to_args(buf, alloc, &mut add_arg).unwrap();
+			}
+			for &r in dev.ranges {
+				buf = r.to_args(buf, alloc, &mut add_arg).unwrap();
+			}
+			for &im in dev.interrupt_map {
+				buf = im.to_args(buf, alloc, &mut add_arg).unwrap();
+			}
+			if !dev.interrupt_map.is_empty() {
+				dev.interrupt_map_mask.to_args(buf, alloc, &mut add_arg);
 			}
 
-			// Push reg
-			for &(a, s) in dev.reg {
-				let (b, a) = fmt(buf, a);
-				let (b, s) = fmt(b, s);
-				args[argc] = b"--reg";
-				args[argc + 1] = a;
-				args[argc + 2] = s;
-				argc += 3;
-				buf = b;
-			}
-
-			// Push ranges
-			for &(c, a, s) in dev.ranges {
-				let (b, c) = fmt(buf, c);
-				let (b, a) = fmt(b, a);
-				let (b, s) = fmt(b, s);
-				args[argc] = b"--range";
-				args[argc + 1] = c;
-				args[argc + 2] = a;
-				args[argc + 3] = s;
-				argc += 4;
-				buf = b;
-			}
-
+			// Spawn
 			let address = dux::task::spawn_elf(data, &mut [].iter().copied(), &args[..argc])
 				.expect("failed to spawn task");
-
-			// Allocate a single page for transmitting data.
-			let raw = dux::mem::reserve_range(None, 1)
-				.unwrap()
-				.as_ptr()
-				.cast::<u8>();
-			let ret = unsafe { kernel::mem_alloc(raw.cast(), 1, 0b011) };
-			assert_eq!(ret.status, 0);
 
 			sys_log!("Registering task {} as {:?}", address, bin.name);
 

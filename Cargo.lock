@@ -33,13 +33,13 @@ name = "b0"
 version = "0.1.0"
 dependencies = [
  "device_tree",
+ "driver",
  "dux",
  "fatfs",
  "pci",
  "syscalls",
  "virtio",
  "virtio_block",
- "xmas-elf",
 ]
 
 [[package]]

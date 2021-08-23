@@ -7,7 +7,7 @@
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
 
-use core::convert::TryFrom;
+use core::convert::{TryFrom, TryInto};
 use core::mem::MaybeUninit;
 use core::ptr::NonNull;
 use core::str;
@@ -29,6 +29,33 @@ mod rtbegin;
 
 include!(concat!(env!("OUT_DIR"), "/list.rs"));
 
+#[derive(Clone, Copy)]
+struct Task {
+	address: dux::task::Address,
+	child_address: u128,
+}
+
+#[derive(Clone, Copy)]
+struct InterruptMap {
+	bus: u16,
+	system: u16,
+	child_address: u128,
+}
+
+static mut TASKS: [Task; 16] = [Task {
+	address: dux::task::Address::new(0),
+	child_address: 0,
+}; 16];
+static mut TASKS_COUNT: usize = 0;
+
+static mut INTERRUPT_MAP: [InterruptMap; 16] = [InterruptMap {
+	bus: 0,
+	system: 0,
+	child_address: 0,
+}; 16];
+static mut INTERRUPT_MAP_COUNT: usize = 0;
+static mut INTERRUPT_MAP_MASK: driver::InterruptMapMask = driver::InterruptMapMask::new(0, 0);
+
 #[export_name = "main"]
 fn main() {
 	unsafe { dux::init() };
@@ -36,6 +63,12 @@ fn main() {
 	let mut reg = None;
 	let mut mmio = MaybeUninit::<pci::PhysicalMemory>::uninit_array::<8>();
 	let mut mmio_count = 0;
+	let mut unique_irqs = [0; 8];
+	let mut unique_irqs_count = 0;
+
+	rtbegin::args().for_each(|e| {
+		kernel::dbg!(core::str::from_utf8(e).unwrap());
+	});
 
 	driver::parse_args(rtbegin::args(), |arg, _| match arg {
 		driver::Arg::Reg(r) => {
@@ -51,8 +84,22 @@ fn main() {
 			});
 			mmio_count += 1;
 		}
+		driver::Arg::InterruptMap(m) => unsafe {
+			let system = m.parent_interrupt.try_into().unwrap();
+			INTERRUPT_MAP[INTERRUPT_MAP_COUNT] = InterruptMap {
+				bus: m.child_interrupt.try_into().unwrap(),
+				system,
+				child_address: m.child_address,
+			};
+			if !unique_irqs[..unique_irqs_count].contains(&system) {
+				unique_irqs[unique_irqs_count] = system;
+				unique_irqs_count += 1
+			}
+			INTERRUPT_MAP_COUNT += 1;
+		},
+		driver::Arg::InterruptMapMask(m) => unsafe { INTERRUPT_MAP_MASK = m },
 		driver::Arg::Other(o) => panic!("unhandled {:?}", core::str::from_utf8(o)),
-		_ => unreachable!(),
+		_ => todo!(),
 	});
 
 	let reg = reg.expect("expecteed a --reg specifier");
@@ -119,28 +166,33 @@ fn main() {
 				let mut args = [&[][..]; 64];
 				let mut argc = 0;
 
-				fn fmt(buf: &mut [u8], mut num: u128) -> (&mut [u8], &mut [u8]) {
-					let mut i = buf.len() - 1;
-					while {
-						let d = (num % 16) as u8;
-						buf[i] = (d < 10).then(|| b'0').unwrap_or(b'a' - 10) + d;
-						num /= 16;
-						i -= 1;
-						num != 0
-					} {}
-					buf.split_at_mut(i + 1)
-				}
+				fn alloc<'a>(
+					buf: &'a mut [u8],
+					size: usize,
+				) -> Result<(&'a mut [u8], &'a mut [u8]), driver::OutOfMemory> {
+					if size <= buf.len() {
+						Ok(buf.split_at_mut(size))
+					} else {
+						Err(driver::OutOfMemory)
+					}
+				};
+				let mut add_arg = |arg| {
+					*args.get_mut(argc).ok_or(driver::OutOfMemory)? = str::as_bytes(arg);
+					argc += 1;
+					Ok(())
+				};
 
 				// Pass PCI MMIO area
-				{
-					let (b, a) = fmt(buf, u128::try_from(dev.header_physical_address()).unwrap());
-					let (b, s) = fmt(b, u128::try_from(dev.header().size()).unwrap());
-					buf = b;
-					args[argc] = b"--pci";
-					args[argc + 1] = a;
-					args[argc + 2] = s;
-					argc += 3;
+				let child_address = u128::from(dev.child_address());
+				let address = u128::try_from(dev.header_physical_address()).unwrap();
+				let size = u128::try_from(dev.header().size()).unwrap();
+				buf = driver::Pci {
+					child_address,
+					address,
+					size,
 				}
+				.to_args(buf, &mut alloc, &mut add_arg)
+				.unwrap();
 
 				// Parse BARs
 				let mut header = dev.header();
@@ -173,25 +225,30 @@ fn main() {
 					b.set(u32::try_from(mmio).unwrap());
 
 					// Push args
-					let (b, i) = fmt(buf, u128::try_from(i).unwrap());
-					let (b, a) = fmt(b, u128::try_from(mmio).unwrap());
-					let (b, s) = fmt(b, u128::try_from(size).unwrap());
-					buf = b;
-					args[argc] = match pci::BaseAddress::is_mmio(og) {
-						true => b"--bar-mmio",
-						false => b"--bar-io",
-					};
-					args[argc + 1] = i;
-					args[argc + 2] = a;
-					args[argc + 3] = s;
-					argc += 4;
+					let i = u128::try_from(i).unwrap();
+					let a = u128::try_from(mmio).unwrap();
+					let s = u128::try_from(size).unwrap();
+					buf = match pci::BaseAddress::is_mmio(og) {
+						true => {
+							driver::BarMmio::new(i, a, s).to_args(buf, &mut alloc, &mut add_arg)
+						}
+						false => driver::BarIo::new(i, a, s).to_args(buf, &mut alloc, &mut add_arg),
+					}
+					.unwrap();
 
 					mmio += size;
 				}
 
 				let ret = dux::task::spawn_elf(data, &mut [].iter().copied(), &args[..argc]);
-				let ret = ret.unwrap();
-				kernel::sys_log!("Spawned driver as {}", ret);
+				let address = ret.unwrap();
+				kernel::sys_log!("Spawned driver as {}", address);
+				unsafe {
+					TASKS[TASKS_COUNT] = Task {
+						address,
+						child_address: child_address << 64,
+					};
+					TASKS_COUNT += 1;
+				}
 			} else {
 				kernel::sys_log!("No driver found for {:x}|{:x}", v, d);
 			}
@@ -199,9 +256,31 @@ fn main() {
 	}
 
 	// Enable notifications / interrupts
-	notification::init(&[0x20, 0x21, 0x22, 0x23]);
+	notification::init(&unique_irqs[..unique_irqs_count]);
 
 	loop {
-		unsafe { kernel::io_wait(u64::MAX) };
+		const OP_OPEN: u8 = 128;
+
+		let rx = dux::ipc::receive();
+		match rx.opcode.map(|n| n.get()).unwrap_or(0) {
+			OP_OPEN => unsafe {
+				let intr = u128::from(rx.uuid);
+				let task = TASKS[..TASKS_COUNT]
+					.iter()
+					.find(|t| usize::from(t.address) == rx.address)
+					.unwrap();
+				let mask_addr = task.child_address & INTERRUPT_MAP_MASK.child_address;
+				let mask_intr = intr & INTERRUPT_MAP_MASK.child_interrupt;
+				kernel::dbg!(mask_intr, mask_addr);
+				let intr = INTERRUPT_MAP[..INTERRUPT_MAP_COUNT.into()]
+					.iter()
+					.find(|intr| {
+						intr.child_address == mask_addr && u128::from(intr.bus) == mask_intr
+					})
+					.unwrap();
+				notification::add_interrupt_listener(intr.system, rx.address);
+			},
+			_ => (),
+		}
 	}
 }

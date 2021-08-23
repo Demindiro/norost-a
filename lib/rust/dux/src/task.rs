@@ -22,6 +22,12 @@ impl Address {
 	pub const INVALID: Self = Self(usize::MAX);
 }
 
+impl Address {
+	pub const fn new(address: usize) -> Self {
+		Self(address)
+	}
+}
+
 impl fmt::Debug for Address {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let s = core::mem::size_of::<Self>() * 4;
@@ -44,6 +50,12 @@ impl fmt::Display for Address {
 impl From<usize> for Address {
 	fn from(tid: usize) -> Self {
 		Self(tid)
+	}
+}
+
+impl From<Address> for usize {
+	fn from(tid: Address) -> Self {
+		tid.0
 	}
 }
 

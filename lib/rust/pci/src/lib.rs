@@ -10,6 +10,7 @@
 #![feature(ptr_metadata)]
 
 use core::cell::Cell;
+use core::convert::TryInto;
 use core::fmt;
 use core::mem;
 use core::num::NonZeroU32;
@@ -405,6 +406,19 @@ impl PCI {
 		self.physical_address + Self::offset(bus, device, function)
 	}
 
+	/// Return the child address of a function.
+	///
+	/// ## Panics
+	///
+	/// If either the device or function are out of bounds.
+	#[inline(always)]
+	fn get_child_address(&self, bus: u8, device: u8, function: u8) -> u32 {
+		kernel::dbg!(bus, device, function);
+		(Self::offset(bus, device, function) >> 4)
+			.try_into()
+			.unwrap()
+	}
+
 	/// Return the byte offset for a function configuration area.
 	///
 	/// ## Panics
@@ -518,20 +532,29 @@ pub struct Device<'a> {
 }
 
 impl<'a> Device<'a> {
+	#[inline]
 	pub fn vendor_id(&self) -> u16 {
 		self.header().common().vendor_id.get().into()
 	}
 
+	#[inline]
 	pub fn device_id(&self) -> u16 {
 		self.header().common().device_id.get().into()
 	}
 
+	#[inline]
 	pub fn header(&self) -> Header {
 		self.pci.get_unchecked(self.bus, self.device, 0)
 	}
 
+	#[inline]
 	pub fn header_physical_address(&self) -> usize {
 		self.pci.get_physical_address(self.bus, self.device, 0)
+	}
+
+	#[inline]
+	pub fn child_address(&self) -> u32 {
+		self.pci.get_child_address(self.bus, self.device, 0)
 	}
 }
 
