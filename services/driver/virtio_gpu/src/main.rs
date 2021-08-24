@@ -118,10 +118,24 @@ fn main() {
 		core::slice::from_raw_parts_mut(ptr, size)
 	};
 
+	// Create cursor buffer
+	let (cursor_w, cursor_h) = (64, 64);
+	let cursor_addr = core::ptr::NonNull::new(addr.as_ptr().wrapping_add(size)).unwrap();
+	let cursor_size = (cursor_w * cursor_h * core::mem::size_of::<RGBA8>() + kernel::Page::MASK)
+		/ kernel::Page::SIZE;
+	let ret = unsafe { kernel::mem_alloc(cursor_addr.cast().as_ptr(), cursor_size, 0b11) };
+	assert_eq!(ret.status, 0);
+	let cursor_buffer = unsafe {
+		let ptr = cursor_addr.as_ptr().cast::<RGBA8>();
+		let size = size * kernel::Page::SIZE / core::mem::size_of::<RGBA8>();
+		// SAFETY: while the device will read from it, only we will write to it.
+		core::slice::from_raw_parts_mut(ptr, size)
+	};
+
 	// Set up scan
 	let rect = virtio_gpu::Rect::new(0, 0, w.try_into().unwrap(), h.try_into().unwrap());
 	let ret = unsafe { device.init_scanout(virtio_gpu::Format::RGBA8Unorm, rect, addr, size) };
-	ret.unwrap();
+	let id = ret.unwrap();
 
 	for x in 0..w {
 		for y in 0..h {
@@ -136,10 +150,25 @@ fn main() {
 		}
 	}
 
-	core::sync::atomic::fence(core::sync::atomic::Ordering::AcqRel);
+	// Set up cursor
+	let cursor_rect = virtio_gpu::Rect::new(0, 0, 64, 64);
+	let ret = unsafe {
+		device.init_cursor(
+			0,
+			0,
+			virtio_gpu::Format::RGBA8Unorm,
+			cursor_addr,
+			cursor_size,
+		)
+	};
+	let cursor_id = ret.unwrap();
 
 	// Draw
-	device.draw(rect).expect("failed to draw");
+	device.draw(cursor_id, cursor_rect).expect("failed to draw");
+	device.draw(id, rect).expect("failed to draw");
+
+	device.update_cursor(cursor_id, 0, 0);
+	//device.move_cursor(0, 0);
 
 	// Add self to registry
 	let name = "virtio_gpu";
@@ -155,24 +184,42 @@ fn main() {
 		use core::slice;
 
 		match rx.opcode.map(|n| n.get()).unwrap_or(0) {
-			OP_OPEN => {
-				kernel::sys_log!("OP_OPEN");
-				*dux::ipc::transmit() = kernel::ipc::Packet {
-					uuid: kernel::ipc::UUID::INVALID,
-					data: Some(addr),
-					length: w * h * core::mem::size_of::<RGBA8>(),
-					address: rx.address,
-					id: rx.id,
-					name: None,
-					name_len: 0,
-					flags: 0,
-					offset: 0,
-					opcode: rx.opcode,
-				};
-			}
+			OP_OPEN => match u128::from(rx.uuid) {
+				0 => {
+					*dux::ipc::transmit() = kernel::ipc::Packet {
+						uuid: kernel::ipc::UUID::INVALID,
+						data: Some(addr),
+						length: w * h * core::mem::size_of::<RGBA8>(),
+						address: rx.address,
+						id: rx.id,
+						name: None,
+						name_len: 0,
+						flags: 0,
+						offset: 0,
+						opcode: rx.opcode,
+					};
+				}
+				1 => {
+					*dux::ipc::transmit() = kernel::ipc::Packet {
+						uuid: kernel::ipc::UUID::INVALID,
+						data: Some(cursor_addr),
+						length: cursor_w * cursor_h * core::mem::size_of::<RGBA8>(),
+						address: rx.address,
+						id: rx.id,
+						name: None,
+						name_len: 0,
+						flags: 0,
+						offset: 0,
+						opcode: rx.opcode,
+					};
+				}
+				_ => todo!(),
+			},
 			OP_FLUSH => {
-				kernel::sys_log!("OP_FLUSH");
-				device.draw(rect).expect("failed to draw");
+				device.draw(id, rect).expect("failed to draw");
+				device.draw(cursor_id, cursor_rect).expect("failed to draw");
+				device.update_cursor(cursor_id, 0, 0);
+				//device.move_cursor(0, 0);
 			}
 			_ => todo!(),
 		}

@@ -9,6 +9,8 @@ pub use controlq::Rect;
 use core::convert::TryInto;
 use core::fmt;
 use core::mem;
+use core::num::NonZeroU32;
+use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::ptr::NonNull;
 use simple_endian::{u32le, u64le};
@@ -140,9 +142,13 @@ impl fmt::Debug for ControlHeader {
 	}
 }
 
+/// A handle to a resource
+#[derive(Clone, Copy)]
+pub struct Resource(NonZeroU32);
+
 pub struct Device<'a> {
 	config: &'a Config,
-	notify: &'a virtio::pci::Notify,
+	notify: virtio::pci::Notify<'a>,
 	controlq: virtio::queue::Queue<'a>,
 	cursorq: virtio::queue::Queue<'a>,
 }
@@ -154,7 +160,7 @@ impl<'a> Device<'a> {
 	pub fn new(
 		common: &'a virtio::pci::CommonConfig,
 		device: &'a virtio::pci::DeviceConfig,
-		notify: &'a virtio::pci::Notify,
+		notify: virtio::pci::Notify<'a>,
 		isr: &'a virtio::pci::ISR,
 	) -> Result<Self, SetupError> {
 		let features = FEATURE_EDID;
@@ -174,6 +180,7 @@ impl<'a> Device<'a> {
 
 		let controlq = virtio::queue::Queue::<'a>::new(common, 0, 8, None).expect("OOM");
 		let cursorq = virtio::queue::Queue::<'a>::new(common, 1, 8, None).expect("OOM");
+		kernel::dbg!(controlq.notify_offset(), cursorq.notify_offset());
 
 		common.device_status.set(
 			virtio::pci::CommonConfig::STATUS_ACKNOWLEDGE
@@ -196,26 +203,162 @@ impl<'a> Device<'a> {
 		rect: Rect,
 		backend: NonNull<kernel::Page>,
 		count: usize,
-	) -> Result<(), InitScanoutError> {
+	) -> Result<Resource, InitScanoutError> {
 		let res_id = 1;
 		let scan_id = 0;
 
-		const MAX_PAGES: usize = 1024;
+		self.create_resource(
+			NonZeroU32::new(res_id).unwrap(),
+			rect,
+			format,
+			backend,
+			count,
+		);
 
-		// Get storage phys addresses
-		assert!(count <= MAX_PAGES, "todo: use dyn alloc");
-		let mut phys_addrs = [0; MAX_PAGES];
-		let phys_addrs = &mut phys_addrs[..count];
-		let ret = unsafe {
-			kernel::mem_physical_address(
-				backend.as_ptr(),
-				phys_addrs.as_mut_ptr(),
-				phys_addrs.len(),
-			)
-		};
-		assert_eq!(ret.status, 0, "backend not allocated");
-		//let phys_addrs = &phys_addrs[..ret.value];
-		let phys_addrs = &phys_addrs[..];
+		// Response buffer
+		let mut resp_buffer = ControlHeader::new(0, None);
+		let resp_buffer = Pin::new(&mut resp_buffer);
+		let resp_data = Self::create_queue_entry_mut(resp_buffer, None);
+
+		// Attach scanout
+		let scanout = controlq::SetScanout::new(scan_id, res_id, rect, Some(0));
+		let data = [
+			Self::create_queue_entry(Pin::new(&scanout), None),
+			resp_data,
+		];
+		self.controlq
+			.send(data.iter().copied(), None, None)
+			.expect("failed to send data");
+		self.flush();
+		self.controlq.wait_for_used(None, || ());
+
+		Ok(Resource(NonZeroU32::new(res_id).unwrap()))
+	}
+
+	pub unsafe fn init_cursor(
+		&mut self,
+		x: u32,
+		y: u32,
+		format: Format,
+		backend: NonNull<kernel::Page>,
+		count: usize,
+	) -> Result<Resource, InitCursorError> {
+		assert_eq!(count, 4);
+		let res_id = 2;
+		let scan_id = 0;
+
+		let rect = Rect::new(0, 0, 64, 64);
+		self.create_resource(
+			NonZeroU32::new(res_id).unwrap(),
+			rect,
+			format,
+			backend,
+			count,
+		);
+
+		// Response buffer
+		let mut resp_buffer = ControlHeader::new(0, None);
+		let resp_buffer = Pin::new(&mut resp_buffer);
+		let resp_data = Self::create_queue_entry_mut(resp_buffer, None);
+
+		let pos = cursorq::CursorPosition::new(scan_id, x, y);
+		let update = cursorq::UpdateCursor::new(pos, res_id, 0, 0, Some(0));
+		let data = [Self::create_queue_entry(Pin::new(&update), None), resp_data];
+		self.cursorq
+			.send(data.iter().copied(), None, None)
+			.expect("failed to send data");
+		self.flush();
+		self.cursorq.wait_for_used(None, || ());
+
+		Ok(Resource(NonZeroU32::new(res_id).unwrap()))
+	}
+
+	pub fn update_cursor(
+		&mut self,
+		resource: Resource,
+		hot_x: u32,
+		hot_y: u32,
+	) -> Result<Resource, UpdateCursorError> {
+		let res_id = resource.0.get();
+		let scan_id = 0;
+
+		// Response buffer
+		let mut resp_buffer = ControlHeader::new(0, None);
+		let resp_buffer = Pin::new(&mut resp_buffer);
+		let resp_data = Self::create_queue_entry_mut(resp_buffer, None);
+
+		let pos = cursorq::CursorPosition::new(scan_id, 0, 0);
+		let update = cursorq::UpdateCursor::new(pos, res_id, hot_x, hot_y, Some(0));
+		let data = [Self::create_queue_entry(Pin::new(&update), None), resp_data];
+		self.cursorq
+			.send(data.iter().copied(), None, None)
+			.expect("failed to send data");
+		self.flush();
+		self.cursorq.wait_for_used(None, || ());
+
+		Ok(Resource(NonZeroU32::new(res_id).unwrap()))
+	}
+
+	pub fn move_cursor(&mut self, x: u32, y: u32) -> Result<(), MoveCursorError> {
+		let scan_id = 0;
+
+		// Response buffer
+		let mut resp_buffer = ControlHeader::new(0, None);
+		let resp_buffer = Pin::new(&mut resp_buffer);
+		let resp_data = Self::create_queue_entry_mut(resp_buffer, None);
+
+		let pos = cursorq::CursorPosition::new(scan_id, x, y);
+		let mov = cursorq::MoveCursor::new(pos, Some(0));
+		let data = [Self::create_queue_entry(Pin::new(&mov), None), resp_data];
+		self.cursorq
+			.send(data.iter().copied(), None, None)
+			.expect("failed to send data");
+		self.flush();
+		self.cursorq.wait_for_used(None, || ());
+
+		Ok(())
+	}
+
+	pub fn draw(&mut self, resource: Resource, rect: Rect) -> Result<(), DrawError> {
+		let res_id = resource.0.get();
+
+		// Response buffer
+		let mut resp_buffer = ControlHeader::new(0, None);
+		let resp_buffer = Pin::new(&mut resp_buffer);
+		let resp_data = Self::create_queue_entry_mut(resp_buffer, None);
+
+		// Transfer to host
+		let res = controlq::TransferToHost2D::new(res_id, 0, rect, Some(0));
+		let res = Pin::new(&res);
+		let data = [Self::create_queue_entry(res, None), resp_data];
+		self.controlq
+			.send(data.iter().copied(), None, None)
+			.expect("failed to send data");
+		self.flush();
+		self.controlq.wait_for_used(None, || ());
+
+		// Flush resource
+		let flush = controlq::resource::Flush::new(res_id.try_into().unwrap(), rect, Some(0));
+		let flush = Pin::new(&flush);
+		let data = [Self::create_queue_entry(flush, None), resp_data];
+		self.controlq
+			.send(data.iter().copied(), None, None)
+			.expect("failed to send data");
+		self.flush();
+		self.controlq.wait_for_used(None, || ());
+
+		Ok(())
+	}
+
+	fn create_resource(
+		&mut self,
+		id: NonZeroU32,
+		rect: Rect,
+		format: Format,
+		backend: NonNull<kernel::Page>,
+		count: usize,
+	) {
+		const MAX_PAGES: usize = 1024;
 
 		// Response buffer
 		let mut resp_buffer = ControlHeader::new(0, None);
@@ -231,9 +374,28 @@ impl<'a> Device<'a> {
 			true,
 		);
 
+		// Get storage phys addresses
+		assert!(count <= MAX_PAGES, "todo: use dyn alloc");
+		let mut phys_addrs = [0; MAX_PAGES];
+		let phys_addrs = &mut phys_addrs[..count];
+		let ret = unsafe {
+			kernel::mem_physical_address(
+				backend.as_ptr(),
+				phys_addrs.as_mut_ptr(),
+				phys_addrs.len(),
+			)
+		};
+		assert_eq!(ret.status, 0, "backend not allocated");
+		let phys_addrs = &phys_addrs[..];
+
 		// Create resource
-		let res =
-			controlq::resource::Create2D::new(res_id, format, rect.width(), rect.height(), Some(0));
+		let res = controlq::resource::Create2D::new(
+			id.get(),
+			format,
+			rect.width(),
+			rect.height(),
+			Some(0),
+		);
 		let res = Pin::new(&res);
 		let res_ptr = &*res as *const _ as usize;
 		let (ppn, offt) = (res_ptr & !kernel::Page::MASK, res_ptr & kernel::Page::MASK);
@@ -264,7 +426,7 @@ impl<'a> Device<'a> {
 		}
 		let mut storage = Storage {
 			attach: controlq::resource::AttachBacking::new(
-				res_id,
+				id.get(),
 				phys_addrs.len().try_into().unwrap(),
 				Some(0),
 			),
@@ -280,19 +442,10 @@ impl<'a> Device<'a> {
 				kernel::Page::SIZE.try_into().unwrap(),
 			);
 		}
-		let sto_ptr = &storage as *const _ as usize;
-		let (ppn, offt) = (sto_ptr & !kernel::Page::MASK, sto_ptr & kernel::Page::MASK);
-		let mut phys = 0;
-		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
-		assert_eq!(ret.status, 0, "Failed DMA get phys address");
 		let size = mem::size_of::<controlq::resource::AttachBacking>()
 			+ mem::size_of::<controlq::resource::MemoryEntry>() * phys_addrs.len();
 		let data = [
-			(
-				(phys + offt).try_into().unwrap(),
-				size.try_into().unwrap(),
-				false,
-			),
+			Self::create_queue_entry(Pin::new(&storage), Some(size.try_into().unwrap())),
 			resp_data,
 		];
 		self.controlq
@@ -300,100 +453,37 @@ impl<'a> Device<'a> {
 			.expect("failed to send data");
 		self.flush();
 		self.controlq.wait_for_used(None, || ());
-
-		// Attach scanout
-		let scanout = controlq::SetScanout::new(scan_id, res_id, rect, Some(0));
-		let sto_ptr = &scanout as *const _ as usize;
-		let (ppn, offt) = (sto_ptr & !kernel::Page::MASK, sto_ptr & kernel::Page::MASK);
-		let mut phys = 0;
-		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
-		assert_eq!(ret.status, 0, "Failed DMA get phys address");
-		let data = [
-			(
-				(phys + offt).try_into().unwrap(),
-				mem::size_of::<controlq::SetScanout>().try_into().unwrap(),
-				false,
-			),
-			resp_data,
-		];
-		self.controlq
-			.send(data.iter().copied(), None, None)
-			.expect("failed to send data");
-		self.flush();
-		self.controlq.wait_for_used(None, || ());
-
-		Ok(())
 	}
 
-	pub fn draw(&mut self, rect: Rect) -> Result<(), DrawError> {
-		let res_id = 1;
-
-		// Response buffer
-		let mut resp_buffer = ControlHeader::new(0, None);
-		let mut resp_buffer = Pin::new(&mut resp_buffer);
-		let res_ptr = &mut *resp_buffer as *mut _ as usize;
-		let (ppn, offt) = (res_ptr & !kernel::Page::MASK, res_ptr & kernel::Page::MASK);
+	fn create_queue_entry<T>(buffer: Pin<&T>, size: Option<u32>) -> (u64, u32, bool) {
+		let ptr = &*buffer as *const _ as usize;
+		let (ppn, offt) = (ptr & !kernel::Page::MASK, ptr & kernel::Page::MASK);
 		let mut phys = 0;
 		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
 		assert_eq!(ret.status, 0, "Failed DMA get phys address");
-		let resp_data = (
+		(
 			(phys + offt).try_into().unwrap(),
-			mem::size_of::<ControlHeader>().try_into().unwrap(),
+			size.unwrap_or(mem::size_of::<T>().try_into().unwrap()),
+			false,
+		)
+	}
+
+	fn create_queue_entry_mut<T>(buffer: Pin<&mut T>, size: Option<u32>) -> (u64, u32, bool) {
+		let ptr = &*buffer as *const _ as usize;
+		let (ppn, offt) = (ptr & !kernel::Page::MASK, ptr & kernel::Page::MASK);
+		let mut phys = 0;
+		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
+		assert_eq!(ret.status, 0, "Failed DMA get phys address");
+		(
+			(phys + offt).try_into().unwrap(),
+			size.unwrap_or(mem::size_of::<T>().try_into().unwrap()),
 			true,
-		);
-
-		// Transfer to host
-		let res = controlq::TransferToHost2D::new(res_id, 0, rect, Some(0));
-		let res_ptr = &res as *const _ as usize;
-		let (ppn, offt) = (res_ptr & !kernel::Page::MASK, res_ptr & kernel::Page::MASK);
-		let mut phys = 0;
-		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
-		assert_eq!(ret.status, 0, "Failed DMA get phys address");
-		let data = [
-			(
-				(phys + offt).try_into().unwrap(),
-				mem::size_of::<controlq::TransferToHost2D>()
-					.try_into()
-					.unwrap(),
-				false,
-			),
-			resp_data,
-		];
-		self.controlq
-			.send(data.iter().copied(), None, None)
-			.expect("failed to send data");
-		self.flush();
-		self.controlq.wait_for_used(None, || ());
-
-		// Flush resource
-		let flush = controlq::resource::Flush::new(res_id.try_into().unwrap(), rect, Some(0));
-		let flush = Pin::new(&flush);
-		let sto_ptr = &*flush as *const _ as usize;
-		let (ppn, offt) = (sto_ptr & !kernel::Page::MASK, sto_ptr & kernel::Page::MASK);
-		let mut phys = 0;
-		let ret = unsafe { kernel::mem_physical_address(ppn as *const _, &mut phys, 1) };
-		assert_eq!(ret.status, 0, "Failed DMA get phys address");
-		let data = [
-			(
-				(phys + offt).try_into().unwrap(),
-				mem::size_of::<controlq::resource::Flush>()
-					.try_into()
-					.unwrap(),
-				false,
-			),
-			resp_data,
-		];
-		self.controlq
-			.send(data.iter().copied(), None, None)
-			.expect("failed to send data");
-		self.flush();
-		self.controlq.wait_for_used(None, || ());
-
-		Ok(())
+		)
 	}
 
 	fn flush(&self) {
-		self.notify.send(0)
+		self.notify.send(0);
+		self.notify.send(1);
 	}
 }
 
@@ -404,6 +494,15 @@ pub enum SetupError {}
 
 #[derive(Debug)]
 pub enum InitScanoutError {}
+
+#[derive(Debug)]
+pub enum InitCursorError {}
+
+#[derive(Debug)]
+pub enum UpdateCursorError {}
+
+#[derive(Debug)]
+pub enum MoveCursorError {}
 
 #[derive(Debug)]
 pub enum DrawError {}

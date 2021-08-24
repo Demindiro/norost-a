@@ -73,6 +73,7 @@ pub struct Queue<'a> {
 	descriptors: NonNull<Descriptor>,
 	available: NonNull<Avail>,
 	used: NonNull<Used>,
+	notify_offset: u16,
 }
 
 /// Returns the available head & ring.
@@ -191,6 +192,8 @@ impl<'a> Queue<'a> {
 		config.queue_size.set((size as u16).into());
 		config.queue_enable.set(1.into());
 
+		let notify_offset = config.queue_notify_off.get().into();
+
 		unsafe { DMA_ADDR += 4096 * 0x2 };
 
 		msix.map(|msix| config.queue_msix_vector.set(msix.into()));
@@ -204,6 +207,7 @@ impl<'a> Queue<'a> {
 			descriptors,
 			available,
 			used,
+			notify_offset,
 		})
 	}
 
@@ -318,16 +322,9 @@ impl<'a> Queue<'a> {
 		}
 	}
 
-	pub fn test(&mut self) {
-		let mut prev_val = None;
-		loop {
-			let (used_head, _) = used_ring!(self);
-			let val = used_head.index;
-			if Some(val) != prev_val {
-				prev_val = Some(val)
-			}
-			atomic::fence(Ordering::Release);
-		}
+	/// Return the offset relative to the notify address to flush this queue.
+	pub fn notify_offset(&self) -> u16 {
+		self.notify_offset
 	}
 }
 

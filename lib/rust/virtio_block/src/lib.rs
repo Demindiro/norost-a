@@ -37,7 +37,7 @@ const INDIRECT_DESC: u32 = 1 << 29;
 /// A driver for a virtio block device.
 pub struct BlockDevice<'a> {
 	queue: queue::Queue<'a>,
-	notify: &'a virtio::pci::Notify,
+	notify: virtio::pci::Notify<'a>,
 	isr: &'a virtio::pci::ISR,
 	/// The amount of sectors available
 	capacity: u64,
@@ -103,7 +103,7 @@ impl<'a> BlockDevice<'a> {
 	pub fn new(
 		common: &'a CommonConfig,
 		device: &'a DeviceConfig,
-		notify: &'a Notify,
+		notify: Notify<'a>,
 		isr: &'a virtio::pci::ISR,
 	) -> Result<Self, SetupError> {
 		let features = SIZE_MAX | SEG_MAX | GEOMETRY | BLK_SIZE | TOPOLOGY;

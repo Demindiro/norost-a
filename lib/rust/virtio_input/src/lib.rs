@@ -98,7 +98,7 @@ impl fmt::Debug for InputEvent {
 
 pub struct Device<'a> {
 	config: &'a Config,
-	notify: &'a virtio::pci::Notify,
+	notify: virtio::pci::Notify<'a>,
 	eventq: virtio::queue::Queue<'a>,
 	statusq: virtio::queue::Queue<'a>,
 	events: NonNull<InputEvent>,
@@ -115,7 +115,7 @@ impl<'a> Device<'a> {
 	pub fn new(
 		common: &'a virtio::pci::CommonConfig,
 		device: &'a virtio::pci::DeviceConfig,
-		notify: &'a virtio::pci::Notify,
+		notify: virtio::pci::Notify<'a>,
 		isr: &'a virtio::pci::ISR,
 	) -> Result<Self, SetupError> {
 		let features = 0;

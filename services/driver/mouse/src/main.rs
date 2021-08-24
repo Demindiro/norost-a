@@ -18,12 +18,9 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 	loop {}
 }
 
-mod letter;
 mod rtbegin;
 
 use core::convert::TryInto;
-use letter::Letter;
-use letter::*;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -49,6 +46,10 @@ fn main() {
 	// FIXME move this to rtbegin
 	unsafe { dux::init() };
 
+	kernel::dbg!(
+		"iregregiojergirgjejirejiorgeiojrgejiogrejoigrejoigrejiogrjiogrejiogerjirogegrjeio"
+	);
+
 	// Wait for virtio_gpu driver to come online
 	let address = loop {
 		let name = b"virtio_gpu";
@@ -73,7 +74,7 @@ fn main() {
 			id: 0,
 			offset: 0,
 			opcode: core::num::NonZeroU8::new(OP_OPEN),
-			uuid: kernel::ipc::UUID::new(0),
+			uuid: kernel::ipc::UUID::new(1),
 			data: None,
 			length: 0,
 			name: None,
@@ -91,18 +92,44 @@ fn main() {
 		unsafe { core::slice::from_raw_parts_mut(ptr, len) }
 	};
 
-	let (w, h) = (800, 600);
+	let (w, h) = (64, 64);
+	for x in 0..w {
+		for y in 0..w {
+			// Check if it's below-left of the '\' diagonal
+			let a = if x * 1 < y * 1 {
+				// Check if it's above-left of the '/' diagonal
+				// sin(pi / 8) is the factor
+				let y = 64 - y;
+				if y * 261 > x * 100 {
+					255
+				} else {
+					0
+				}
+			} else {
+				0
+			};
+			buffer[x + y * w] = RGBA8 {
+				r: 255,
+				g: 255,
+				b: 255,
+				a,
+			}
+		}
+	}
+
+	kernel::dbg!();
 
 	// Add self to registry
 	let name = "console";
 	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name.len(), usize::MAX) };
 	assert_eq!(ret.status, 0, "failed to add self to registry");
 
-	let (mut a, mut b) = (1.0, 0.0);
+	let (mut x, mut y) = (0, 0);
+	let (w, h) = (800, 600);
 
-	let (mut cursor_x, mut cursor_y) = (0, 0);
-	let (cursor_w, cursor_h) = (50, 24);
+	kernel::dbg!();
 
+	/*
 	loop {
 		use core::slice;
 
@@ -179,5 +206,9 @@ fn main() {
 			name_len: 0,
 			address,
 		};
+	}
+	*/
+	loop {
+		unsafe { kernel::io_wait(1_000_000) };
 	}
 }

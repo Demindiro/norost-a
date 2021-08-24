@@ -1,5 +1,6 @@
-use core::convert::TryFrom;
+use core::convert::{TryFrom, TryInto};
 use core::fmt;
+use core::marker::PhantomData;
 use core::num::NonZeroU8;
 use core::ptr::NonNull;
 use simple_endian::{u16le, u32le, u64le};
@@ -193,12 +194,18 @@ impl DeviceConfig {
 	}
 }
 
-#[repr(transparent)]
-pub struct Notify(VolatileCell<u16le>);
+pub struct Notify<'a> {
+	address: NonNull<VolatileCell<u16le>>,
+	multiplier: u32,
+	_marker: PhantomData<&'a VolatileCell<u16le>>,
+}
 
-impl Notify {
-	pub fn send(&self, value: u16) {
-		self.0.set(value.into());
+impl Notify<'_> {
+	pub fn send(&self, offset: u16) {
+		unsafe {
+			let offt = usize::try_from(self.multiplier / 2).unwrap() * usize::from(offset);
+			(&*self.address.as_ptr().add(offt)).set(0.into())
+		};
 	}
 }
 
@@ -210,7 +217,7 @@ pub fn new_device<'a, D, H, R>(
 ) -> Result<D, R>
 where
 	D: Device + 'a,
-	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, &'a Notify, &'a ISR) -> Result<D, R>,
+	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, Notify<'a>, &'a ISR) -> Result<D, R>,
 {
 	let cmd = pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK;
 
@@ -264,9 +271,9 @@ where
 	let mut device_config = None;
 	let mut pci_config = None;
 
-	for cap in header.capabilities() {
-		if cap.id() == 0x9 {
-			let cap = unsafe { cap.data::<Capability>() };
+	for cap_raw in header.capabilities() {
+		if cap_raw.id() == 0x9 {
+			let cap = unsafe { cap_raw.data::<Capability>() };
 			if bar_sizes[usize::from(cap.base_address.get())].is_some() {
 				match cap.config_type.get() {
 					Capability::COMMON_CONFIGURATION => {
@@ -276,7 +283,8 @@ where
 					}
 					Capability::NOTIFY_CONFIGURATION => {
 						if notify_config.is_none() {
-							notify_config = Some(cap);
+							let mul = unsafe { cap.more_stuff.get().into() };
+							notify_config = Some((cap, mul));
 						}
 					}
 					Capability::ISR_CONFIGURATION => {
@@ -328,10 +336,13 @@ where
 		.expect("No common config map defined");
 
 	let notify_config = notify_config
-		.map(|cfg| unsafe {
-			setup_mmio(cfg.base_address.get(), cfg.offset.get().into())
-				.cast::<Notify>()
-				.as_ref()
+		.map(|(cfg, multiplier)| unsafe {
+			let address = setup_mmio(cfg.base_address.get(), cfg.offset.get().into()).cast();
+			Notify {
+				address,
+				multiplier,
+				_marker: PhantomData,
+			}
 		})
 		.expect("No common config map defined");
 
