@@ -7,4 +7,4 @@ build: font.bitmap
 	cargo build --release
 
 font.bitmap: font.bitmap.xz
-	xz -dk $<
+	test -e $@ || xz -dk $<
