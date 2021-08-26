@@ -66,10 +66,6 @@ fn main() {
 	let mut unique_irqs = [0; 8];
 	let mut unique_irqs_count = 0;
 
-	rtbegin::args().for_each(|e| {
-		kernel::dbg!(core::str::from_utf8(e).unwrap());
-	});
-
 	driver::parse_args(rtbegin::args(), |arg, _| match arg {
 		driver::Arg::Reg(r) => {
 			reg.replace(r)
@@ -271,7 +267,6 @@ fn main() {
 					.unwrap();
 				let mask_addr = task.child_address & INTERRUPT_MAP_MASK.child_address;
 				let mask_intr = intr & INTERRUPT_MAP_MASK.child_interrupt;
-				kernel::dbg!(mask_intr, mask_addr);
 				let intr = INTERRUPT_MAP[..INTERRUPT_MAP_COUNT.into()]
 					.iter()
 					.find(|intr| {

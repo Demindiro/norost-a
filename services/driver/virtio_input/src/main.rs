@@ -156,15 +156,9 @@ fn main() {
 	// Add self to registry
 	let mut name = [0; 128];
 	let name_len = usize::from(dev.name(&mut name));
-	kernel::dbg!(core::str::from_utf8(&name[..name_len]));
 
 	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name_len.into(), usize::MAX) };
 	assert_eq!(ret.status, 0, "failed to add self to registry");
-
-	for i in 0..5 {
-		let name_len = usize::from(dev.ev_bits(&mut name, i));
-		kernel::dbg!(format_args!("{:x?}", &name[..name_len]));
-	}
 
 	unsafe { SET = Some(scancode::default()) };
 
@@ -268,7 +262,7 @@ fn process_events() {
 				Some(Key::Space) => putc(on, ' '),
 				_ => todo!(),
 				None => unsafe {
-					kernel::dbg!(format_args!("0x{:x}", evt.code()));
+					kernel::sys_log!("unknown event: 0x{:x}", evt.code());
 				},
 			}
 		}

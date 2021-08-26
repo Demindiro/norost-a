@@ -13,17 +13,13 @@
 
 #[panic_handler]
 fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
-	kernel::sys_log!("Panic!");
-	#[cfg(debug_assertions)]
-	if let Some(m) = _info.message() {
-		kernel::sys_log!("  Message: {}", m);
-	}
-	loop {}
+	exit_err_msg("Panic!");
 }
 
 mod rtbegin;
 
 use core::convert::{TryFrom, TryInto};
+use core::fmt::Write;
 use core::ptr;
 use core::str;
 
@@ -35,54 +31,54 @@ extern "C" fn main(argc: usize, argv: *const *const u8) {
 	let ret = driver::parse_args(args, |arg, _| match arg {
 		driver::Arg::Reg(r) => {
 			if reg.replace(r).is_some() {
-				kernel::sys_log!("--reg specified multiple times");
-				exit_err();
+				exit_err_msg("--reg specified multiple times");
 			}
 		}
 		arg => {
-			kernel::sys_log!("invalid argument {:?}", arg);
-			exit_err();
+			let a = arg.cmd_arg().map(str::as_bytes).unwrap_or_else(|a| a);
+			exit_err_msg_val("invalid argument ", a);
 		}
 	});
 
 	if let Err(e) = ret {
-		kernel::sys_log!("error parsing arguments: {:?}", e);
-		exit_err();
+		exit_err_msg_val("error parsing arguments ", e.as_str().as_bytes());
 	}
 
 	let reg = match reg {
 		Some(reg) => reg,
-		None => {
-			kernel::sys_log!("--reg not specified");
-			exit_err();
-		}
+		None => exit_err_msg("--reg not specified"),
 	};
 
 	let ps = u128::try_from(kernel::Page::SIZE).unwrap();
 	let addr = match usize::try_from(reg.address / ps) {
 		Ok(a) => a,
-		Err(_) => {
-			kernel::sys_log!("address out of range");
-			exit_err();
-		}
+		Err(_) => exit_err_msg("address out of range"),
 	};
 	let size = match usize::try_from(reg.size / ps) {
 		Ok(s) => s,
-		Err(_) => {
-			kernel::sys_log!("size out of range");
-			exit_err();
-		}
+		Err(_) => exit_err_msg("size out of range"),
 	};
 
 	let ret = unsafe { kernel::sys_set_interrupt_controller(addr, size, 1023) };
 	if ret.status != 0 {
-		kernel::sys_log!("failed to set interrupt controller");
+		exit_err_msg("failed to set interrupt controller");
 	}
 
 	// We _still_ can't exit yet
 	loop {
 		unsafe { kernel::io_wait(u64::MAX) };
 	}
+}
+
+fn exit_err_msg(msg: &str) -> ! {
+	let _ = kernel::SysLog.write_str(msg);
+	exit_err()
+}
+
+fn exit_err_msg_val(msg: &str, val: &[u8]) -> ! {
+	let _ = kernel::SysLog.write_str(msg);
+	let _ = unsafe { kernel::sys_log(val.as_ptr(), val.len()) };
+	exit_err()
 }
 
 fn exit_err() -> ! {

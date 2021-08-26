@@ -7,4 +7,4 @@ edition = "2018"
 
 [dependencies]
 kernel = { path = "../../../lib/rust/kernel", package = "syscalls" }
-driver = { path = "../../../lib/rust/driver" }
+driver = { path = "../../../lib/rust/driver", default_features = false, features = ["parse-reg"] }

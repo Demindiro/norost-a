@@ -41,10 +41,6 @@ fn main() {
 	let mut pci = None;
 	let mut bars = [None; 6];
 
-	rtbegin::args().for_each(|a| {
-		kernel::dbg!(core::str::from_utf8(a).unwrap());
-	});
-
 	driver::parse_args(rtbegin::args(), |arg, _| {
 		match arg {
 			driver::Arg::Pci(p) => pci
@@ -151,7 +147,6 @@ fn main() {
 					core::slice::from_raw_parts_mut(data, length)
 				};
 
-				kernel::dbg!(device.was_interrupted());
 				device
 					.read(data, offset, &mut wait)
 					.expect("failed to read sectors");
@@ -176,7 +171,6 @@ fn main() {
 					core::slice::from_raw_parts(data, length)
 				};
 
-				kernel::dbg!(device.was_interrupted());
 				device
 					.write(data, offset, &mut wait)
 					.expect("failed to write sectors");

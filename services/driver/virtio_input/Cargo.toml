@@ -8,7 +8,7 @@ edition = "2018"
 [dependencies]
 kernel = { path = "../../../lib/rust/kernel/", package = "syscalls" }
 dux = { path = "../../../lib/rust/dux/" }
-driver = { path = "../../../lib/rust/driver/" }
+driver = { path = "../../../lib/rust/driver/", default_features = false, features = ["parse-pci-args"] }
 virtio_input = { path = "../../../lib/rust/virtio_input/" }
 virtio = { path = "../../../lib/rust/virtio/" }
 pci = { path = "../../../lib/rust/pci/" }

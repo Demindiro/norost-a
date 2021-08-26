@@ -46,10 +46,6 @@ fn main() {
 	// FIXME move this to rtbegin
 	unsafe { dux::init() };
 
-	kernel::dbg!(
-		"iregregiojergirgjejirejiorgeiojrgejiogrejoigrejoigrejiogrjiogrejiogerjirogegrjeio"
-	);
-
 	// Wait for virtio_gpu driver to come online
 	let address = loop {
 		let name = b"virtio_gpu";
@@ -117,8 +113,6 @@ fn main() {
 		}
 	}
 
-	kernel::dbg!();
-
 	// Add self to registry
 	let name = "console";
 	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name.len(), usize::MAX) };
@@ -126,8 +120,6 @@ fn main() {
 
 	let (mut x, mut y) = (0, 0);
 	let (w, h) = (800, 600);
-
-	kernel::dbg!();
 
 	/*
 	loop {

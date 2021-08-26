@@ -31,6 +31,7 @@ CARGO=cargo rustc \
 	-C link-arg=-T$(current_dir)link.ld \
 	-C link-arg=$(current_dir)start.s \
 	-C no-redzone=yes
+	#-C link-arg=--no-eh-frame-hdr \
 
 
 default: build

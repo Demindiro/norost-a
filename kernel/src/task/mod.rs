@@ -141,11 +141,6 @@ impl Task {
 				wait_time: 0,
 				ipc: None,
 			});
-			dbg!(-task
-				.0
-				.as_ptr()
-				.cast::<u8>()
-				.offset_from(&task.0.as_ref().wait_time as *const _ as *const _));
 		}
 		unsafe { TASK_DATA_ADDRESS = TASK_DATA_ADDRESS.next().unwrap() };
 		Ok(task)

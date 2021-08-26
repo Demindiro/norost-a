@@ -3,6 +3,34 @@ name = "driver"
 version = "0.1.0"
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+
+[features]
+default = [
+	"parse-device-tree-args",
+	"parse-pci-args",
+]
+
+parse-device-tree-args = ["parse-reg", "parse-range", "parse-interrupt-map", "parse-interrupt-map-mask"]
+parse-pci-args = ["parse-pci", "parse-pci-interrupt", "parse-bar-mmio", "parse-bar-io"]
+
+to-device-tree-args = ["to-reg", "to-range", "to-interrupt-map", "to-interrupt-map-mask"]
+to-pci-args = ["to-pci", "to-pci-interrupt", "to-bar-mmio", "to-bar-io"]
+
+parse-reg = []
+parse-range = []
+parse-interrupt-map = []
+parse-interrupt-map-mask = []
+parse-pci = []
+parse-pci-interrupt = []
+parse-bar-mmio = []
+parse-bar-io = []
+
+to-reg = []
+to-range = []
+to-interrupt-map = []
+to-interrupt-map-mask = []
+to-pci = []
+to-pci-interrupt = []
+to-bar-mmio = []
+to-bar-io = []

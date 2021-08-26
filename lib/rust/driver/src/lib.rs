@@ -1,6 +1,7 @@
 //! # Helper library for drivers
 
 #![no_std]
+#![feature(optimize_attribute)]
 
 use core::fmt;
 use core::num;
@@ -32,6 +33,7 @@ macro_rules! derive {
 	};
 	(@INTERNAL impl fmt::Debug($self:ident) for $name:ident { $list:expr }) => {
 		impl fmt::Debug for $name {
+			#[optimize(size)]
 			fn fmt(&$self, f: &mut fmt::Formatter) -> fmt::Result {
 				fmt(f, stringify!($name), &$list)
 			}
@@ -44,6 +46,8 @@ macro_rules! derive {
 		}
 
 		impl $name {
+			pub const CMD_ARG: &'static str = $arg;
+
 			#[inline(always)]
 			pub const fn new($a: u128) -> Self {
 				Self { $a }
@@ -70,6 +74,8 @@ macro_rules! derive {
 		}
 
 		impl $name {
+			pub const CMD_ARG: &'static str = $arg;
+
 			#[inline(always)]
 			pub const fn new($a: u128, $b: u128) -> Self {
 				Self { $a, $b }
@@ -97,6 +103,8 @@ macro_rules! derive {
 		}
 
 		impl $name {
+			pub const CMD_ARG: &'static str = $arg;
+
 			#[inline(always)]
 			pub const fn new($a: u128, $b: u128, $c: u128) -> Self {
 				Self { $a, $b, $c }
@@ -126,6 +134,8 @@ macro_rules! derive {
 		}
 
 		impl $name {
+			pub const CMD_ARG: &'static str = $arg;
+
 			#[inline(always)]
 			pub const fn new($a: u128, $b: u128, $c: u128, $d: u128, $e: u128) -> Self {
 				Self { $a, $b, $c, $d, $e }
@@ -246,15 +256,54 @@ derive!(BarIo "bar-io" index address size);
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Arg<'a> {
+	#[cfg(any(feature = "parse-reg", feature = "to-reg"))]
 	Reg(Reg),
+	#[cfg(any(feature = "parse-range", feature = "to-range"))]
 	Range(Range),
+	#[cfg(any(feature = "parse-interrupt-map", feature = "to-interrupt-map"))]
 	InterruptMap(InterruptMap),
+	#[cfg(any(
+		feature = "parse-interrupt-map-mask",
+		feature = "to-interrupt-map-mask"
+	))]
 	InterruptMapMask(InterruptMapMask),
+	#[cfg(any(feature = "parse-pci", feature = "to-pci"))]
 	Pci(Pci),
+	#[cfg(any(feature = "parse-pci-interrupt", feature = "to-pci-interrupt"))]
 	PciInterrupt(PciInterrupt),
+	#[cfg(any(feature = "parse-bar-io", feature = "to-bar-io"))]
 	BarIo(BarIo),
+	#[cfg(any(feature = "parse-bar-mmio", feature = "to-bar-mmio"))]
 	BarMmio(BarMmio),
 	Other(&'a [u8]),
+}
+
+impl Arg<'_> {
+	#[optimize(size)]
+	pub fn cmd_arg(&self) -> Result<&str, &[u8]> {
+		Ok(match self {
+			#[cfg(any(feature = "parse-reg", feature = "to-reg"))]
+			Self::Reg(_) => Reg::CMD_ARG,
+			#[cfg(any(feature = "parse-range", feature = "to-range"))]
+			Self::Range(_) => Range::CMD_ARG,
+			#[cfg(any(feature = "parse-interrupt-map", feature = "to-interrupt-map"))]
+			Self::InterruptMap(_) => InterruptMap::CMD_ARG,
+			#[cfg(any(
+				feature = "parse-interrupt-map-mask",
+				feature = "to-interrupt-map-mask"
+			))]
+			Self::InterruptMapMask(_) => InterruptMapMask::CMD_ARG,
+			#[cfg(any(feature = "parse-pci", feature = "to-pci"))]
+			Self::Pci(_) => Pci::CMD_ARG,
+			#[cfg(any(feature = "parse-pci-interrupt", feature = "to-pci-interrupt"))]
+			Self::PciInterrupt(_) => PciInterrupt::CMD_ARG,
+			#[cfg(any(feature = "parse-bar-io", feature = "to-bar-io"))]
+			Self::BarIo(_) => BarIo::CMD_ARG,
+			#[cfg(any(feature = "parse-bar-mmio", feature = "to-bar-mmio"))]
+			Self::BarMmio(_) => BarMmio::CMD_ARG,
+			Self::Other(o) => str::from_utf8(o).map_err(|_| *o)?,
+		})
+	}
 }
 
 /// Parse arguments from the given iterator
@@ -265,15 +314,21 @@ where
 {
 	while let Some(ty) = args.next() {
 		let a = match ty {
+			#[cfg(feature = "parse-reg")]
 			b"--reg" => Arg::Reg(Reg::from_args(&mut args)?),
+			#[cfg(feature = "parse-range")]
 			b"--range" => Arg::Range(Range::from_args(&mut args)?),
+			#[cfg(feature = "parse-interrupt-map")]
 			b"--interrupt-map" => Arg::InterruptMap(InterruptMap::from_args(&mut args)?),
-			b"--interrupt-map-mask" => {
-				Arg::InterruptMapMask(InterruptMapMask::from_args(&mut args)?)
-			}
+			#[cfg(feature = "parse-interrupt-map-mask")]
+			b"--interrupt-map-mask" => Arg::InterruptMapMask(InterruptMapMask::from_args(&mut args)?),
+			#[cfg(feature = "parse-pci")]
 			b"--pci" => Arg::Pci(Pci::from_args(&mut args)?),
+			#[cfg(feature = "parse-pci-interrupt")]
 			b"--pci-interrupt" => Arg::PciInterrupt(PciInterrupt::from_args(&mut args)?),
+			#[cfg(feature = "parse-bar-mmio")]
 			b"--bar-io" => Arg::BarIo(BarIo::from_args(&mut args)?),
+			#[cfg(feature = "parse-bar-io")]
 			b"--bar-mmio" => Arg::BarMmio(BarMmio::from_args(&mut args)?),
 			arg => Arg::Other(arg),
 		};
@@ -301,7 +356,23 @@ pub enum ParseError<'a> {
 	OutOfMemory,
 }
 
+impl<'a> ParseError<'a> {
+	#[optimize(size)]
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Self::TooManyRegs => "too many ranges",
+			Self::TooManyRanges => "too many ranges",
+			Self::MissingArgument(_) => "expected argument",
+			Self::Utf8Error(_) => "utf-8 error",
+			Self::ParseIntError(_) => "failed to parse integer",
+			Self::UnknownArgument(_) => "unknown argument",
+			Self::OutOfMemory => "out of memory",
+		}
+	}
+}
+
 impl fmt::Debug for ParseError<'_> {
+	#[optimize(size)]
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::TooManyRegs => fmt::Display::fmt("too many ranges", f),
@@ -311,7 +382,7 @@ impl fmt::Debug for ParseError<'_> {
 			Self::ParseIntError(r) => r.fmt(f),
 			Self::UnknownArgument(r) => match str::from_utf8(r) {
 				Ok(s) => write!(f, "unknown argument \"--{}\"", s),
-				Err(_) => write!(f, "argument is not valid UTF-8 {:x?}", r),
+				Err(_) => write!(f, "argument is not valid UTF-8"),
 			},
 			Self::OutOfMemory => fmt::Display::fmt("out of memory", f),
 		}
@@ -319,6 +390,7 @@ impl fmt::Debug for ParseError<'_> {
 }
 
 impl From<OutOfMemory> for ParseError<'_> {
+	#[inline(always)]
 	fn from(_: OutOfMemory) -> Self {
 		Self::OutOfMemory
 	}
