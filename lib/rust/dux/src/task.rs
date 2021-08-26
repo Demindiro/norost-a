@@ -80,6 +80,13 @@ pub fn spawn_elf(
 	// This struct ensures no memory is leaked.
 	struct DropRanges([Option<(Page, usize)>; 8], usize);
 
+	impl DropRanges {
+		fn push(&mut self, addr: Page, count: usize) {
+			self.0[self.1] = Some((addr, count));
+			self.1 += 1;
+		}
+	}
+
 	impl Drop for DropRanges {
 		fn drop(&mut self) {
 			for (addr, count) in self.0[..self.1].iter().copied().map(Option::unwrap) {
@@ -139,8 +146,7 @@ pub fn spawn_elf(
 				to_zero.iter_mut().for_each(kernel::Page::zeroize);
 			}
 
-			reserved_ranges.0[reserved_ranges.1] = Some((addr, mem_pages));
-			reserved_ranges.1 += 1;
+			reserved_ranges.push(addr, mem_pages);
 
 			let copy = unsafe {
 				let addr = addr.as_ptr().cast::<u8>().add(page_offset);
@@ -190,8 +196,7 @@ pub fn spawn_elf(
 		let addr =
 			mem::allocate_range(None, stack_pages, RWX::RW).map_err(SpawnElfError::ReserveError)?;
 
-		reserved_ranges.0[reserved_ranges.1] = Some((addr, stack_pages));
-		reserved_ranges.1 += 1;
+		reserved_ranges.push(addr, stack_pages);
 
 		let l = object_entries.len();
 

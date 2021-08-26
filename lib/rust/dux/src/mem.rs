@@ -290,7 +290,8 @@ pub enum UnreserveError {
 
 pub fn unreserve_range(address: Page, _count: usize) -> Result<(), UnreserveError> {
 	util::spin_lock(&GLOBAL.part.reserved_capacity, 0, |_capacity| {
-		GLOBAL.reserved_entries[..GLOBAL.part.reserved_count.get()]
+		let count = GLOBAL.part.reserved_count.get();
+		let i = GLOBAL.reserved_entries[..count]
 			.binary_search_by(|e| {
 				e.start
 					.get()
@@ -299,8 +300,16 @@ pub fn unreserve_range(address: Page, _count: usize) -> Result<(), UnreserveErro
 					.cmp(&address.as_ptr())
 			})
 			// TODO check for size
-			.map(|i| GLOBAL.reserved_entries[i].start.set(None))
-			.map_err(|_| UnreserveError::InvalidAddress)
+			.map_err(|_| UnreserveError::InvalidAddress)?;
+		let count = count - 1;
+		for i in i..count {
+			let e = &GLOBAL.reserved_entries[i + 1];
+			GLOBAL.reserved_entries[i].start.set(e.start.get());
+			GLOBAL.reserved_entries[i].end.set(e.end.get());
+			//.map(|i| GLOBAL.reserved_entries.start.set(None))
+		}
+		GLOBAL.part.reserved_count.set(count);
+		Ok(())
 	})
 }
 

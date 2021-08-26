@@ -72,9 +72,9 @@ impl Page {
 
 impl fmt::Debug for Page {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		stringify!(Page, "(").fmt(f)?;
+		f.write_str(concat!(stringify!(Page), "("))?;
 		fmt::Pointer::fmt(self, f)?;
-		")".fmt(f)
+		f.write_str(")")
 	}
 }
 
