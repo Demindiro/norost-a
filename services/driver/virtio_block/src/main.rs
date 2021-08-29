@@ -138,7 +138,9 @@ fn main() {
 		let length = rxq.length / virtio_block::Sector::SIZE;
 		let offset = rxq.offset * ratio as u64;
 
-		let mut wait = || unsafe { kernel::io_wait(u64::MAX) };
+		//let mut wait = || unsafe { kernel::io_wait(u64::MAX) };
+		// FIXME it is _still_ not fixed (wtf?)
+		let mut wait = || unsafe { kernel::io_wait(10_000) };
 
 		match kernel::ipc::Op::try_from(op) {
 			Ok(kernel::ipc::Op::Read) => {
