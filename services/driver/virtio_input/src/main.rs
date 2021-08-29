@@ -32,16 +32,8 @@ use core::ptr;
 use kernel::Page;
 
 /// Write buffer for data read.
-///
-/// 4 KiB should be quite enough.
-static mut BUFFER: [u8; 1 << 12] = [0; 1 << 12];
-
-// We spin it right round baby right round
-/// The last index of data read from UART.
-static mut NEW_INDEX: u16 = 0;
-
-/// The last index of data read from the buffer
-static mut USED_INDEX: u16 = 0;
+static mut BUFFER: Option<dux::Page> = None;
+static mut BUFFER_WRITTEN: u16 = 0;
 
 static mut DEVICE: Option<virtio_input::Device> = None;
 
@@ -88,9 +80,6 @@ impl KeyModifiers {
 
 #[export_name = "main"]
 fn main() {
-	// FIXME move this to rtbegin
-	unsafe { dux::init() };
-
 	// Parse arguments
 	let mut pci = None;
 	let mut bars = [None; 6];
@@ -150,7 +139,18 @@ fn main() {
 	);
 
 	// Set up device
-	let dev = virtio::pci::new_device(pci, &virt_bars[..], virtio_input::Device::new)
+	let alloc = |count| {
+		let addr = virt;
+		let ret = unsafe { kernel::mem_alloc(addr, count, 0b11) };
+		match ret.status {
+			0 => {
+				virt = virt.wrapping_add(size);
+				Ok(dux::Page::new(ptr::NonNull::new(addr).unwrap()).unwrap())
+			}
+			err => Err(err),
+		}
+	};
+	let dev = virtio::pci::new_device(pci, &virt_bars[..], virtio_input::Device::new, alloc)
 		.expect("failed to create device");
 
 	// Add self to registry
@@ -166,75 +166,44 @@ fn main() {
 		DEVICE = Some(dev);
 	}
 
+	let ipc = dux::ipc::queue::IPC::<4>::new();
+
 	loop {
-		let rx = dux::ipc::receive();
+		let rx = ipc.receive();
 
-		match kernel::ipc::Op::try_from(rx.opcode.unwrap()) {
-			Ok(kernel::ipc::Op::Read) => {
-				// Figure out object to read.
-				let data = unsafe {
-					core::slice::from_raw_parts_mut(rx.data.unwrap().as_ptr().cast(), rx.length)
-				};
-				let path = rx.name.map(|name| unsafe {
-					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rx.name_len.into())
-				});
-
+		match dux::ipc::Op::from_flags(rx.flags_user) {
+			Ok(dux::ipc::Op::Map) => {
 				let mut length = 0;
 
 				unsafe {
 					// Wait until data is available
 					// TODO this blocks writes from other tasks.
-					while USED_INDEX == NEW_INDEX {
+					while BUFFER_WRITTEN == 0 {
 						process_events();
 						kernel::io_wait(50_000);
 					}
-
-					while USED_INDEX != NEW_INDEX && length < data.len() {
-						data[length] = BUFFER[usize::from(USED_INDEX) & (BUFFER.len() - 1)];
-						USED_INDEX = USED_INDEX.wrapping_add(1);
-						length += 1;
-					}
 				}
 
-				// Send completion event
-				*dux::ipc::transmit() = kernel::ipc::Packet {
-					uuid: kernel::ipc::UUID::INVALID,
-					opcode: Some(kernel::ipc::Op::Read.into()),
+				// Send data
+				*ipc.transmit() = dux::ipc::Packet {
 					name: None,
-					name_len: 0,
-					flags: 0,
+					name_length: 0,
+					flags_user: 0,
+					flags_kernel: 0b011_00_10_00, // WR & move data page
 					id: 0,
 					address: rx.address,
-					data: None,
-					length,
-					offset: 0,
+					data: unsafe { BUFFER_WRITTEN },
+					data_length: length,
+					data_offset: 0,
 				};
+
+				// Acquire new page for buffer
 			}
 			// Just ignore other requests for now
 			_ => (),
 		}
 
-		// Free ranges
-		if let Some(data) = rx.data {
-			let len = dux::Page::min_pages_for_range(rx.length);
-			let ret = unsafe { kernel::mem_dealloc(data.as_ptr() as *mut _, len) };
-			assert_eq!(ret.status, 0);
-			dux::ipc::add_free_range(
-				dux::Page::new(core::ptr::NonNull::new(data.as_ptr() as *mut _).unwrap()).unwrap(),
-				len,
-			)
-			.unwrap();
-		}
-		if let Some(name) = rx.name {
-			let len = dux::Page::min_pages_for_range(rx.name_len.into());
-			let ret = unsafe { kernel::mem_dealloc(name.as_ptr() as *mut _, len) };
-			assert_eq!(ret.status, 0);
-			dux::ipc::add_free_range(
-				dux::Page::new(core::ptr::NonNull::new(name.as_ptr() as *mut _).unwrap()).unwrap(),
-				len,
-			)
-			.unwrap();
-		}
+		// There is no need to free ranges as no free ranges were added anyways.
 	}
 }
 

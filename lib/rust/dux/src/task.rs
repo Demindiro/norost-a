@@ -60,49 +60,29 @@ impl From<Address> for usize {
 }
 
 #[derive(Debug)]
-pub enum SpawnElfError {
-	ReserveError(mem::ReserveError),
+pub enum SpawnElfError<M> {
 	BadRWXFlags,
+	AllocError(M),
 }
 
 /// Create a new task from an ELF file.
-pub fn spawn_elf(
+pub fn spawn_elf<M>(
 	data: &[kernel::Page],
-	object_entries: &mut dyn ExactSizeIterator<Item = (Address, kernel::ipc::UUID)>,
+	mut object_entries: impl ExactSizeIterator<Item = Address>,
 	arguments: &[&[u8]],
-) -> Result<Address, SpawnElfError> {
+	mut allocate_range: impl FnMut(usize) -> Result<Page, M>,
+) -> Result<Address, SpawnElfError<M>> {
 	use xmas_elf::ElfFile;
 
 	// SAFETY: the data is guaranteed to be properly aligned and have the proper size
 	let data =
 		unsafe { core::slice::from_raw_parts(data.as_ptr().cast::<u8>(), data.len() * Page::SIZE) };
 
-	// This struct ensures no memory is leaked.
-	struct DropRanges([Option<(Page, usize)>; 8], usize);
-
-	impl DropRanges {
-		fn push(&mut self, addr: Page, count: usize) {
-			self.0[self.1] = Some((addr, count));
-			self.1 += 1;
-		}
-	}
-
-	impl Drop for DropRanges {
-		fn drop(&mut self) {
-			for (addr, count) in self.0[..self.1].iter().copied().map(Option::unwrap) {
-				// SAFETY: Nothing can (should?) be using these ranges anymore.
-				unsafe { mem::deallocate_range(addr, count) };
-			}
-		}
-	}
-
 	// SAFETY: all zeroes TaskSpawnMapping is valid.
 	let mut mappings =
 		unsafe { core::mem::MaybeUninit::<[kernel::TaskSpawnMapping; 96]>::zeroed().assume_init() };
 	let mut i = 0;
 	let mut pc = 0;
-
-	let mut reserved_ranges = DropRanges([None; 8], 0);
 
 	let elf = ElfFile::new(data).unwrap();
 	for ph in elf
@@ -132,8 +112,7 @@ pub fn spawn_elf(
 
 		if ph.flags().is_write() {
 			// We must copy the pages as they may be written to.
-			let addr =
-				mem::allocate_range(None, mem_pages, flags).map_err(SpawnElfError::ReserveError)?;
+			let addr = allocate_range(mem_pages).map_err(SpawnElfError::AllocError)?;
 
 			// FIXME ensure there is no garbage in the pages.
 			//
@@ -145,8 +124,6 @@ pub fn spawn_elf(
 				);
 				to_zero.iter_mut().for_each(kernel::Page::zeroize);
 			}
-
-			reserved_ranges.push(addr, mem_pages);
 
 			let copy = unsafe {
 				let addr = addr.as_ptr().cast::<u8>().add(page_offset);
@@ -193,10 +170,7 @@ pub fn spawn_elf(
 	{
 		// Allocate
 		let stack_pages = 16;
-		let addr =
-			mem::allocate_range(None, stack_pages, RWX::RW).map_err(SpawnElfError::ReserveError)?;
-
-		reserved_ranges.push(addr, stack_pages);
+		let addr = allocate_range(stack_pages).map_err(SpawnElfError::AllocError)?;
 
 		let l = object_entries.len();
 
@@ -241,11 +215,9 @@ pub fn spawn_elf(
 			// Push address + UUID entries on the stack
 			sp = sp.cast::<usize>().sub(1).cast();
 			sp.cast::<usize>().write(object_entries.len());
-			for (addr, uuid) in object_entries {
+			for addr in object_entries {
 				sp = sp.cast::<Address>().sub(1).cast();
 				sp.cast::<Address>().write(addr);
-				sp = sp.cast::<kernel::ipc::UUID>().sub(1).cast();
-				sp.cast::<kernel::ipc::UUID>().write(uuid);
 			}
 		}
 

@@ -18,7 +18,7 @@ pub type Syscall = extern "C" fn(
 	a3: usize,
 	a4: usize,
 	a5: usize,
-	task: task::Task,
+	task: &task::Task,
 ) -> Return;
 
 /// The FFI-safe return value of syscalls
@@ -147,7 +147,7 @@ mod sys {
 			$block:block
 		} => {
 			$(#[$outer])*
-			pub extern "C" fn $fn($a0: usize, $a1: usize, $a2: usize, $a3: usize, $a4: usize, $a5: usize, $task: task::Task) -> Return {
+			pub extern "C" fn $fn($a0: usize, $a1: usize, $a2: usize, $a3: usize, $a4: usize, $a5: usize, $task: &task::Task) -> Return {
 				$block
 			}
 		};
@@ -212,35 +212,22 @@ mod sys {
 			task.wait_duration(time);
 			task.process_io(task::Executor::current_address());
 
-			crate::task::Executor::next()
+			task::Executor::next()
 		}
 	}
 
 	sys! {
 		/// Resize the task's IPC buffers to be able to hold the given amount of entries.
-		[task] io_set_queues(packet_table, mask_bits, free_pages, free_pages_size) {
+		[task] io_set_queues(packet_table, mask_bits) {
 			logcall!(
-				"io_set_queues 0x{:x}, {}, 0x{:x}, {}",
+				"io_set_queues 0x{:x}, {}",
 				packet_table,
 				mask_bits,
-				free_pages,
-				free_pages_size,
 			);
-			let a = match NonNull::new(packet_table as *mut _) {
-				Some(pt) => {
-					let mb = mask_bits as u8;
-					let fp = NonNull::new(free_pages as *mut _);
-					let fs = free_pages_size;
-					let r = fp.map(|fp| unsafe { crate::task::ipc::IPC::new(pt, mb, fp, fs).unwrap() });
-					if r.is_none() {
-						return Return(Status::NullArgument, 0);
-					}
-					r
-				}
-				None => None,
-			};
-			task.set_queues(a);
-			Return(Status::Ok, 0)
+			match task.set_queues(NonNull::new(packet_table as *mut _), mask_bits as u8) {
+				Ok(()) => Return(Status::Ok, 0),
+				Err(task::ipc::SetQueuesError::TooLarge) => Return(Status::TooLong, 0),
+			}
 		}
 	}
 
@@ -259,17 +246,18 @@ mod sys {
 	sys! {
 		/// Return from a notification handler.
 		[task] io_notify_return(defer_to) {
+			let defer_to = defer_to as u32;
 			logcall!("io_notify_return");
 			extern "C" {
-				fn syscall_io_notify_return(task: crate::task::Task) -> !;
-				fn syscall_io_notify_defer(from: task::Task, from_address: task::Address, to_address: task::Address) -> !;
+				fn syscall_io_notify_return(task: &task::Task) -> !;
+				fn syscall_io_notify_defer(from: &task::Task, from_address: task::TaskID, to_address: task::TaskID) -> !;
 			}
 			unsafe {
-				if defer_to == usize::MAX {
-					syscall_io_notify_return(task.clone());
+				if defer_to == u32::MAX {
+					syscall_io_notify_return(task);
 				} else {
 					let from_addr = task::Executor::current_address();
-					let to_addr = task::Address::from(defer_to);
+					let to_addr = task::TaskID::from(defer_to);
 					syscall_io_notify_defer(task.clone(), from_addr, to_addr);
 				}
 			}
@@ -360,14 +348,10 @@ mod sys {
 				}
 			}
 			arch::set_supervisor_userpage_access(false);
-			let task = Task::new(vms).unwrap();
 			logcall!("  pc  {:p}", program_counter as *const ());
 			logcall!("  sp  {:p}", stack_pointer as *const ());
-			task.set_pc(program_counter as *const ());
-			task.set_stack_pointer(stack_pointer as *const ());
-			let group = Group::get(0).unwrap();
-			let id = group.insert(task).unwrap();
-			Return(Status::Ok, id)
+			let id = Task::new(vms, program_counter, stack_pointer).unwrap();
+			Return(Status::Ok, usize::try_from(u32::from(id)).unwrap())
 		}
 	}
 
@@ -534,9 +518,10 @@ mod sys {
 		/// the calling tasks' address.
 		[_] sys_registry_add(name, name_len, address) {
 			use task::registry;
-			let address = (address == usize::MAX)
+			let address = address as u32;
+			let address = (address == u32::MAX)
 				.then(task::Executor::current_address)
-				.unwrap_or(task::Address::todo(address));
+				.unwrap_or(task::TaskID::from(address));
 			arch::set_supervisor_userpage_access(true);
 			let name = unsafe { core::slice::from_raw_parts(name as *const u8, name_len.into()) };
 			let ret = match registry::add(name, address) {
@@ -556,7 +541,7 @@ mod sys {
 			arch::set_supervisor_userpage_access(true);
 			let name = unsafe { core::slice::from_raw_parts(name as *const u8, name_len.into()) };
 			let ret = task::registry::get(name)
-				.map(|addr| Return(Status::Ok, addr.into()))
+				.map(|addr| Return(Status::Ok, usize::from(addr)))
 				.unwrap_or(Return(Status::NotFound, 0));
 			arch::set_supervisor_userpage_access(false);
 			ret

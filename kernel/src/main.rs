@@ -402,7 +402,7 @@ extern "C" fn main(
 		None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
 		None, None,
 	];
-	let mut entry = core::ptr::null();
+	let mut entry = 0;
 	// SAFETY: a valid init pointer and size should have been passed by boot.s.
 	let init = unsafe { core::slice::from_raw_parts(init, init_size) };
 	elf::parse(init.as_ref(), &mut segments[..], &mut entry);
@@ -413,7 +413,7 @@ extern "C" fn main(
 	arch::VMS::clear_identity_maps();
 
 	// Create init task and map pages.
-	let init = task::Task::new(arch::VMS::current()).expect("Failed to create task");
+	let init = task::Task::new(arch::VMS::current(), entry, 0).expect("Failed to create task");
 	for s in segments.iter_mut().filter_map(|s| s.as_mut()) {
 		let mut a = s.address;
 		while let Some(ppn) = s.ppn.pop_base() {
@@ -434,9 +434,6 @@ extern "C" fn main(
 		}
 		arch::set_supervisor_userpage_access(false);
 	}
-	init.set_pc(entry);
-
-	task::Group::new(init).expect("failed to create init task group");
 
 	let _ = (boot_args, stdout, model);
 

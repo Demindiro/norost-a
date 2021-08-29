@@ -112,12 +112,13 @@ impl<'a> Device<'a> {
 	/// Setup an input device
 	///
 	/// This is meant to be used as a handler by the `virtio` crate.
-	pub fn new(
+	pub fn new<R>(
 		common: &'a virtio::pci::CommonConfig,
 		device: &'a virtio::pci::DeviceConfig,
 		notify: virtio::pci::Notify<'a>,
 		isr: &'a virtio::pci::ISR,
-	) -> Result<Self, SetupError> {
+		mut allocate_range: impl FnMut(usize) -> Result<dux::Page, R>,
+	) -> Result<Self, SetupError<R>> {
 		let features = 0;
 		common.device_feature_select.set(0.into());
 
@@ -139,7 +140,7 @@ impl<'a> Device<'a> {
 			virtio::queue::Queue::<'a>::new(common, 1, Self::MAX_STATUS, None).expect("OOM");
 
 		// Push events to the event queue for the device to use.
-		let events = dux::mem::allocate_range(None, 1, dux::RWX::RW).unwrap();
+		let events = allocate_range(1).map_err(SetupError::AllocError)?;
 		let events = events.as_non_null_ptr().cast::<InputEvent>();
 
 		let ev_ptr = events.as_ptr() as usize;
@@ -243,7 +244,9 @@ impl<'a> Device<'a> {
 impl virtio::pci::Device for Device<'_> {}
 
 #[derive(Debug)]
-pub enum SetupError {}
+pub enum SetupError<R> {
+	AllocError(R),
+}
 
 #[derive(Debug)]
 pub enum ReceiveError {}

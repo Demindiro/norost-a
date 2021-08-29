@@ -218,8 +218,15 @@ fn main() {
 	};
 
 	// Reserve the UART interrupt.
-	let ret = unsafe { kernel::sys_reserve_interrupt(0xa) };
-	assert_eq!(ret.status, 0, "failed to reserve interrupt");
+	loop {
+		let ret = unsafe { kernel::sys_reserve_interrupt(0xa) };
+		match ret.status {
+			0 => break,
+			11 => panic!("interrupt already reserved"),
+			12 => continue,
+			_ => panic!("failed to reserve interrupt: {}", ret.status),
+		}
+	}
 
 	// Enable UART data available interrupts.
 	interrupt_data_available(true);

@@ -39,7 +39,7 @@ extern "C" {
 	/// Begins running the given task.
 	// Task _is_ FFI-safe you stupid fucking compiler.
 	#[allow(improper_ctypes)]
-	pub fn trap_start_task(task: crate::task::Task) -> !;
+	pub fn trap_start_task(task: &crate::task::Task) -> !;
 }
 
 /// Initialize arch-specific structures, such as the interrupt table

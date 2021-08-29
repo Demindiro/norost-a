@@ -4,7 +4,8 @@
 //! "regular" IPC, hence why notifications are treated as a separate thing.
 
 use core::mem;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
+use core::sync::atomic::Ordering;
 
 /// A pointer to a userspace notification handler
 pub struct Handler(NonNull<()>);
@@ -39,20 +40,16 @@ pub enum SendError {
 }
 
 impl super::Task {
-	/// Send a notification to this task.
-	pub fn send_notification(&self) -> Result<(), SendError> {
-		self.inner()
-			.notification_handler
-			.as_ref()
-			.map(|handler| {
-				handler.call();
-			})
-			.ok_or(SendError::NoHandler)
-	}
-
 	/// Set the notification handler of this task, returning the previous
 	/// one, if any.
 	pub fn set_notification_handler(&self, handler: Option<Handler>) -> Option<Handler> {
-		mem::replace(&mut self.inner().notification_handler, handler)
+		let handler = handler
+			.as_ref()
+			.map(Handler::as_ptr)
+			.unwrap_or_else(ptr::null);
+		let handler = self
+			.notification_handler
+			.swap(handler as *mut _, Ordering::Relaxed);
+		NonNull::new(handler).map(|c| c.cast()).map(Handler)
 	}
 }

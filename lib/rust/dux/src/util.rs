@@ -56,6 +56,48 @@ impl_atomic!(AtomicU16, u16);
 impl_atomic!(AtomicU32, u32);
 impl_atomic!(AtomicUsize, usize);
 
+/// A spinlock using the smallest, optimal integer for fast spinlocks (i.e. 32 bits for RISC-V)
+pub struct SpinLock {
+	lock: AtomicU32,
+}
+
+impl SpinLock {
+	pub type Lock = AtomicU32;
+
+	pub const fn new() -> Self {
+		Self {
+			lock: AtomicU32::new(0),
+		}
+	}
+
+	pub fn lock(&self) -> SpinLockGuard<AtomicU32> {
+		let mut i = 0u8;
+		loop {
+			match self
+				.lock
+				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
+			{
+				Ok(_) => {
+					return SpinLockGuard {
+						lock: &self.lock,
+						value: 0,
+					}
+				}
+				Err(_) => {
+					i = (i + 1) & 0xf;
+					(i == 0).then(|| unsafe { kernel::io_wait(0) });
+				}
+			}
+		}
+	}
+
+	pub unsafe fn unlock(&self) {
+		self.lock.store(0, Ordering::Release);
+	}
+}
+
+unsafe impl Sync for SpinLock {}
+
 /// Attempt to store a certain value in an atomic variable and call the closure with the original.
 ///
 /// If the original value is equal to the given value, it will try again until it no longer matches.
@@ -82,7 +124,7 @@ where
 	/// The value that should be put in the lock on release.
 	///
 	/// This *SHOULD* not match that of the original lock value.
-	pub value: T::Inner,
+	value: T::Inner,
 }
 
 #[derive(Debug)]

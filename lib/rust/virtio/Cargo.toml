@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 kernel = { path = "../kernel/", package = "syscalls" }
+dux = { path = "../dux/" }
 pci = { path = "../pci/" }
 simple_endian = { path = "../../../thirdparty/rust/simple-endian/" }
 vcell = { path = "../../../thirdparty/rust/vcell/" }

@@ -226,8 +226,7 @@ range! {
 	SHARED_ALLOC => (1 << (44 - 12 + 1)) / Page::SIZE,
 	HART_STACKS => MAX_HARTS * Page::SIZE,
 	DEVICE_TREE => 1 << 16,
-	TASK_GROUPS => 1 << 20,
-	TASK_DATA => 1 << 30,
+	TASKS => 1 << 30,
 	// https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic.adoc
 	PLIC => 0x4000000,
 	REGISTRY => 1 << 20,

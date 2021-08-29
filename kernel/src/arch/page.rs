@@ -7,6 +7,7 @@ use core::ptr::NonNull;
 
 /// A representation of a raw page.
 #[repr(align(4096))]
+#[repr(C)]
 pub struct PageData([u8; Self::SIZE]);
 
 impl PageData {

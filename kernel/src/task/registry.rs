@@ -2,7 +2,7 @@
 //!
 //! This is used as a way to identify tasks with human-readable names.
 
-use super::Address;
+use super::*;
 use crate::memory::reserved;
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -37,7 +37,7 @@ unsafe impl Sync for LOL {}
 struct Entry {
 	name_len: u8,
 	name: [u8; 31],
-	address: Address,
+	address: TaskID,
 }
 
 pub enum AddError {
@@ -46,7 +46,7 @@ pub enum AddError {
 	RegistryFull,
 }
 
-pub fn add(name: &[u8], address: Address) -> Result<(), AddError> {
+pub fn add(name: &[u8], address: TaskID) -> Result<(), AddError> {
 	if name.len() > 31 {
 		return Err(AddError::NameTooLong);
 	}
@@ -69,7 +69,7 @@ pub fn add(name: &[u8], address: Address) -> Result<(), AddError> {
 	}
 }
 
-pub fn get(name: &[u8]) -> Option<Address> {
+pub fn get(name: &[u8]) -> Option<TaskID> {
 	let len = lock();
 	let e = REGISTRY.0[..len]
 		.iter()

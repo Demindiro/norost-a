@@ -36,7 +36,6 @@ impl<'a> List<'a> {
 			let data = unsafe { slice::from_raw_parts(self.data.as_ptr().cast(), len) };
 			let start = usize::try_from(e.name_offset).unwrap();
 			Entry {
-				uuid: e.uuid,
 				name: start
 					.checked_add(e.name_length.into())
 					.and_then(|end| data.get(start..end)),
@@ -58,8 +57,6 @@ impl<'a> List<'a> {
 
 /// A single entry in an object list.
 pub struct Entry<'a> {
-	/// The UUID of the object.
-	pub uuid: kernel::ipc::UUID,
 	/// The name of the object, if any.
 	///
 	/// This will also be `None` if the name couldn't be fetched, i.e `RawEntry::name_length` or
@@ -72,7 +69,6 @@ pub struct Entry<'a> {
 impl fmt::Debug for Entry<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let mut d = f.debug_struct("Entry");
-		d.field("uuid", &self.uuid);
 		self.name.map(|name| {
 			let _ = str::from_utf8(name)
 				.map(|name| {
@@ -90,7 +86,6 @@ impl fmt::Debug for Entry<'_> {
 /// A single raw entry in an object list.
 #[repr(C)]
 pub struct RawEntry {
-	pub uuid: kernel::ipc::UUID,
 	pub size: u64,
 	pub name_offset: u32,
 	pub name_length: u16,
@@ -112,13 +107,17 @@ impl<'b> Iterator for Iter<'_, 'b> {
 }
 
 /// A builder for creating `List´ structures. It allocates pages as needed.
-pub struct Builder {
+pub struct Builder<D>
+where
+	D: FnOnce(crate::Page, usize),
+{
 	address: crate::Page,
 	page_count: usize,
 	max_pages: usize,
 	strings_offset: usize,
 	index: usize,
 	max_entries: usize,
+	deallocate_pages: Option<D>,
 }
 
 #[derive(Debug)]
@@ -130,7 +129,10 @@ pub enum BuilderAddError {
 	MaxEntriesExceeded,
 }
 
-impl Builder {
+impl<D> Builder<D>
+where
+	D: FnOnce(crate::Page, usize),
+{
 	/// Create a new builder. This does not allocate any pages but it does reserve some.
 	///
 	/// The `max_entries` and `max_string_len` are used to determine how many pages need
@@ -139,18 +141,28 @@ impl Builder {
 	pub fn new(
 		max_entries: usize,
 		max_string_len: usize,
+		allocate_pages: impl FnOnce(usize) -> Result<crate::Page, crate::mem::ReserveError>,
+		deallocate_pages: D,
 	) -> Result<Self, crate::mem::ReserveError> {
 		let strings_offset = mem::size_of::<usize>() + max_entries * mem::size_of::<RawEntry>();
 		let max_size = strings_offset + max_string_len;
 		let max_pages = crate::Page::min_pages_for_range(max_size);
-		crate::mem::reserve_range(None, max_pages).map(|address| Self {
+		allocate_pages(max_pages).map(|address| Self {
 			address,
 			page_count: 0,
 			max_pages,
 			strings_offset,
 			index: 0,
 			max_entries,
+			deallocate_pages: Some(deallocate_pages),
 		})
+	}
+
+	/// Return the raw allocated pages.
+	pub fn into_raw(self) -> (crate::Page, usize) {
+		let ret = (self.address, self.page_count);
+		mem::forget(self);
+		ret
 	}
 
 	/// Get the slice the builder is operating on.
@@ -167,12 +179,7 @@ impl Builder {
 
 	/// Add an entry
 	#[inline]
-	pub fn add(
-		&mut self,
-		uuid: kernel::ipc::UUID,
-		name: &[u8],
-		size: u64,
-	) -> Result<(), BuilderAddError> {
+	pub fn add(&mut self, name: &[u8], size: u64) -> Result<(), BuilderAddError> {
 		let name_length = name
 			.len()
 			.try_into()
@@ -210,7 +217,6 @@ impl Builder {
 				.cast::<RawEntry>()
 				.add(self.index)
 				.write(RawEntry {
-					uuid,
 					size,
 					name_offset,
 					name_length,
@@ -241,13 +247,12 @@ impl Builder {
 	}
 }
 
-impl Drop for Builder {
+impl<D> Drop for Builder<D>
+where
+	D: FnOnce(crate::Page, usize),
+{
 	fn drop(&mut self) {
-		if self.page_count > 0 {
-			let ret = unsafe { kernel::mem_dealloc(self.address.as_ptr(), self.page_count) };
-			assert_eq!(ret.status, 0, "failed to free memory: {}", ret.value);
-		}
-		crate::mem::unreserve_range(self.address, self.max_pages)
-			.expect("failed to unreserve range");
+		debug_assert!(self.deallocate_pages.is_some());
+		unsafe { (self.deallocate_pages.take().unwrap_unchecked())(self.address, self.max_pages) }
 	}
 }

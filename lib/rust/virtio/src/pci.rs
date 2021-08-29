@@ -210,14 +210,16 @@ impl Notify<'_> {
 }
 
 /// Setup a new virtio device on a PCI bus.
-pub fn new_device<'a, D, H, R>(
+pub fn new_device<'a, D, H, R, A, AR>(
 	header: pci::Header<'a>,
 	base_address_regions: &[Option<NonNull<()>>],
 	handler: H,
+	allocate_range: A,
 ) -> Result<D, R>
 where
 	D: Device + 'a,
-	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, Notify<'a>, &'a ISR) -> Result<D, R>,
+	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, Notify<'a>, &'a ISR, A) -> Result<D, R>,
+	A: FnMut(usize) -> Result<dux::Page, AR>,
 {
 	let cmd = pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK;
 
@@ -354,7 +356,13 @@ where
 		})
 		.expect("No isr config map defined");
 
-	handler(common_config, device_config, notify_config, isr_config)
+	handler(
+		common_config,
+		device_config,
+		notify_config,
+		isr_config,
+		allocate_range,
+	)
 }
 
 pub trait Device {}

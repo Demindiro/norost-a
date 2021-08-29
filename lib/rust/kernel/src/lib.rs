@@ -48,59 +48,45 @@ pub mod ipc {
 	use core::num::NonZeroU8;
 	use core::ptr;
 	use core::ptr::NonNull;
+	use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
-	/// An UUID used to uniquely identify objects.
-	#[repr(C)]
-	#[derive(Clone, Copy, Default)]
-	pub struct UUID {
-		x: u64,
-		y: u64,
-	}
+	/// Structure to uniquely identify a task.
+	#[derive(Clone, Copy)]
+	#[repr(transparent)]
+	pub struct TaskID(u32);
 
-	impl UUID {
-		/// A UUID that indicates the invalid / no-UUID value.
-		pub const INVALID: Self = Self::new(0);
+	impl TaskID {
+		pub const INVALID: Self = Self(u32::MAX);
+		pub const KERNEL: Self = Self(u32::MAX);
 
-		pub const fn new(uuid: u128) -> Self {
-			Self {
-				x: uuid as u64,
-				y: (uuid >> 64) as u64,
-			}
+		pub const fn new(id: u32) -> Self {
+			Self(id)
 		}
 	}
 
-	impl From<u128> for UUID {
-		fn from(uuid: u128) -> Self {
-			Self::new(uuid)
+	impl Default for TaskID {
+		fn default() -> Self {
+			Self::INVALID
 		}
 	}
 
-	impl From<UUID> for u128 {
-		fn from(uuid: UUID) -> Self {
-			uuid.x as u128 | ((uuid.y as u128) << 64)
+	impl From<u32> for TaskID {
+		fn from(n: u32) -> Self {
+			Self(n)
 		}
 	}
 
-	impl fmt::Debug for UUID {
+	impl From<TaskID> for u32 {
+		fn from(id: TaskID) -> Self {
+			id.0
+		}
+	}
+
+	impl fmt::Debug for TaskID {
 		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-			write!(f, concat!(stringify!(UUID), "({})"), self)
-		}
-	}
-
-	impl fmt::Display for UUID {
-		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-			let n = u128::from(*self);
-			write!(f, "{:02x}{:02x}", n as u8, (n >> 8) as u8)?;
-			for i in 1..8 {
-				"-".fmt(f)?;
-				write!(
-					f,
-					"{:02x}{:02x}",
-					(n >> (16 * i)) as u8,
-					(n >> (24 * i)) as u8
-				)?;
-			}
-			Ok(())
+			"TaskID(".fmt(f)?;
+			self.0.fmt(f)?;
+			")".fmt(f)
 		}
 	}
 
@@ -108,75 +94,43 @@ pub mod ipc {
 	#[derive(Clone, Debug, Default)]
 	#[repr(C)]
 	pub struct Packet {
-		pub uuid: UUID,
 		pub data: Option<NonNull<Page>>,
 		pub name: Option<NonNull<Page>>,
-		pub offset: u64,
-		pub length: usize,
-		pub address: usize,
-		pub flags: u16,
-		pub name_len: u16,
-		pub id: u8,
-		pub opcode: Option<NonZeroU8>,
+		pub data_offset: u64,
+		pub data_length: u32,
+		pub address: TaskID,
+		pub flags_user: u16,
+		pub flags_kernel: u16,
+		pub name_length: u16,
+		pub id: u16,
 	}
 
-	#[derive(Debug)]
-	#[repr(u8)]
-	pub enum Op {
-		Read = 1,
-		Write = 2,
-		Info = 3,
-		List = 4,
-		MapRead = 5,
-		MapWrite = 6,
-		MapReadWrite = 7,
-		MapExec = 8,
-		MapReadExec = 9,
-		MapReadCow = 10,
-		MapExecCow = 11,
-		MapReadExecCow = 12,
-	}
-
-	impl From<Op> for NonZeroU8 {
-		fn from(op: Op) -> Self {
-			// SAFETY: we defined values for each of the variants.
-			NonZeroU8::new(op as u8).unwrap()
-		}
-	}
-
-	#[derive(Debug)]
-	pub struct UnknownOp;
-
-	impl TryFrom<NonZeroU8> for Op {
-		type Error = UnknownOp;
-
-		fn try_from(op: NonZeroU8) -> Result<Self, Self::Error> {
-			let variant_count = mem::variant_count::<Self>();
-			if usize::from(op.get()) <= variant_count {
-				// SAFETY: there are no gaps in the variant list nor is the value out of bounds.
-				Ok(unsafe { mem::transmute(op) })
-			} else {
-				Err(UnknownOp)
-			}
-		}
+	impl Packet {
+		pub const ZEROED: Self = Self {
+			data: None,
+			name: None,
+			data_offset: 0,
+			data_length: 0,
+			address: TaskID::new(0),
+			flags_user: 0,
+			flags_kernel: 0,
+			name_length: 0,
+			id: 0,
+		};
 	}
 
 	#[repr(C)]
-	pub struct FreePage {
-		pub address: Option<NonNull<Page>>,
-		pub count: usize,
+	pub struct FreeRange {
+		pub address: AtomicPtr<Page>,
+		pub count: AtomicUsize,
 	}
 
-	impl fmt::Debug for FreePage {
+	impl FreeRange {}
+
+	impl fmt::Debug for FreeRange {
 		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-			f.debug_struct(stringify!(FreePage))
-				.field(
-					"address",
-					&self
-						.address
-						.map(|p| p.as_ptr())
-						.unwrap_or_else(ptr::null_mut),
-				)
+			f.debug_struct(stringify!(FreeRange))
+				.field("address", &self.address.load(Ordering::Relaxed))
 				.field("count", &self.count)
 				.finish()
 		}
@@ -203,14 +157,7 @@ mod riscv;
 pub use riscv::*;
 
 syscall!(saveall io_wait, 0, time: u64);
-syscall!(
-	io_set_queues,
-	1,
-	packets: *mut ipc::Packet,
-	mask_bits: u8,
-	free_pages: *mut ipc::FreePage,
-	free_pages_size: usize
-);
+syscall!(io_set_queues, 1, base: *mut (), mask_bits: u8);
 syscall!(io_set_notify_handler, 2, function: notification::Handler);
 
 syscall!(mem_alloc, 3, address: *mut Page, size: usize, flags: u8);

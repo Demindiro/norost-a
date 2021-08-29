@@ -1,28 +1,29 @@
 //! Structures & functions to facilitate inter-task communication
 
-use super::group::Group;
-use super::Address;
+use super::*;
+use crate::arch::vms::VirtualMemorySystem;
 use crate::arch::{self, Page, PageData};
 use core::cell::Cell;
+use core::convert::TryInto;
+use core::mem;
 use core::num::NonZeroU8;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
 use core::slice;
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
 /// An IPC packet.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Packet {
-	uuid: [u64; 2],
 	data: Option<NonNull<PageData>>,
 	name: Option<NonNull<PageData>>,
 	data_offset: u64,
-	data_length: usize,
-	address: Address,
-	flags: Flags,
+	data_length: u32,
+	address: TaskID,
+	flags_user: u16,
+	flags_kernel: Flags,
 	name_length: u16,
-	id: u8,
-	opcode: Option<NonZeroU8>,
+	id: u16,
 }
 
 /// IPC packet flags
@@ -61,144 +62,165 @@ impl Flags {
 	}
 }
 
-#[derive(Debug)]
-struct InvalidOp;
-
-#[derive(Debug)]
-pub struct TooLarge;
-
-#[derive(Debug)]
-enum PopFreeSlotError {
-	LockTimeout,
-	NoFreeSlots,
-}
-
-#[derive(Debug)]
-enum PushFreeSlotError {
-	LockTimeout,
-	Full,
+#[repr(C)]
+struct Indices {
+	transmit_queue_index: AtomicU32,
+	received_queue_index: AtomicU32,
+	free_packets_queue_index: AtomicU32,
+	free_ranges_list_size: AtomicU32,
 }
 
 /// A structure used for handling IPC.
+///
+/// Everything is laid out contiguously in memory, so only one pointer is necessary.
+#[derive(Default)]
+#[repr(C)]
 pub struct IPC {
-	/// The address of the packets buffer.
-	packets: NonNull<Packet>,
+	/// The base address of the shared IPC structure.
+	///
+	/// If no packets queue is specified, this is null.
+	base: Cell<Option<NonNull<u8>>>,
 	/// The index of the last processed transmit entry.
 	last_transmit_index: Cell<u16>,
+	/// The index of the last free packet slot entry.
+	last_free_index: Cell<u16>,
 	/// The mask of the ring buffers, which is `packet_count - 1`.
-	ring_mask: u16,
-	/// A list of address that can be freely mapped for IPC.
-	free_pages: NonNull<FreePage>,
-	/// The maximum amount of free pages.
-	max_free_pages: usize,
+	ring_mask: Cell<u16>,
 }
 
-impl IPC {
-	/// Create a new IPC structure.
-	///
-	/// # Safety
-	///
-	/// The address *must* point to user-owned memory and may never point to kernel-owned
-	/// memory.
-	///
-	/// # Returns
-	///
-	/// `Err(TooLarge)` if `mask_bits` is larger than `15`.
-	pub unsafe fn new(
-		packets: NonNull<Packet>,
-		mask_bits: u8,
-		free_pages: NonNull<FreePage>,
-		max_free_pages: usize,
-	) -> Result<Self, TooLarge> {
-		(mask_bits <= 15)
-			.then(|| Self {
-				packets,
-				last_transmit_index: Cell::new(0),
-				ring_mask: (1 << mask_bits) - 1,
-				free_pages,
-				max_free_pages,
-			})
-			.ok_or(TooLarge)
-	}
-
+impl super::Task {
 	/// Process IPC packets to be transmitted.
-	pub fn process_packets(&mut self, slf_task: &super::Task, slf_address: Address) {
-		use crate::arch::vms::VirtualMemorySystem;
-		slf_task.inner().shared_state.virtual_memory.activate(); // TODO do this beforehand and once only
+	pub fn process_io(&self, slf_address: TaskID) {
+		self.lock_transmit_queue();
+
+		let base = match self.ipc.base.get() {
+			Some(base) => base,
+			None => return, // Nothing to do
+		};
+
+		let mask = self.ipc.ring_mask.get();
+
+		self.virtual_memory.activate(); // TODO do this beforehand and once only
 		arch::set_supervisor_userpage_access(true);
-		let (tx_index, tx_slots) = self.transmit_ring();
-		let mut last_transmit_index = self.last_transmit_index.get();
+
+		let (tx_index, tx_slots) = IPC::transmit_queue(base, mask);
+
+		let mut last_transmit_index = self.ipc.last_transmit_index.get();
+
 		while last_transmit_index != tx_index {
-			let tx_pkt_slot = last_transmit_index & self.ring_mask;
-			let tx_pkt = unsafe { *self.packet(tx_slots[usize::from(tx_pkt_slot)]).unwrap() };
+			// Get a reference to the packet.
+			let tx_pkt_slot = last_transmit_index & mask;
+			let tx_pkt_slot = tx_slots[usize::from(tx_pkt_slot)].get();
+			let tx_pkt = match unsafe { IPC::packet(base, mask, tx_pkt_slot) } {
+				Some(pkt) => *pkt,
+				// "Get stuck" so the application developer hopefully has a quicker & easier time
+				// figuring out why no packets are transmitting.
+				None => break,
+			};
 
-			// Disallow sending packets to self since it's pointless + leads to potential aliasing
-			// bugs.
-			assert_ne!(tx_pkt.address, slf_address, "can't transmit to self");
+			let mut fail = || {
+				// Mark the packet as undelivered and put in received queue.
+				// TODO reserve flag bit
+				self.lock_received_queue();
+				let (rx_index, rx_slots) = unsafe { IPC::received_queue(base, mask) };
+				let i = rx_index.load(Ordering::Relaxed);
+				rx_slots[usize::from(i as u16 & mask)].set(tx_pkt_slot);
+				rx_index.store(i.wrapping_add(1), Ordering::Release);
+				last_transmit_index = last_transmit_index.wrapping_add(1);
+			};
 
-			let (group, task) = (tx_pkt.address.group(), tx_pkt.address.task());
-			let task = Group::get(group.into()).unwrap().task(task.into()).unwrap();
-
-			// TODO this is potentially terribly inefficient
-			//
-			// If ASIDs are available, then the impact is likely _okay_, but if there are
-			// no ASIDs then this has a huge context switching cost.
-			//
-			// It may be worth mapping the packet tables into kernel space.
-			task.inner().shared_state.virtual_memory.activate();
-
-			let task_ipc = match task.inner().ipc.as_mut() {
-				Some(ipc) => ipc,
+			// Get the task to send the packet to.
+			let task = match super::get(tx_pkt.address) {
+				Some(task) => task,
 				None => {
-					// TODO instead of waking up the task, we should just process it's entries
-					// without explicitly scheduling it.
-					slf_task.inner().wait_time = 0;
-					break;
+					fail();
+					continue;
 				}
 			};
-			let (rx_index, rx_slots) = task_ipc.received_ring();
-			let rx_pkt_slot = task_ipc.pop_free_slot().unwrap();
+
+			task.lock_received_queue();
+			let rx_base = match task.ipc.base.get() {
+				Some(rx_base) => rx_base,
+				None => {
+					fail();
+					continue;
+				}
+			};
+			let rx_mask = task.ipc.ring_mask.get();
+
+			task.virtual_memory.activate();
+
+			// Get a free packet slot
+			let (free_index, free_slots) = unsafe { IPC::free_queue(rx_base, rx_mask) };
+			let index = task.ipc.last_free_index.get();
+			if free_index.load(Ordering::Acquire) as u16 == index {
+				fail();
+				continue;
+			}
+			let rx_pkt_slot = free_slots[usize::from(index)].get();
+			let rx_pkt = match unsafe { IPC::packet(rx_base, rx_mask, rx_pkt_slot) } {
+				Some(pkt) => pkt,
+				None => {
+					fail();
+					continue;
+				}
+			};
+			task.ipc.last_free_index.set(index.wrapping_add(1));
+
+			// Helper to map data & name
+			let map_range = |addr: Option<_>, len| {
+				addr.map(|addr| {
+					let page = Page::new(addr).map_err(|_| ())?;
+					let count = Page::min_pages_for_byte_count(len);
+					let range = IPC::take_free_range(rx_base, rx_mask, count).ok_or(())?;
+					Ok((page, range, count))
+				})
+				.transpose()
+			};
 
 			// Get address range to map the data
-			let tx_rx_data = tx_pkt.data.map(|data| {
-				let page = Page::new(data).unwrap();
-				let count = Page::min_pages_for_byte_count(tx_pkt.data_length);
-				(page, task_ipc.pop_free_range(count).unwrap(), count)
-			});
+			let tx_rx_data = match map_range(tx_pkt.data, tx_pkt.data_length.try_into().unwrap()) {
+				Ok(data) => data,
+				Err(()) => {
+					fail();
+					continue;
+				}
+			};
 
 			// Get address range to map the name
-			let tx_rx_name = tx_pkt.name.map(|name| {
-				let page = Page::new(name).unwrap();
-				let count = Page::min_pages_for_byte_count(usize::from(tx_pkt.name_length));
-				(page, task_ipc.pop_free_range(count).unwrap(), count)
-			});
+			let tx_rx_name = match map_range(tx_pkt.name, tx_pkt.name_length.into()) {
+				Ok(name) => name,
+				Err(()) => {
+					fail();
+					continue;
+				}
+			};
 
-			rx_slots[usize::from(rx_index.load(Ordering::Acquire) & task_ipc.ring_mask)]
-				.set(rx_pkt_slot);
-
-			let rx_pkt = unsafe { task_ipc.packet(rx_pkt_slot).unwrap() };
-
+			// Fill out the packet data
 			*rx_pkt = Packet {
-				uuid: tx_pkt.uuid,
 				data: tx_rx_data.map(|(_, p, _)| p.as_non_null_ptr()),
 				name: tx_rx_name.map(|(_, p, _)| p.as_non_null_ptr()),
 				data_length: tx_pkt.data_length,
 				data_offset: tx_pkt.data_offset,
 				name_length: tx_pkt.name_length,
 				address: slf_address,
-				flags: tx_pkt.flags,
-				opcode: tx_pkt.opcode,
+				flags_user: tx_pkt.flags_user,
+				flags_kernel: tx_pkt.flags_kernel,
 				id: tx_pkt.id,
 			};
 
-			rx_index.fetch_add(1, Ordering::Release);
+			// Make packet available
+			let (rx_index, rx_slots) = unsafe { IPC::received_queue(rx_base, rx_mask) };
+			let index = rx_index.load(Ordering::Acquire);
+			rx_slots[usize::from(index as u16 & rx_mask)].set(rx_pkt_slot);
+			rx_index.store(index.wrapping_add(1), Ordering::Release);
 
 			// Clear the tasks wait time so it will be rescheduled
-			task.inner().wait_time = 0;
+			task.wait_time.store(0, Ordering::Relaxed);
 
 			// TODO ditto
-			slf_task.inner().shared_state.virtual_memory.activate();
-			let vm = &mut task.inner().shared_state.virtual_memory;
+			self.virtual_memory.activate();
+			let vm = &task.virtual_memory;
 
 			// FIXME map the entire range of pages instead of just one.
 			if let Some((tx_data, rx_data, count)) = tx_rx_data {
@@ -224,22 +246,34 @@ impl IPC {
 				}
 			}
 
-			self.push_free_slot(tx_pkt_slot).unwrap();
-
 			last_transmit_index = last_transmit_index.wrapping_add(1);
 		}
-		self.last_transmit_index.set(last_transmit_index);
+		self.ipc.last_transmit_index.set(last_transmit_index);
 		arch::set_supervisor_userpage_access(false);
 	}
+}
 
-	/// Pop an address range from the free ranges list.
-	fn pop_free_range(&self, size: usize) -> Option<Page> {
-		let free_pages =
-			unsafe { slice::from_raw_parts_mut(self.free_pages.as_ptr(), self.max_free_pages) };
+impl IPC {
+	/// Take an address range from the free ranges list.
+	fn take_free_range(base: NonNull<u8>, mask: u16, size: usize) -> Option<Page> {
+		let base = base.as_ptr();
+		let free_pages_count = unsafe {
+			(&*base.add(Self::queue_indices_offset(mask)).cast::<Indices>())
+				.free_ranges_list_size
+				.load(Ordering::Relaxed);
+		};
+		let free_pages = unsafe {
+			let free_pages = base.add(Self::free_ranges_offset(mask)).cast::<FreePage>();
+			slice::from_raw_parts_mut(free_pages, usize::from(mask) + 1)
+		};
 		for fp in free_pages.iter_mut() {
-			if let Some(addr) = fp.address {
-				if let Some(remaining) = fp.count.checked_sub(size) {
-					fp.count = remaining;
+			// FIXME there are potential race conditions here.
+			//
+			// One potential fix is to lock the address by setting it to null, do whatever else
+			// and restore the original address after.
+			if let Some(addr) = NonNull::new(fp.address.load(Ordering::Relaxed)) {
+				if let Some(remaining) = fp.count.load(Ordering::Relaxed).checked_sub(size) {
+					fp.count.store(remaining, Ordering::Relaxed);
 					return Page::new(addr).ok().and_then(|p| p.skip(remaining));
 				}
 			}
@@ -253,125 +287,173 @@ impl IPC {
 	///
 	/// There may only be one mutable reference to a packet at any time.
 	#[must_use]
-	unsafe fn packet(&self, index: u16) -> Option<&mut Packet> {
-		(index <= self.ring_mask).then(|| &mut *self.packets.as_ptr().add(usize::from(index)))
-	}
-
-	/// Return the transmit ring buffer list.
-	#[must_use]
-	fn transmit_ring(&self) -> (u16, &[u16]) {
-		unsafe {
-			let count = usize::from(self.len());
-			let addr = self.packets.as_ptr().add(count).cast::<u16>();
-			let index = *addr;
-			let slice = slice::from_raw_parts(addr.add(1), count);
-			(index, slice)
-		}
-	}
-
-	/// Return the received ring buffer list.
-	// FIXME lock the ring.
-	#[must_use]
-	fn received_ring(&self) -> (&AtomicU16, &[Cell<u16>]) {
-		unsafe {
-			let count = usize::from(self.len());
-			let addr = self
-				.packets
+	unsafe fn packet<'a>(base: NonNull<u8>, mask: u16, index: u16) -> Option<&'a mut Packet> {
+		(index <= mask).then(|| {
+			let pkt = base
 				.as_ptr()
-				.add(count)
-				.cast::<AtomicU16>()
-				.add(1 + count);
-			let index = &*addr;
-			let slice = slice::from_raw_parts(addr.add(1).cast::<Cell<u16>>(), count);
-			(index, slice)
-		}
-	}
-
-	/// Get a free slot.
-	fn pop_free_slot(&self) -> Result<u16, PopFreeSlotError> {
-		self.lock_free_stack(|top, stack| {
-			top.checked_sub(1)
-				.map(|tv| {
-					*top = tv;
-					stack[usize::from(tv)].get()
-				})
-				.ok_or(PopFreeSlotError::NoFreeSlots)
+				.add(Self::packets_table_offset(mask))
+				.cast::<Packet>();
+			&mut *pkt.add(usize::from(index))
 		})
-		.unwrap_or(Err(PopFreeSlotError::LockTimeout))
 	}
 
-	/// Add a free slot.
-	fn push_free_slot(&self, slot: u16) -> Result<(), PushFreeSlotError> {
-		self.lock_free_stack(|top, stack| {
-			(*top <= self.ring_mask)
-				.then(|| {
-					stack[usize::from(*top)].set(slot);
-					*top += 1;
-				})
-				.ok_or(PushFreeSlotError::Full)
-		})
-		.unwrap_or(Err(PushFreeSlotError::LockTimeout))
-	}
-
-	/// Try to lock the stack.
+	/// Return the transmit queue.
 	#[must_use]
-	fn lock_free_stack<F, R>(&self, f: F) -> Option<R>
-	where
-		F: FnOnce(&mut u16, &[Cell<u16>]) -> R,
-	{
-		let count = usize::from(self.len());
-		let addr = unsafe {
-			self.packets
-				.as_ptr()
-				.add(count)
-				.cast::<AtomicU16>()
-				.add((1 + count) * 2)
-		};
-		let lock = unsafe { &*addr };
-		let stack = unsafe { slice::from_raw_parts(addr.add(1).cast::<Cell<u16>>(), count) };
-
-		let mut val = lock.load(Ordering::Acquire);
-		let mut counter = 30usize;
-		loop {
-			// Wait until the lock is released.
-			while val == u16::MAX {
-				counter = counter.checked_sub(1)?;
-				val = lock.load(Ordering::Acquire);
-			}
-
-			// Try to acquire the lock
-			match lock.compare_exchange_weak(val, u16::MAX, Ordering::Acquire, Ordering::Acquire) {
-				Ok(mut v) => {
-					let ret = f(&mut v, stack);
-					lock.store(v, Ordering::Release);
-					return Some(ret);
-				}
-				Err(v) => val = v,
-			}
-		}
+	fn transmit_queue<'a>(base: NonNull<u8>, mask: u16) -> (u16, &'a [Cell<u16>]) {
+		let base = base.as_ptr();
+		let index = unsafe { &*base.add(Self::queue_indices_offset(mask)).cast::<Indices>() };
+		let index = index.transmit_queue_index.load(Ordering::Acquire) as u16;
+		let slice = base
+			.wrapping_add(Self::transmit_queue_offset(mask))
+			.cast::<Cell<u16>>();
+		let slice = unsafe { slice::from_raw_parts(slice, usize::from(mask) + 1) };
+		(index, slice)
 	}
 
-	/// The amount of packets in the table.
-	pub fn len(&self) -> u16 {
-		debug_assert!(self.ring_mask.checked_add(1).is_some(), "length overflowed");
-		self.ring_mask + 1
+	/// Return the received queue.
+	///
+	/// # Safety
+	///
+	/// The queue must be locked somehow.
+	#[must_use]
+	unsafe fn received_queue<'a>(base: NonNull<u8>, mask: u16) -> (&'a AtomicU32, &'a [Cell<u16>]) {
+		let base = base.as_ptr();
+		let index = unsafe { &*base.add(Self::queue_indices_offset(mask)).cast::<Indices>() };
+		let index = &index.received_queue_index;
+		let slice = base
+			.wrapping_add(Self::received_queue_offset(mask))
+			.cast::<Cell<u16>>();
+		let slice = unsafe { slice::from_raw_parts(slice, usize::from(mask) + 1) };
+		(index, slice)
+	}
+
+	/// Return the free slot queue.
+	///
+	/// # Safety
+	///
+	/// The queue must be locked somehow.
+	#[must_use]
+	unsafe fn free_queue<'a>(base: NonNull<u8>, mask: u16) -> (&'a AtomicU32, &'a [Cell<u16>]) {
+		let base = base.as_ptr();
+		let index = unsafe { &*base.add(Self::queue_indices_offset(mask)).cast::<Indices>() };
+		let index = &index.free_packets_queue_index;
+		let slice = base
+			.wrapping_add(Self::free_packets_queue_offset(mask))
+			.cast::<Cell<u16>>();
+		let slice = unsafe { slice::from_raw_parts(slice, usize::from(mask) + 1) };
+		(index, slice)
+	}
+
+	/// Determine the size of the packets table in bytes with the given mask.
+	fn packets_table_byte_size(mask: u16) -> usize {
+		(usize::from(mask) + 1) * mem::size_of::<Packet>()
+	}
+
+	/// Determine the size of a single queue (ring buffer).
+	///
+	/// The transmit, received and free buffers use the same structure and the size of each can
+	/// be determined with this function.
+	fn queue_byte_size(mask: u16) -> usize {
+		mem::size_of::<AtomicU16>() + (usize::from(mask) + 1) * mem::size_of::<u16>()
+	}
+
+	/// Determine the size of the free stack.
+	fn free_ranges_byte_size(mask: u16) -> usize {
+		mem::size_of::<AtomicU16>() + (usize::from(mask) + 1) * mem::size_of::<FreePage>()
+	}
+
+	/// The offset of the packets table in bytes.
+	fn packets_table_offset(_mask: u16) -> usize {
+		0
+	}
+
+	/// The offset of the free ranges list.
+	fn free_ranges_offset(mask: u16) -> usize {
+		Self::packets_table_offset(mask) + Self::packets_table_byte_size(mask)
+	}
+
+	/// The offset of the `Indices` struct.
+	fn queue_indices_offset(mask: u16) -> usize {
+		Self::free_ranges_offset(mask) + Self::free_ranges_byte_size(mask)
+	}
+
+	/// The offset of the transmit queue.
+	fn transmit_queue_offset(mask: u16) -> usize {
+		Self::queue_indices_offset(mask) + mem::size_of::<Indices>()
+	}
+
+	/// The offset of the receive queue.
+	fn received_queue_offset(mask: u16) -> usize {
+		Self::transmit_queue_offset(mask) + Self::queue_byte_size(mask)
+	}
+
+	/// The offset of the free queue.
+	fn free_packets_queue_offset(mask: u16) -> usize {
+		Self::received_queue_offset(mask) + Self::queue_byte_size(mask)
 	}
 }
 
-/// A single free page.
-#[derive(Debug)]
+/// A free address range.
 #[repr(C)]
 pub struct FreePage {
-	address: Option<NonNull<PageData>>,
-	count: usize,
+	address: AtomicPtr<PageData>,
+	count: AtomicUsize,
+}
+
+struct TransmitLock<'a>(&'a Task);
+
+impl Drop for TransmitLock<'_> {
+	fn drop(&mut self) {
+		unsafe {
+			self.0.unlock_transmit_queue();
+		}
+	}
+}
+
+struct ReceivedLock<'a>(&'a Task);
+
+impl Drop for ReceivedLock<'_> {
+	fn drop(&mut self) {
+		unsafe {
+			self.0.unlock_received_queue();
+		}
+	}
 }
 
 impl super::Task {
-	/// Process IPC packets to be transmitted.
-	pub fn process_io(&self, slf_address: Address) {
-		self.inner()
-			.ipc
-			.as_mut()
-			.map(|ipc| ipc.process_packets(self, slf_address));
+	fn lock_transmit_queue(&self) -> TransmitLock {
+		self.flags.lock(super::Flags::IPC_LOCK_TRANSMIT);
+		TransmitLock(self)
 	}
+
+	unsafe fn unlock_transmit_queue(&self) {
+		self.flags.unlock(super::Flags::IPC_LOCK_TRANSMIT);
+	}
+
+	fn lock_received_queue(&self) -> ReceivedLock {
+		self.flags.lock(super::Flags::IPC_LOCK_RECEIVED);
+		ReceivedLock(self)
+	}
+
+	unsafe fn unlock_received_queue(&self) {
+		self.flags.unlock(super::Flags::IPC_LOCK_RECEIVED);
+	}
+
+	/// Set the task transmit & receive queue pointers and sizes.
+	pub fn set_queues(&self, base: Option<NonNull<u8>>, bits: u8) -> Result<(), SetQueuesError> {
+		// Limit to 1024 slots for now.
+		(bits <= 10).then(|| ()).ok_or(SetQueuesError::TooLarge)?;
+		let flags = super::Flags::IPC_LOCK_TRANSMIT | super::Flags::IPC_LOCK_RECEIVED;
+		self.flags.lock(flags);
+		self.ipc.base.set(base);
+		self.ipc.ring_mask.set((1 << bits) - 1);
+		self.ipc.last_transmit_index.set(0);
+		self.ipc.last_free_index.set(0);
+		self.flags.unlock(flags);
+		Ok(())
+	}
+}
+
+pub enum SetQueuesError {
+	TooLarge,
 }

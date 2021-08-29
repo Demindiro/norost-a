@@ -13,37 +13,36 @@ pub mod rv64;
 pub mod sbi;
 pub mod vms;
 
+use core::cell::Cell;
 use core::ptr;
 
 /// Structure used to save register state
 #[repr(C)]
 pub struct RegisterState {
 	/// The program counter state.
-	pub pc: *const (),
+	pc: Cell<usize>,
 	/// All integer registers except `x0`
-	pub x: [usize; 31],
-	// /// All FP registers
-	//pub f: [usize; 32],
+	x: [Cell<usize>; 31],
 }
 impl RegisterState {
 	/// Sets the program counter to the given address.
 	#[inline(always)]
-	pub fn set_pc(&mut self, address: *const ()) {
-		self.pc = address;
+	pub fn set_program_counter(&mut self, address: usize) {
+		self.pc.set(address);
 	}
 
 	/// Set the stack pointer to the given address.
 	#[inline(always)]
-	pub fn set_stack_pointer(&mut self, address: *const ()) {
-		self.x[2 - 1] = address as usize;
+	pub fn set_stack_pointer(&mut self, address: usize) {
+		self.x[2 - 1].set(address);
 	}
 }
 impl Default for RegisterState {
 	fn default() -> Self {
+		const ZERO: Cell<usize> = Cell::new(0);
 		Self {
-			x: [0; 31],
-			pc: ptr::null(),
-			//f: [0; 32],
+			x: [ZERO; 31],
+			pc: ZERO,
 		}
 	}
 }

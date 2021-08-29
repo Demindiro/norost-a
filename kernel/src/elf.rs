@@ -141,7 +141,7 @@ pub struct Segment {
 ///
 /// The ELF file has bad data anywhere. Panicking is fine since if the init ELF cannot
 /// be parsed we cannot continue anyways.
-pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const ()) {
+pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut usize) {
 	// Parse the file header
 
 	assert!(data.len() >= 16, "Data too short to include magic");
@@ -260,7 +260,7 @@ pub fn parse(data: &[u8], segments: &mut [Option<Segment>], entry: &mut *const (
 		i += 1;
 	}
 
-	*entry = header.entry as *const _;
+	*entry = header.entry;
 }
 
 const FLAG_EXEC: u32 = 0x1;

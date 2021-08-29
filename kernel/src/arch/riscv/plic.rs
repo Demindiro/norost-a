@@ -5,14 +5,14 @@
 
 use crate::arch::{MapRange, VMS};
 use crate::memory::reserved;
-use crate::task::Address;
+use crate::task::TaskID;
 use crate::util::OnceCell;
 use core::convert::TryFrom;
 use core::mem;
 use core::num::NonZeroU16;
 use core::ptr;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
 
 /// The total amount of available interrupt sources.
 ///
@@ -21,15 +21,13 @@ static TOTAL_SOURCES: OnceCell<u16> = OnceCell::new(0);
 
 /// The list of reserved interrupts.
 ///
-/// A value of usize::MAX indicates the slot is free.
+/// A value of u32::MAX indicates the slot is free.
 ///
 /// Note that it is offset by one, i.e. slot 0 refers to interrupt 1.
-// Using 0 as using usize::MAX would cause RESERVATIONS to be stored in the
-// ELF file, bloating it.
 #[export_name = "plic_reservations"]
-static RESERVATIONS: [AtomicUsize; 1023] = [STUPIDITY; 1023];
+static RESERVATIONS: [AtomicU32; 1023] = [STUPIDITY; 1023];
 
-const STUPIDITY: AtomicUsize = AtomicUsize::new(0);
+const STUPIDITY: AtomicU32 = AtomicU32::new(0);
 
 /// A PLIC abstraction with the base address set to where the PLIC is supposed to be mapped.
 const PLIC: PLIC = PLIC {
@@ -61,24 +59,19 @@ pub unsafe fn set_controller(range: MapRange, max_devices: u16) {
 	.unwrap();
 	// Set up the reservations now.
 	for e in RESERVATIONS.iter() {
-		e.store(usize::MAX, Ordering::Relaxed);
+		e.store(u32::MAX, Ordering::Relaxed);
 	}
 }
 
 /// Reserve an interrupt source
-pub fn reserve(source: u16, address: Address) -> Result<(), ReserveError> {
+pub fn reserve(source: u16, task: TaskID) -> Result<(), ReserveError> {
 	let source = source.checked_sub(1).ok_or(ReserveError::NonExistent)?;
 	(source < *TOTAL_SOURCES)
 		.then(|| ())
 		.ok_or(ReserveError::NonExistent)?;
 	let entry = &RESERVATIONS[usize::from(source)];
 	entry
-		.compare_exchange(
-			usize::MAX,
-			address.into(),
-			Ordering::Relaxed,
-			Ordering::Relaxed,
-		)
+		.compare_exchange(u32::MAX, task.into(), Ordering::Relaxed, Ordering::Relaxed)
 		.map_err(|_| ReserveError::Occupied)?;
 
 	// The PLIC's behaviour should match that of SiFive's PLIC

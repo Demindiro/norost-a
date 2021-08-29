@@ -16,7 +16,7 @@ use core::sync::atomic::Ordering;
 ///
 /// While writing to data from multiple harts without synchronization may technically be
 /// UB, it is unlikely to be an issue since we normally don't read from the written data.
-static IDLE_TASK_STUB: WriteOnly<UnsafeCell<MaybeUninit<TaskData>>> =
+static IDLE_TASK_STUB: WriteOnly<UnsafeCell<MaybeUninit<Task>>> =
 	WriteOnly(UnsafeCell::new(MaybeUninit::uninit()));
 
 struct WriteOnly<T>(T);
@@ -24,11 +24,9 @@ struct WriteOnly<T>(T);
 unsafe impl<T> Sync for WriteOnly<T> {}
 
 #[repr(C)]
-pub struct Executor<'a> {
+pub struct Executor {
 	/// The stack of this executor.
 	stack: arch::Page,
-	/// A pointer to the current task being executed.
-	current_task: Option<group::Guard<'a>>,
 }
 
 #[derive(Debug)]
@@ -37,20 +35,17 @@ pub struct NoTask;
 // FIXME lol wtf
 // FIXME this really needs to be fixed, it just got out of sync due to an interrupt which caused
 // some very strange buggy behaviour.
-static mut NEXT_ID: usize = 0;
+static mut NEXT_ID: u32 = 0;
 
-impl Executor<'_> {
+impl Executor {
 	/// Suspend the current task (if any) and begin executing another task.
 	pub fn next() -> ! {
 		// Unclaim the current task
 		Self::current_task()
-			.inner()
 			.executor_id
 			.store(u16::MAX, Ordering::Relaxed);
 
 		// TODO lol, lmao
-
-		let group = group::Group::get(0).expect("No root group");
 
 		let prev_id = unsafe { NEXT_ID };
 		// Incrementing by prime numbers because I'm a genius hacker hmmm yes yes
@@ -61,8 +56,8 @@ impl Executor<'_> {
 		let mut stop_next = false;
 
 		loop {
-			if let Ok(task) = group.task(id) {
-				let wait_time = task.inner().wait_time;
+			if let Some(task) = super::get(TaskID::from(id)) {
+				let wait_time = task.wait_time.load(Ordering::Relaxed);
 				if wait_time < curr_time {
 					unsafe { NEXT_ID = id };
 					arch::schedule_timer(10_000_000 / 10);
@@ -84,9 +79,9 @@ impl Executor<'_> {
 	}
 
 	/// Returns the address of the current task
-	pub fn current_address() -> Address {
+	pub fn current_address() -> TaskID {
 		// FIXME
-		Address::todo(unsafe { NEXT_ID })
+		TaskID(unsafe { NEXT_ID })
 	}
 
 	/// Begin idling, i.e. do nothing until the given time.
@@ -142,37 +137,36 @@ impl Executor<'_> {
 
 	/// Return the ID of this executor, which corresponds to the hart ID.
 	pub fn id() -> u16 {
-		Self::current_task()
-			.inner()
-			.executor_id
-			.load(Ordering::Relaxed)
+		Self::current_task().executor_id.load(Ordering::Relaxed)
 	}
 
 	/// Return the current task claimed by this executor.
-	pub fn current_task() -> Task {
+	pub fn current_task<'a>() -> &'a Task {
 		// TODO should be moved partially to arch::
-		let task: *mut TaskData;
+		let task: *const Task;
 		unsafe { asm!("csrr {0}, sscratch", out(reg) task) };
 		// SAFETY: sscratch should never ever EVER be 0! Hence it _should_ be safe to
 		// make it NonNull
-		unsafe { Task(NonNull::new_unchecked(task)) }
+		unsafe { &*task }
 	}
 }
 
 impl super::Task {
 	/// Delay the task for the given duration
 	pub fn wait_duration(&self, delay: u64) {
-		// Clamp the duration in case delay is very high.
-		self.inner().wait_time = arch::current_time().checked_add(delay).unwrap_or(u64::MAX);
+		self.wait_time.store(
+			arch::current_time().saturating_add(delay),
+			Ordering::Relaxed,
+		);
 	}
 }
 
 /// Helper function primarily intended to be called from assembly.
 #[export_name = "executor_get_task"]
-extern "C" fn get_task(address: Address) -> Option<Task> {
+extern "C" fn get_task<'a>(address: TaskID) -> Option<&'a Task> {
 	// FIXME *puke*
 	unsafe { NEXT_ID = address.into() };
-	group::Group::get(address.group().into()).and_then(|g| g.task(address.task().into()).ok())
+	super::get(address)
 }
 
 /// Helper function primarily intended to be called from assembly.
