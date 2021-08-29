@@ -198,9 +198,7 @@ impl Allocator {
 		// FIXME use hart IDs.
 		match self.stacks.push(0, page) {
 			Ok(()) => (),
-			Err(page) => {
-				todo!()
-			}
+			Err(_) => todo!(),
 		}
 	}
 

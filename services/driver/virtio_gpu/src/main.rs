@@ -26,10 +26,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 mod rtbegin;
 
 use core::convert::{TryFrom, TryInto};
-use core::ptr;
 use kernel::Page;
-
-static mut DEVICE: Option<virtio_gpu::Device> = None;
 
 #[export_name = "main"]
 fn main() {
@@ -56,7 +53,7 @@ fn main() {
 					.expect_err("bar specified multiple times");
 			}
 			// Ignore I/O, as we only use MMIO.
-			driver::Arg::BarIo(b) => (),
+			driver::Arg::BarIo(_) => (),
 			arg => panic!("bad argument: {:?}", arg),
 		}
 	})
@@ -125,12 +122,6 @@ fn main() {
 		/ kernel::Page::SIZE;
 	let ret = unsafe { kernel::mem_alloc(cursor_addr.cast().as_ptr(), cursor_size, 0b11) };
 	assert_eq!(ret.status, 0);
-	let cursor_buffer = unsafe {
-		let ptr = cursor_addr.as_ptr().cast::<RGBA8>();
-		let size = size * kernel::Page::SIZE / core::mem::size_of::<RGBA8>();
-		// SAFETY: while the device will read from it, only we will write to it.
-		core::slice::from_raw_parts_mut(ptr, size)
-	};
 
 	// Set up scan
 	let rect = virtio_gpu::Rect::new(0, 0, w.try_into().unwrap(), h.try_into().unwrap());
@@ -167,9 +158,6 @@ fn main() {
 	device.draw(cursor_id, cursor_rect).expect("failed to draw");
 	device.draw(id, rect).expect("failed to draw");
 
-	device.update_cursor(cursor_id, 0, 0);
-	//device.move_cursor(0, 0);
-
 	// Add self to registry
 	let name = "virtio_gpu";
 	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name.len(), usize::MAX) };
@@ -180,8 +168,6 @@ fn main() {
 
 		const OP_OPEN: u8 = 128;
 		const OP_FLUSH: u8 = 129;
-
-		use core::slice;
 
 		match rx.opcode.map(|n| n.get()).unwrap_or(0) {
 			OP_OPEN => match u128::from(rx.uuid) {
@@ -218,8 +204,9 @@ fn main() {
 			OP_FLUSH => {
 				device.draw(id, rect).expect("failed to draw");
 				device.draw(cursor_id, cursor_rect).expect("failed to draw");
-				device.update_cursor(cursor_id, 0, 0);
-				//device.move_cursor(0, 0);
+				device
+					.update_cursor(cursor_id, 0, 0)
+					.expect("failed to update cursor");
 			}
 			_ => todo!(),
 		}

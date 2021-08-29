@@ -35,11 +35,13 @@ pub enum SendError {
 	/// The task did not specify a handler and hence cannot receive any notifications.
 	NoHandler,
 	/// The task is already processing a notification.
+	#[allow(dead_code)]
 	Busy,
 }
 
 impl super::Task {
 	/// Send a notification to this task.
+	#[allow(dead_code)]
 	pub fn send_notification(&self) -> Result<(), SendError> {
 		self.inner()
 			.notification_handler

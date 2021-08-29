@@ -24,7 +24,6 @@ mod rtbegin;
 
 include!(concat!(env!("OUT_DIR"), "/list.rs"));
 
-use core::convert::TryFrom;
 use kernel::sys_log;
 
 #[export_name = "main"]
@@ -66,7 +65,7 @@ fn main() {
 				} else {
 					Err(driver::OutOfMemory)
 				}
-			};
+			}
 			let mut add_arg = |arg| {
 				*args.get_mut(argc).ok_or(driver::OutOfMemory)? = str::as_bytes(arg);
 				argc += 1;
@@ -83,7 +82,9 @@ fn main() {
 				buf = im.to_args(buf, alloc, &mut add_arg).unwrap();
 			}
 			if !dev.interrupt_map.is_empty() {
-				dev.interrupt_map_mask.to_args(buf, alloc, &mut add_arg);
+				dev.interrupt_map_mask
+					.to_args(buf, alloc, &mut add_arg)
+					.unwrap();
 			}
 
 			// Spawn
@@ -138,7 +139,6 @@ fn main() {
 
 	// Wait for uart / console to come online
 	let uart_addr = loop {
-		let name = b"uart";
 		let name = b"QEMU Virtio Keyboard";
 		let ret = unsafe { kernel::sys_registry_get(name.as_ptr(), name.len()) };
 		if ret.status == 0 {

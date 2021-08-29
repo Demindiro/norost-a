@@ -1,7 +1,6 @@
 //! Table of letter bitmaps.
 
 use crate::RGBA8;
-use core::convert::TryInto;
 
 /// Bitmap of letters stolen from https://forum.osdev.org/viewtopic.php?f=2&t=20833
 ///
@@ -35,7 +34,7 @@ impl Letter {
 	}
 
 	/// Copy a letter to the given buffer with the given foreground and background color.
-	pub fn copy(
+	pub(crate) fn copy(
 		&self,
 		x: usize,
 		y: usize,
@@ -45,6 +44,7 @@ impl Letter {
 		fg: RGBA8,
 		bg: RGBA8,
 	) {
+		let _ = h;
 		assert!(x + w * y < buffer.len());
 		for (ly, wy) in (0..Self::HEIGHT).zip(y..y + Self::HEIGHT) {
 			for (lx, wx) in (0..Self::WIDTH).zip(x..x + Self::WIDTH) {

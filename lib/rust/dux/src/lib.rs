@@ -3,7 +3,6 @@
 //! This library defines common types used in the Dux operating system.
 
 #![no_std]
-#![feature(const_fn_transmute)]
 #![feature(const_option)]
 #![feature(const_ptr_is_null)]
 #![feature(const_ptr_offset)]

@@ -12,7 +12,6 @@
 use core::cell::Cell;
 use core::convert::TryInto;
 use core::fmt;
-use core::mem;
 use core::num::NonZeroU32;
 use core::ptr::NonNull;
 use simple_endian::{u16le, u32le};
@@ -301,9 +300,7 @@ impl Capability {
 	///
 	/// It is up to the caller to ensure that the data actually exists and won't go out of bounds.
 	pub unsafe fn data<'a, T>(&'a self) -> &'a T {
-		&*(self as *const _ as *const u8)
-			.add(mem::size_of::<Self>())
-			.cast()
+		&*(self as *const _ as *const u8).cast()
 	}
 }
 
@@ -337,7 +334,7 @@ pub struct PCI {
 	/// The physical address of the area.
 	physical_address: usize,
 	/// The size of the area in bytes
-	size: usize,
+	_size: usize,
 	/// MMIO ranges for use with base addresses
 	mem: [Option<PhysicalMemory>; 8],
 	/// Ugly hacky but working counter for MMIO bump allocator.
@@ -368,7 +365,7 @@ impl PCI {
 		Self {
 			start,
 			physical_address,
-			size,
+			_size: size,
 			mem,
 			alloc_counter,
 		}
@@ -413,7 +410,6 @@ impl PCI {
 	/// If either the device or function are out of bounds.
 	#[inline(always)]
 	fn get_child_address(&self, bus: u8, device: u8, function: u8) -> u32 {
-		kernel::dbg!(bus, device, function);
 		(Self::offset(bus, device, function) >> 4)
 			.try_into()
 			.unwrap()

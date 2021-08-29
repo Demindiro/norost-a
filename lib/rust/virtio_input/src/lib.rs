@@ -6,18 +6,16 @@
 
 #![no_std]
 
-mod ev;
-
 use core::convert::{TryFrom, TryInto};
 use core::fmt;
 use core::mem;
-use core::pin::Pin;
 use core::ptr::NonNull;
-use simple_endian::{i32le, u16le, u32le, u64le};
+use simple_endian::{i32le, u16le, u32le};
 use vcell::VolatileCell;
 
 #[allow(dead_code)]
 const FEATURE_VIRGL: u32 = 0x1;
+#[allow(dead_code)]
 const FEATURE_EDID: u32 = 0x2;
 
 #[repr(C)]
@@ -30,20 +28,26 @@ struct Config {
 }
 
 impl Config {
+	#[allow(dead_code)]
 	const UNSET: u8 = 0x00;
 	const ID_NAME: u8 = 0x01;
 	const ID_SERIAL: u8 = 0x02;
+	#[allow(dead_code)]
 	const ID_DEVIDS: u8 = 0x03;
 
+	#[allow(dead_code)]
 	const PROP_BITS: u8 = 0x10;
 	const EV_BITS: u8 = 0x11;
+	#[allow(dead_code)]
 	const ABS_INFO: u8 = 0x12;
 }
 
 union ConfigUnion {
 	string: mem::ManuallyDrop<VolatileCell<[u8; 128]>>,
 	bitmap: mem::ManuallyDrop<VolatileCell<[u8; 128]>>,
+	#[allow(dead_code)]
 	abs: mem::ManuallyDrop<AbsInfo>,
+	#[allow(dead_code)]
 	ids: mem::ManuallyDrop<DevIds>,
 }
 
@@ -100,7 +104,7 @@ pub struct Device<'a> {
 	config: &'a Config,
 	notify: virtio::pci::Notify<'a>,
 	eventq: virtio::queue::Queue<'a>,
-	statusq: virtio::queue::Queue<'a>,
+	_statusq: virtio::queue::Queue<'a>,
 	events: NonNull<InputEvent>,
 	events_phys_addr: usize,
 }
@@ -116,7 +120,7 @@ impl<'a> Device<'a> {
 		common: &'a virtio::pci::CommonConfig,
 		device: &'a virtio::pci::DeviceConfig,
 		notify: virtio::pci::Notify<'a>,
-		isr: &'a virtio::pci::ISR,
+		_isr: &'a virtio::pci::ISR,
 	) -> Result<Self, SetupError> {
 		let features = 0;
 		common.device_feature_select.set(0.into());
@@ -151,7 +155,7 @@ impl<'a> Device<'a> {
 		let mut slf = Self {
 			config,
 			eventq,
-			statusq,
+			_statusq: statusq,
 			notify,
 			events,
 			events_phys_addr,

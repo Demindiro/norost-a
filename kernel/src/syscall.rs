@@ -261,7 +261,10 @@ mod sys {
 		[task] io_notify_return(defer_to) {
 			logcall!("io_notify_return");
 			extern "C" {
-				fn syscall_io_notify_return(task: crate::task::Task) -> !;
+				// IDK what the compiler is on about
+				#[allow(improper_ctypes)]
+				fn syscall_io_notify_return(task: task::Task) -> !;
+				#[allow(improper_ctypes)]
 				fn syscall_io_notify_defer(from: task::Task, from_address: task::Address, to_address: task::Address) -> !;
 			}
 			unsafe {
@@ -374,7 +377,6 @@ mod sys {
 	sys! {
 		[_] dev_dma_alloc(address, size, _flags) {
 			logcall!("dev_dma_alloc 0x{:x}, {}, 0b{:b}", address, size, _flags);
-			log!("dev_dma_alloc 0x{:x}, {}, 0b{:b}", address, size, _flags);
 			assert_ne!(size, 0, "TODO just return an error doof");
 			// FIXME this should be in the PMM
 			let mut ppns = [None, None, None, None, None, None, None, None];

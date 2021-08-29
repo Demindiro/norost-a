@@ -360,7 +360,6 @@ impl Sv39 {
 				.as_mut()
 		};
 		let pte = &mut tbl[va.ppn_0()];
-		let addr = va;
 		Ok(NonNull::from(pte))
 	}
 

@@ -197,8 +197,8 @@ fn main() {
 
 	let mut args = rtbegin::args();
 	let arg = args.next().unwrap();
-	let mut addr = args.next().unwrap();
-	let mut size = args.next().unwrap();
+	let addr = args.next().unwrap();
+	let size = args.next().unwrap();
 	args.next().ok_or(()).unwrap_err();
 
 	assert_eq!(arg, b"--reg");
@@ -236,9 +236,6 @@ fn main() {
 				let data = unsafe {
 					core::slice::from_raw_parts_mut(rxq.data.unwrap().as_ptr().cast(), rxq.length)
 				};
-				let path = rxq.name.map(|name| unsafe {
-					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
-				});
 
 				let mut length = 0;
 
@@ -282,9 +279,6 @@ fn main() {
 				let data = unsafe {
 					core::slice::from_raw_parts(rxq.data.unwrap().as_ptr().cast(), rxq.length)
 				};
-				let path = rxq.name.map(|name| unsafe {
-					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rxq.name_len.into())
-				});
 
 				// Write data
 				let mut len = 0;

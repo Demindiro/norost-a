@@ -56,7 +56,7 @@ impl Group<'_> {
 	pub fn new(task: Task) -> Result<usize, arena::InsertError> {
 		GROUPS.insert(GroupData {
 			tasks: [
-				AtomicPtr::new(task.0.as_ptr()),
+				AtomicPtr::new(task.ptr.as_ptr()),
 				AtomicPtr::default(),
 				AtomicPtr::default(),
 				AtomicPtr::default(),
@@ -82,7 +82,9 @@ impl Group<'_> {
 		tasks
 			.get(id)
 			.and_then(|ptr| unsafe { ptr.load(Ordering::Relaxed).as_ref() })
-			.map(|t| Task(NonNull::from(t)))
+			.map(|t| Task {
+				ptr: NonNull::from(t),
+			})
 			.ok_or(NoTask)
 	}
 
@@ -124,7 +126,7 @@ impl Group<'_> {
 			if s.load(Ordering::Relaxed).is_null() {
 				if s.compare_exchange(
 					ptr::null_mut(),
-					task.0.as_ptr(),
+					task.ptr.as_ptr(),
 					Ordering::Relaxed,
 					Ordering::Relaxed,
 				)

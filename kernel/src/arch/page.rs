@@ -33,6 +33,7 @@ pub struct BadAlignment;
 
 impl Page {
 	/// The size of the offset part in bits.
+	#[allow(dead_code)]
 	pub const OFFSET_BITS: usize = PageData::OFFSET_BITS;
 
 	/// The size of a single page.

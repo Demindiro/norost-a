@@ -64,8 +64,10 @@ impl Default for IRQ {
 
 /// A wrapper around a task pointer.
 #[derive(Clone)]
-#[repr(C)]
-pub struct Task(NonNull<TaskData>);
+#[repr(transparent)]
+pub struct Task {
+	ptr: NonNull<TaskData>,
+}
 
 /// State that can be shared between multiple tasks.
 #[repr(C)]
@@ -123,10 +125,12 @@ impl Task {
 			)
 			.unwrap();
 		}
-		let task = Self(unsafe { TASK_DATA_ADDRESS }.as_non_null_ptr().cast());
+		let task = Self {
+			ptr: unsafe { TASK_DATA_ADDRESS }.as_non_null_ptr().cast(),
+		};
 		// SAFETY: task is valid
 		unsafe {
-			task.0.as_ptr().write(TaskData {
+			task.ptr.as_ptr().write(TaskData {
 				register_state: Default::default(),
 				stack: STACK_ADDRESS.next().unwrap(),
 				shared_state: SharedState {
@@ -202,13 +206,8 @@ impl Task {
 		self.inner().flags.0 &= !Flags::NOTIFIED;
 	}
 
-	/// Get the current IRQ being processed.
-	pub fn current_irq(&self) -> u32 {
-		self.inner().current_irq.0.load(Ordering::Relaxed)
-	}
-
 	fn inner<'a>(&'a self) -> &'a mut TaskData {
 		// SAFETY: The task has been safely initialized.
-		unsafe { self.0.clone().as_mut() }
+		unsafe { self.ptr.clone().as_mut() }
 	}
 }

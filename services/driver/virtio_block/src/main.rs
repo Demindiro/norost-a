@@ -26,11 +26,8 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 mod notification;
 mod rtbegin;
 
-use core::convert::{TryFrom, TryInto};
-use core::ptr;
+use core::convert::TryFrom;
 use kernel::Page;
-
-static mut DEVICE: Option<virtio_block::BlockDevice> = None;
 
 #[export_name = "main"]
 fn main() {
@@ -57,7 +54,7 @@ fn main() {
 					.expect_err("bar specified multiple times");
 			}
 			// Ignore I/O, as we only use MMIO.
-			driver::Arg::BarIo(b) => (),
+			driver::Arg::BarIo(_) => (),
 			arg => panic!("bad argument: {:?}", arg),
 		}
 	})
@@ -96,8 +93,6 @@ fn main() {
 
 	// Route interrupts to us
 	{
-		//let uuid =  | irq[usize::from(irq)] ;
-		let uuid = 0x21;
 		let uuid = u128::from(irq);
 		*dux::ipc::transmit() = kernel::ipc::Packet {
 			address: 1,

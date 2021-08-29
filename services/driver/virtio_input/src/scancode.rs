@@ -4,7 +4,6 @@ const DEFAULT: &str = include_str!("../scancode_sets/evdev.kbd");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Key {
-	None,
 	Char(char),
 	LShift,
 	RShift,
@@ -78,10 +77,6 @@ impl Modifiers {
 
 	pub fn new() -> Self {
 		Self(0)
-	}
-
-	pub fn caps(&self) -> bool {
-		self.0 & Self::CAPS > 0
 	}
 
 	pub fn set_caps(&mut self, enable: bool) {

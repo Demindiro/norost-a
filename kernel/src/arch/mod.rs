@@ -147,14 +147,6 @@ pub fn schedule_timer(delay: u64) {
 	riscv::sbi::set_timer(current_time().checked_add(delay).unwrap_or(u64::MAX));
 }
 
-/// Disable the timer
-#[inline]
-pub fn disable_timer() {
-	//riscv::sbi::set_timer(u64::MAX);
-	// IDK what's wrong with SBI
-	riscv::sbi::set_timer(u32::MAX.into());
-}
-
 /// Return the current time in microseconds.
 #[inline]
 pub fn current_time() -> u64 {

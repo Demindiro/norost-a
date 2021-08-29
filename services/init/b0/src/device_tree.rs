@@ -3,8 +3,6 @@
 //! This module keeps track of used devices & their addresses.
 
 use core::convert::{TryFrom, TryInto};
-use core::num::NonZeroUsize;
-use core::ptr::NonNull;
 
 pub struct Device<'a> {
 	pub name: &'a [u8],
@@ -122,6 +120,7 @@ where
 						let (child_address, r) =
 							unpack_reg(raw_interrupt_map_mask, child_address_cells);
 						let (child_interrupt, r) = unpack_reg(r, child_interrupt_cells);
+						assert!(r.is_empty());
 						driver::InterruptMapMask {
 							child_address,
 							child_interrupt,

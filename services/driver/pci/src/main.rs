@@ -96,7 +96,8 @@ fn main() {
 		driver::Arg::InterruptMapMask(m) => unsafe { INTERRUPT_MAP_MASK = m },
 		driver::Arg::Other(o) => panic!("unhandled {:?}", core::str::from_utf8(o)),
 		_ => todo!(),
-	});
+	})
+	.expect("failed to parse all arguments");
 
 	let reg = reg.expect("expecteed a --reg specifier");
 	let addr = usize::try_from(reg.address).expect("address too large");
@@ -171,7 +172,7 @@ fn main() {
 					} else {
 						Err(driver::OutOfMemory)
 					}
-				};
+				}
 				let mut add_arg = |arg| {
 					*args.get_mut(argc).ok_or(driver::OutOfMemory)? = str::as_bytes(arg);
 					argc += 1;
@@ -191,7 +192,7 @@ fn main() {
 				.unwrap();
 
 				// Parse BARs
-				let mut header = dev.header();
+				let header = dev.header();
 				let mut bars = header.base_addresses().iter().enumerate();
 				while let Some((i, b)) = bars.next() {
 					let (size, og) = b.size();
@@ -217,7 +218,6 @@ fn main() {
 					if offt > 0 {
 						mmio += size - offt;
 					}
-					kernel::sys_log!("mmio is 0x{:x}", mmio);
 					b.set(u32::try_from(mmio).unwrap());
 
 					// Push args

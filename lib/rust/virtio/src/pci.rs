@@ -1,67 +1,10 @@
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryFrom;
 use core::fmt;
 use core::marker::PhantomData;
 use core::num::NonZeroU8;
 use core::ptr::NonNull;
 use simple_endian::{u16le, u32le, u64le};
 use vcell::VolatileCell;
-
-/// The type of a device handler
-
-/*
-// TODO move this to a separate "sync" crate.
-struct Mutex<T> {
-lock: core::sync::atomic::AtomicU8,
-value: UnsafeCell<T>,
-}
-
-impl<T> Mutex<T> {
-const fn new(value: T) -> Self {
-Self {
-lock: core::sync::atomic::AtomicU8::new(0),
-value: UnsafeCell::new(value),
-}
-}
-
-fn lock(&self) -> Guard<T> {
-use core::sync::atomic::*;
-while self.lock.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed).is_err() {
-}
-Guard { lock: self }
-}
-}
-
-unsafe impl<T> Sync for Mutex<T> {}
-
-struct Guard<'a, T> {
-lock: &'a Mutex<T>
-}
-
-impl<T> core::ops::Deref for Guard<'_, T> {
-type Target = T;
-
-fn deref(&self) -> &Self::Target {
-unsafe { &*self.lock.value.get() }
-}
-}
-
-impl<T> core::ops::DerefMut for Guard<'_, T> {
-fn deref_mut(&mut self) -> &mut Self::Target {
-unsafe { &mut *self.lock.value.get() }
-}
-}
-
-impl<T> Drop for Guard<'_, T> {
-fn drop(&mut self) {
-use core::sync::atomic::*;
-let _ret = self.lock.lock.compare_exchange(1, 0, Ordering::Release, Ordering::Relaxed);
-debug_assert!(_ret.is_ok(), "failed to release lock");
-}
-}
-
-/// All registered device handlers.
-static DEVICE_HANDLERS: Mutex<BTreeMap<DeviceType, DeviceHandler>> = Mutex::new(BTreeMap::new());
-*/
 
 /// An identifier for a device type
 #[derive(Clone, Copy, Hash, PartialOrd, Ord, Eq, PartialEq)]
@@ -97,8 +40,8 @@ impl fmt::Debug for DeviceType {
 }
 
 #[repr(C)]
-#[repr(packed)]
 struct Capability {
+	_next_cap: pci::Capability,
 	capability_length: VolatileCell<u8>,
 	config_type: VolatileCell<u8>,
 	base_address: VolatileCell<u8>,
@@ -219,8 +162,6 @@ where
 	D: Device + 'a,
 	H: FnOnce(&'a CommonConfig, &'a DeviceConfig, Notify<'a>, &'a ISR) -> Result<D, R>,
 {
-	let cmd = pci::HeaderCommon::COMMAND_MMIO_MASK | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK;
-
 	let header = match header {
 		pci::Header::H0(h) => h,
 		// TODO not actually unreachable, but meh.
@@ -283,7 +224,7 @@ where
 					}
 					Capability::NOTIFY_CONFIGURATION => {
 						if notify_config.is_none() {
-							let mul = unsafe { cap.more_stuff.get().into() };
+							let mul = cap.more_stuff.get().into();
 							notify_config = Some((cap, mul));
 						}
 					}
@@ -312,7 +253,7 @@ where
 	let mmio = base_address_regions;
 	assert_eq!(mmio.len(), pci::Header0::BASE_ADDRESS_COUNT as usize);
 
-	let mut setup_mmio = |bar: u8, offset: u32| -> NonNull<u8> {
+	let setup_mmio = |bar: u8, offset: u32| -> NonNull<u8> {
 		let mmio = mmio[usize::from(bar)]
 			.expect("BAR not mapped to region")
 			.cast::<u8>();
@@ -336,7 +277,7 @@ where
 		.expect("No common config map defined");
 
 	let notify_config = notify_config
-		.map(|(cfg, multiplier)| unsafe {
+		.map(|(cfg, multiplier)| {
 			let address = setup_mmio(cfg.base_address.get(), cfg.offset.get().into()).cast();
 			Notify {
 				address,

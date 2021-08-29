@@ -1,6 +1,7 @@
 use crate::ControlHeader;
 use simple_endian::u32le;
 
+#[allow(dead_code)]
 #[repr(C)]
 pub struct GetEDID {
 	header: ControlHeader,
@@ -8,8 +9,9 @@ pub struct GetEDID {
 	_padding: u32le,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
-struct ResponseEDID {
+pub struct EDID {
 	header: ControlHeader,
 	size: u32le,
 	_padding: u32le,

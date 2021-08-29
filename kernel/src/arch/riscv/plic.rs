@@ -134,10 +134,12 @@ impl PLIC {
 	const OFFSET_PENDING_BITS: usize = 0x1000 / mem::size_of::<u32>();
 	const OFFSET_ENABLE_BITS: usize = 0x2000 / mem::size_of::<u32>();
 	const OFFSET_PRIORITY_THRESHOLDS: usize = 0x20_0000 / mem::size_of::<u32>();
+	#[allow(dead_code)]
 	const OFFSET_CLAIM_COMPLETE: usize = 0x20_0004 / mem::size_of::<u32>();
 
 	const STRIDE_ENABLE_BITS: usize = 0x80 / mem::size_of::<u32>();
 	const STRIDE_PRIORITY_THRESHOLDS: usize = 0x1000 / mem::size_of::<u32>();
+	#[allow(dead_code)]
 	const STRIDE_CLAIM_COMPLETE: usize = 0x1000 / mem::size_of::<u32>();
 
 	/// Set the priority of an interrupt source.
@@ -209,6 +211,7 @@ impl PLIC {
 	}
 
 	/// Claim an interrupt.
+	#[allow(dead_code)]
 	pub fn claim(&self, context: u16) -> Result<Option<NonZeroU16>, InvalidContext> {
 		Self::context_in_range(context)?;
 		unsafe {
@@ -224,6 +227,7 @@ impl PLIC {
 	}
 
 	/// Mark an interrupt as completed.
+	#[allow(dead_code)]
 	pub fn complete(&self, context: u16, source: NonZeroU16) -> Result<(), InvalidContextOrSource> {
 		Self::context_in_range(context)?;
 		Self::source_in_range(source)?;

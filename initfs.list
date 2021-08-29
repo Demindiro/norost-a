@@ -2,6 +2,5 @@ minish		init					sysroot/riscv64-pc-dux/bin/minish
 plic		riscv,plic0				target/riscv64gc-unknown-none-elf/release/plic_driver
 fatfs		fs						target/riscv64gc-unknown-none-elf/release/fat_driver
 console		console					target/riscv64gc-unknown-none-elf/release/console_driver
-mouse		init					target/riscv64gc-unknown-none-elf/release/mouse_driver
 #uart		ns16550a				target/riscv64gc-unknown-none-elf/release/uart
 pci			pci-host-ecam-generic	target/riscv64gc-unknown-none-elf/release/pci_manager

@@ -91,7 +91,7 @@ fn main() {
 				let path = path.unwrap();
 				let path = core::str::from_utf8(path).unwrap();
 				let mut file = fs.root_dir().open_file(path).unwrap();
-				file.seek(SeekFrom::Start(rxq.offset));
+				file.seek(SeekFrom::Start(rxq.offset)).unwrap();
 				let length = file.read(&mut data[..rxq.length]).unwrap();
 
 				// Send completion event
@@ -120,7 +120,7 @@ fn main() {
 				let path = path.unwrap();
 				let path = core::str::from_utf8(path).unwrap();
 				let mut file = fs.root_dir().create_file(path).unwrap();
-				file.seek(SeekFrom::Start(rxq.offset));
+				file.seek(SeekFrom::Start(rxq.offset)).unwrap();
 				let length = file.write(&mut data[..rxq.length]).unwrap();
 
 				// Confirm reception.

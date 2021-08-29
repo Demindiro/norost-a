@@ -4,16 +4,12 @@
 #![feature(alloc_layout_extra)]
 #![feature(arbitrary_enum_discriminant)]
 #![feature(asm)]
-#![feature(bindings_after_at)]
-// Needed because rustc is stupid
-#![feature(const_fn_transmute)]
 #![feature(const_mut_refs)]
 #![feature(const_option)]
 #![feature(const_panic)]
 #![feature(const_ptr_is_null)]
 #![feature(const_ptr_offset)]
 #![feature(const_raw_ptr_deref)]
-//#![feature(custom_test_frameworks)]
 #![feature(destructuring_assignment)]
 #![feature(dropck_eyepatch)]
 #![feature(global_asm)]
@@ -36,31 +32,6 @@
 #![feature(trivial_bounds)]
 #![feature(untagged_unions)]
 #![feature(link_llvm_intrinsics)]
-//#![test_runner(crate::test::runner)]
-//#![reexport_test_harness_main = "test_main"]
-
-// TODO read up on the test framework thing. Using macro for now because custom_test_frameworks
-// does something stupid complicated with tokenstreams (I just want to log the function name
-// damnit)
-/*
-#[macro_export]
-macro_rules! test {
-	($name:ident() $code:block) => {
-		#[test_case]
-		fn $name() {
-			log!(concat!(
-				"  testing ",
-				module_path!(),
-				"::",
-				stringify!($name)
-			));
-			{
-				$code
-			}
-		}
-	};
-}
-*/
 
 #[macro_use]
 mod log;
@@ -77,9 +48,7 @@ mod sync;
 mod syscall;
 mod task;
 
-use core::cell::UnsafeCell;
 use core::convert::TryInto;
-use core::ops;
 use core::{mem, panic, ptr};
 use util::OnceCell;
 
@@ -444,40 +413,3 @@ extern "C" fn main(
 	task::Executor::init(hart_id.try_into().expect("hart id higher than supported"));
 	task::Executor::next();
 }
-
-/*
-#[cfg(test)]
-mod test {
-	use super::*;
-	use core::num::NonZeroUsize;
-	use core::ptr::NonNull;
-
-	#[no_mangle]
-	#[cfg(test)]
-	fn main() {
-		test_main();
-	}
-
-	const MEMORY_MANAGER_ADDRESS: NonNull<arch::Page> =
-		unsafe { NonNull::new_unchecked(0x8100_0000 as *mut _) };
-
-	pub(super) fn runner(tests: &[&dyn Fn()]) {
-		log!(
-			"Running {} test{}",
-			tests.len(),
-			if tests.len() == 1 { "" } else { "s" }
-		);
-		arch::init();
-		for f in tests {
-			// Reinitialize the memory manager each time in case of leaks or something else
-			// overwriting it's state.
-			// Incredibly unsafe, but w/e.
-			unsafe {
-				memory::mem_add_range(MEMORY_MANAGER_ADDRESS, NonZeroUsize::new(256).unwrap());
-			}
-			f();
-		}
-		log!("Done");
-	}
-}
-*/

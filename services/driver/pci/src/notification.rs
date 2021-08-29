@@ -69,7 +69,9 @@ extern "C" fn notification_handler_entry() {
 
 #[export_name = "notification_handler"]
 extern "C" fn notification_handler(typ: usize, value: usize, address: usize) -> usize {
-	kernel::sys_log!("OH MY {:x} {:x} {:x}", typ, value, address);
+	if typ != 0 || address != usize::MAX {
+		return usize::MAX;
+	}
 	let mut addr = usize::MAX;
 	unsafe {
 		INTERRUPT_LISTENERS

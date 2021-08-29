@@ -3,7 +3,6 @@
 //! This is used as a way to identify tasks with human-readable names.
 
 use super::Address;
-use crate::memory::reserved;
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -41,6 +40,7 @@ struct Entry {
 }
 
 pub enum AddError {
+	#[allow(dead_code)]
 	Occupied,
 	NameTooLong,
 	RegistryFull,

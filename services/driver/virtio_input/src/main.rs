@@ -28,7 +28,6 @@ mod scancode;
 
 use core::convert::{TryFrom, TryInto};
 use core::num::NonZeroU8;
-use core::ptr;
 use kernel::Page;
 
 /// Write buffer for data read.
@@ -111,7 +110,7 @@ fn main() {
 					.expect_err("bar specified multiple times");
 			}
 			// Ignore I/O, as we only use MMIO.
-			driver::Arg::BarIo(b) => (),
+			driver::Arg::BarIo(_) => (),
 			arg => panic!("bad argument: {:?}", arg),
 		}
 	})
@@ -175,9 +174,6 @@ fn main() {
 				let data = unsafe {
 					core::slice::from_raw_parts_mut(rx.data.unwrap().as_ptr().cast(), rx.length)
 				};
-				let path = rx.name.map(|name| unsafe {
-					core::slice::from_raw_parts(name.cast::<u8>().as_ptr(), rx.name_len.into())
-				});
 
 				let mut length = 0;
 
@@ -240,31 +236,31 @@ fn main() {
 
 fn process_events() {
 	let k_mods = unsafe { &mut KEY_MODIFIERS };
-	let mut putc = |on: bool, c: char| unsafe {
+	let putc = |on: bool, c: char| unsafe {
 		if on {
 			let len = c.encode_utf8(&mut BUFFER[usize::from(NEW_INDEX)..]).len();
 			NEW_INDEX += u16::try_from(len).unwrap();
 		}
 	};
-	unsafe { DEVICE.as_mut().unwrap() }.receive(&mut |evt| {
-		if let Some(k) = NonZeroU8::new(evt.code().try_into().unwrap()) {
-			use scancode::*;
-			let mut mods = Modifiers::new();
-			mods.set_caps((k_mods.lshift() || k_mods.rshift()) != k_mods.capslock());
-			let on = evt.value() > 0;
-			match unsafe { SET.as_mut().unwrap() }.get(mods, k) {
-				Some(Key::Char(c)) => putc(on, c),
-				Some(Key::LShift) => k_mods.set_lshift(on),
-				Some(Key::RShift) => k_mods.set_rshift(on),
-				Some(Key::Capslock) => k_mods.set_capslock(on),
-				Some(Key::Backspace) => putc(on, '\x08'),
-				Some(Key::Enter) => putc(on, '\n'),
-				Some(Key::Space) => putc(on, ' '),
-				_ => todo!(),
-				None => unsafe {
-					kernel::sys_log!("unknown event: 0x{:x}", evt.code());
-				},
+	unsafe { DEVICE.as_mut().unwrap() }
+		.receive(&mut |evt| {
+			if let Some(k) = NonZeroU8::new(evt.code().try_into().unwrap()) {
+				use scancode::*;
+				let mut mods = Modifiers::new();
+				mods.set_caps((k_mods.lshift() || k_mods.rshift()) != k_mods.capslock());
+				let on = evt.value() > 0;
+				match unsafe { SET.as_mut().unwrap() }.get(mods, k) {
+					Some(Key::Char(c)) => putc(on, c),
+					Some(Key::LShift) => k_mods.set_lshift(on),
+					Some(Key::RShift) => k_mods.set_rshift(on),
+					Some(Key::Capslock) => k_mods.set_capslock(on),
+					Some(Key::Backspace) => putc(on, '\x08'),
+					Some(Key::Enter) => putc(on, '\n'),
+					Some(Key::Space) => putc(on, ' '),
+					Some(k) => kernel::sys_log!("unhandled key: {:?}", k),
+					None => kernel::sys_log!("unknown event: 0x{:x}", evt.code()),
+				}
 			}
-		}
-	});
+		})
+		.unwrap();
 }

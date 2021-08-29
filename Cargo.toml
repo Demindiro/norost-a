@@ -15,7 +15,6 @@ members = [
 	"lib/rust/virtio_gpu",
 	"lib/rust/virtio_input",
 	"services/driver/console",
-	"services/driver/mouse",
 	"services/driver/fat",
 	"services/driver/pci",
 	"services/driver/plic",

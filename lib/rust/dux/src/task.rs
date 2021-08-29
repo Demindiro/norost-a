@@ -100,7 +100,6 @@ pub fn spawn_elf(
 	let mut mappings =
 		unsafe { core::mem::MaybeUninit::<[kernel::TaskSpawnMapping; 96]>::zeroed().assume_init() };
 	let mut i = 0;
-	let mut pc = 0;
 
 	let mut reserved_ranges = DropRanges([None; 8], 0);
 
@@ -110,7 +109,7 @@ pub fn spawn_elf(
 		.filter(|ph| ph.get_type() == Ok(xmas_elf::program::Type::Load))
 	{
 		let mut offset = ph.offset() as usize & !Page::OFFSET_MASK;
-		let mut page_offset = ph.offset() as usize & Page::OFFSET_MASK;
+		let page_offset = ph.offset() as usize & Page::OFFSET_MASK;
 		let mut virt_a = ph.virtual_addr() as usize & !Page::OFFSET_MASK;
 
 		let file_pages = ((ph.file_size() as usize + page_offset + Page::OFFSET_MASK)
@@ -198,14 +197,11 @@ pub fn spawn_elf(
 
 		reserved_ranges.push(addr, stack_pages);
 
-		let l = object_entries.len();
-
 		unsafe {
 			let mut sp = addr.as_ptr().add(stack_pages);
 
 			// Copy strings onto stack
 			for arg in arguments.iter().copied() {
-				use core::convert::TryInto;
 				let words = ((arg.len() + 1) / 2) + 1;
 				sp = sp.cast::<u16>().sub(words).cast();
 				// Write length

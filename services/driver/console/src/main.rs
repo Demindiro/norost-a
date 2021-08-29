@@ -21,9 +21,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 mod letter;
 mod rtbegin;
 
-use core::convert::TryInto;
 use letter::Letter;
-use letter::*;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -98,10 +96,8 @@ fn main() {
 	let ret = unsafe { kernel::sys_registry_add(name.as_ptr(), name.len(), usize::MAX) };
 	assert_eq!(ret.status, 0, "failed to add self to registry");
 
-	let (mut a, mut b) = (1.0, 0.0);
-
 	let (mut cursor_x, mut cursor_y) = (0, 0);
-	let (cursor_w, cursor_h) = (50, 24);
+	let (cursor_w, _cursor_h) = (50, 24);
 
 	loop {
 		use core::slice;

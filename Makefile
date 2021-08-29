@@ -3,7 +3,6 @@ default: build
 
 test:
 	#make -C lib/c/std/ test
-	make -C services/driver/mouse
 	make -C services/driver/virtio_input
 	make -C services/driver/console
 	make -C services/driver/virtio_gpu

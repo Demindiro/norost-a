@@ -10,7 +10,6 @@ use core::convert::TryInto;
 use core::fmt;
 use core::mem;
 use core::num::NonZeroU32;
-use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::ptr::NonNull;
 use simple_endian::{u32le, u64le};
@@ -20,6 +19,7 @@ use vcell::VolatileCell;
 const FEATURE_VIRGL: u32 = 0x1;
 const FEATURE_EDID: u32 = 0x2;
 
+#[allow(dead_code)]
 #[repr(C)]
 struct Config {
 	events_read: VolatileCell<u32le>,
@@ -29,6 +29,7 @@ struct Config {
 }
 
 impl Config {
+	#[allow(dead_code)]
 	const EVENT_DISPLAY: u32 = 0x1;
 }
 
@@ -147,7 +148,6 @@ impl fmt::Debug for ControlHeader {
 pub struct Resource(NonZeroU32);
 
 pub struct Device<'a> {
-	config: &'a Config,
 	notify: virtio::pci::Notify<'a>,
 	controlq: virtio::queue::Queue<'a>,
 	cursorq: virtio::queue::Queue<'a>,
@@ -159,9 +159,9 @@ impl<'a> Device<'a> {
 	/// This is meant to be used as a handler by the `virtio` crate.
 	pub fn new(
 		common: &'a virtio::pci::CommonConfig,
-		device: &'a virtio::pci::DeviceConfig,
+		_device: &'a virtio::pci::DeviceConfig,
 		notify: virtio::pci::Notify<'a>,
-		isr: &'a virtio::pci::ISR,
+		_isr: &'a virtio::pci::ISR,
 	) -> Result<Self, SetupError> {
 		let features = FEATURE_EDID;
 		common.device_feature_select.set(0.into());
@@ -176,11 +176,8 @@ impl<'a> Device<'a> {
 		);
 		// TODO check device status to ensure features were enabled correctly.
 
-		let config = unsafe { device.cast::<Config>() };
-
 		let controlq = virtio::queue::Queue::<'a>::new(common, 0, 8, None).expect("OOM");
 		let cursorq = virtio::queue::Queue::<'a>::new(common, 1, 8, None).expect("OOM");
-		kernel::dbg!(controlq.notify_offset(), cursorq.notify_offset());
 
 		common.device_status.set(
 			virtio::pci::CommonConfig::STATUS_ACKNOWLEDGE
@@ -190,7 +187,6 @@ impl<'a> Device<'a> {
 		);
 
 		Ok(Self {
-			config,
 			controlq,
 			cursorq,
 			notify,

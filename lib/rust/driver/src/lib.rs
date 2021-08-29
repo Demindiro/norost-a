@@ -338,13 +338,6 @@ where
 	Ok(())
 }
 
-/// Convert arguments into static strings.
-///
-/// Space is allocated using the `alloc` callback. Arguments are added using `add_argument`.
-pub fn to_args(args: impl Iterator<Item = ()>) {
-	todo!();
-}
-
 #[non_exhaustive]
 pub enum ParseError<'a> {
 	TooManyRegs,

@@ -1,5 +1,4 @@
 use super::*;
-use core::ptr::NonNull;
 
 #[repr(C)]
 pub struct AttachBacking {

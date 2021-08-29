@@ -29,7 +29,7 @@ fn main() {
 	pub struct Aligned<const S: usize>([u8; S]);
 
 	pub struct Binary {{
-		name: &'static str,
+		//name: &'static str,
 		vendor: u16,
 		device: u16,
 		data: &'static [u8],
@@ -64,7 +64,7 @@ fn main() {
 			const LENGTH: usize = include_bytes!({:?}).len();
 			const ALIGNED: Aligned<LENGTH> = Aligned(*include_bytes!({:?}));
 			Binary {{
-				name: {:?},
+				//name: {:?},
 				vendor: 0x{},
 				device: 0x{},
 				data: &ALIGNED.0,

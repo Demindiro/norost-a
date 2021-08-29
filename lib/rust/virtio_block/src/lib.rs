@@ -40,7 +40,7 @@ pub struct BlockDevice<'a> {
 	notify: virtio::pci::Notify<'a>,
 	isr: &'a virtio::pci::ISR,
 	/// The amount of sectors available
-	capacity: u64,
+	_capacity: u64,
 }
 
 #[repr(C)]
@@ -137,7 +137,7 @@ impl<'a> BlockDevice<'a> {
 			queue,
 			notify,
 			isr,
-			capacity: blk_cfg.capacity.into(),
+			_capacity: blk_cfg.capacity.into(),
 		})
 	}
 
@@ -146,7 +146,7 @@ impl<'a> BlockDevice<'a> {
 		&'s mut self,
 		data: impl AsRef<[Sector]> + 's,
 		sector_start: u64,
-		mut wait: impl FnMut(),
+		wait: impl FnMut(),
 	) -> Result<(), WriteError> {
 		let header = RequestHeader {
 			typ: RequestHeader::WRITE.into(),
@@ -207,7 +207,7 @@ impl<'a> BlockDevice<'a> {
 		&'s mut self,
 		mut data: impl AsMut<[Sector]> + 's,
 		sector_start: u64,
-		mut wait: impl FnMut(),
+		wait: impl FnMut(),
 	) -> Result<(), WriteError> {
 		let header = RequestHeader {
 			typ: RequestHeader::READ.into(),

@@ -311,7 +311,7 @@ impl<'a> Queue<'a> {
 	/// wasting cycles.
 	pub fn wait_for_used(
 		&mut self,
-		mut callback: Option<&mut FnMut(u16, u64, u32)>,
+		mut callback: Option<&mut dyn FnMut(u16, u64, u32)>,
 		mut wait_fn: impl FnMut(),
 	) {
 		let cb = &mut |a, b, c| {

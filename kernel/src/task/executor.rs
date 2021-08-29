@@ -57,7 +57,7 @@ impl Executor<'_> {
 		let mut id = (prev_id + 7) & 0xf;
 
 		let mut min_time = u64::MAX;
-		let mut curr_time = arch::current_time();
+		let curr_time = arch::current_time();
 		let mut stop_next = false;
 
 		loop {
@@ -155,7 +155,11 @@ impl Executor<'_> {
 		unsafe { asm!("csrr {0}, sscratch", out(reg) task) };
 		// SAFETY: sscratch should never ever EVER be 0! Hence it _should_ be safe to
 		// make it NonNull
-		unsafe { Task(NonNull::new_unchecked(task)) }
+		unsafe {
+			Task {
+				ptr: NonNull::new_unchecked(task),
+			}
+		}
 	}
 }
 

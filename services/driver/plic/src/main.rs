@@ -18,14 +18,13 @@ fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
 
 mod rtbegin;
 
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryFrom;
 use core::fmt::Write;
-use core::ptr;
 use core::str;
 
 #[export_name = "main"]
 extern "C" fn main(argc: usize, argv: *const *const u8) {
-	let mut args = rtbegin::args(argc, argv);
+	let args = rtbegin::args(argc, argv);
 	let mut reg = None;
 
 	let ret = driver::parse_args(args, |arg, _| match arg {

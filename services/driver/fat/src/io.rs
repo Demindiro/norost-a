@@ -1,7 +1,5 @@
 //! # Support for `rust-fatfs` I/O traits.
 
-use crate::*;
-use core::ptr::NonNull;
 use fatfs::*;
 
 pub static mut ADDRESS: usize = 0;
@@ -13,7 +11,6 @@ pub struct GlobalIO<'a> {
 	buffer_sector: u64,
 	max_position: u64,
 	dirty: bool,
-	need_fetch: bool,
 }
 
 impl<'a> GlobalIO<'a> {
@@ -22,7 +19,6 @@ impl<'a> GlobalIO<'a> {
 			buffer,
 			position: 0,
 			dirty: false,
-			need_fetch: true,
 			max_position: 512 * 32, // TODO
 			buffer_sector: u64::MAX,
 		};
@@ -91,7 +87,7 @@ impl Read for GlobalIO<'_> {
 				self.fetch();
 				assert_eq!(self.seek_sector(), self.buffer_sector());
 			}
-			data[i] = unsafe { self.buffer.as_ref()[self.seek_offset()] };
+			data[i] = self.buffer.as_ref()[self.seek_offset()];
 			self.position += 1;
 			i += 1;
 		}
